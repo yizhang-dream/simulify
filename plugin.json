@@ -1,0 +1,14 @@
+{
+  "name": "simulify",
+  "displayName": "Simulify",
+  "version": "1.0.0",
+  "description": "Turn mechanisms, physical structures, protocols, math laws and algorithms into offline interactive 3D/4D explainers: cutaway views, scrubbable multi-act timelines, live equation substitution and what-if controls, built from a zero-build ESM kit.",
+  "logo": "assets/logo.svg",
+  "author": "yizhang-dream",
+  "repository": "https://github.com/yizhang-dream/simulify",
+  "suggestedPrompts": [
+    "Build a 3D cutaway explainer of how a bimetallic thermostat switches, with a scrubbable timeline and an adjustable hysteresis band",
+    "Make an interactive multi-act workbench that shows LRU vs FIFO cache eviction side by side, with live hit-rate and AMAT formula substitution",
+    "Explain TD(0), Sarsa and n-step returns on a gridworld as a playable 3D chapter where I can rewind time and test counterexamples"
+  ]
+}

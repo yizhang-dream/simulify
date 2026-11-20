@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulify · RL 第 7 章时序差分 5 幕精密实验台</title>
+  <link rel="stylesheet" href="../../kit/primer-tokens.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../shared/vendor/three/three.module.js",
+      "three/addons/": "../shared/vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    /* Concept A · Precision Architectural Instrument & Archival Drafting Layout */
+    .top-ribbon {
+      position: absolute;
+      top: 10px;
+      left: 16px;
+      right: 16px;
+      height: 48px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 14px;
+      background: var(--card-solid);
+      border: 1px solid var(--line);
+      border-bottom: 1.5px solid var(--navy);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .act-stepper {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .act-tab {
+      padding: 5px 10px;
+      border-radius: 7px;
+      border: 1px solid transparent;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+
+    .act-tab:hover {
+      background: var(--bg-deep);
+    }
+
+    .act-tab.active {
+      background: var(--navy);
+      color: #faf4e8;
+      border-color: var(--navy);
+    }
+
+    .act-sep {
+      font-size: 11px;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    .param-pills {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .param-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fffdf8;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .param-pill button {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--navy);
+      font-size: 12px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .param-pill button:hover {
+      background: var(--navy);
+      color: #fff;
+    }
+
+    .right-dock {
+      position: absolute;
+      top: 68px;
+      right: 16px;
+      bottom: 16px;
+      width: 320px;
+      z-index: 14;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px;
+      background: var(--card-solid);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+
+    .dock-header h2 {
+      margin: 0 0 3px;
+      font-size: 14.5px;
+      line-height: 1.28;
+      color: var(--navy);
+    }
+
+    .dock-header .guide-cue {
+      margin: 0 0 6px;
+      font-size: 12px;
+      line-height: 1.38;
+      color: var(--ink);
+    }
+
+    .qc-compact {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 5px 8px;
+      border-radius: 7px;
+      background: #fffaf0;
+      border: 1px solid var(--line-soft);
+      font-size: 11px;
+      line-height: 1.32;
+      color: var(--ink);
+    }
+
+    .qc-compact strong {
+      color: var(--navy);
+    }
+
+    /* TdForkPanel primitive styling */
+    .td-fork-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .fork-svg-card {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fffdf8;
+      padding: 6px 8px;
+    }
+
+    .fork-svg-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .fork-title {
+      font-size: 11.5px;
+      color: var(--navy);
+    }
+
+    .fork-probe-btn {
+      font-size: 11px;
+      padding: 3px 8px;
+      min-height: 24px;
+    }
+
+    .fork-probe-btn[aria-pressed="true"] {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #fff;
+    }
+
+    .fork-svg {
+      display: block;
+      width: 100%;
+      height: 82px;
+    }
+
+    .formula-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .formula-pill {
+      border-radius: 8px;
+      padding: 5px 8px;
+      color: #fff;
+      font-family: var(--font-mono);
+    }
+
+    .formula-pill.teal {
+      background: #146c69;
+    }
+
+    .formula-pill.amber {
+      background: #b8631a;
+    }
+
+    .formula-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      gap: 6px;
+    }
+
+    .formula-head code {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #fffaf2;
+    }
+
+    .formula-sub {
+      margin-top: 2px;
+      font-size: 10.5px;
+      opacity: 0.96;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .unified-matrix {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .matrix-row {
+      display: grid;
+      grid-template-columns: 78px 1fr 44px;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 4px 7px;
+      border-radius: 6px;
+      border: 1px solid var(--line-soft);
+      background: #fffdf8;
+      text-align: left;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--navy);
+    }
+
+    .matrix-row.active {
+      border-color: var(--navy);
+      background: #efe6d4;
+      font-weight: 700;
+    }
+
+    .m-bar-wrap {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--bg-deep);
+      overflow: hidden;
+      display: block;
+    }
+
+    .m-bar {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+    }
+
+    .m-bar.teal { background: var(--teal); }
+    .m-bar.amber { background: var(--amber); }
+    .m-bar.danger { background: var(--danger); }
+    .m-bar.navy { background: var(--navy); }
+
+    .m-val {
+      text-align: right;
+      font-weight: 700;
+    }
+
+    .cell-inspector {
+      border-top: 1px solid var(--line-soft);
+      padding-top: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11.5px;
+    }
+
+    .cell-inspector-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-family: var(--font-mono);
+      color: var(--navy);
+    }
+
+    .cell-q-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+    }
+
+    .cell-q-chip {
+      padding: 3px 4px;
+      border-radius: 5px;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      text-align: center;
+      color: var(--navy);
+    }
+
+    .cell-q-chip.best {
+      border-color: var(--teal);
+      background: var(--teal-soft);
+      font-weight: 700;
+    }
+
+    .bottom-left-dock {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      width: 500px;
+      height: 166px;
+      z-index: 14;
+      display: grid;
+      grid-template-columns: 248px 240px;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .bottom-left-dock .chart-card {
+      margin: 0;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100%;
+    }
+
+    .bottom-left-dock .chart-head {
+      white-space: nowrap;
+      gap: 4px;
+    }
+
+    .bottom-left-dock .chart-fold {
+      display: none;
+    }
+
+    .bottom-left-dock .xy-svg {
+      width: 100%;
+      height: 112px;
+      display: block;
+    }
+
+    .code-trace-card {
+      background: #18213d;
+      color: #e8eef7;
+      border: 1px solid #283558;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      padding: 8px 9px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 7px;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    .code-trace-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: #a9b8d4;
+      border-bottom: 1px solid #2b3a60;
+      padding-bottom: 4px;
+    }
+
+    .code-trace-watch {
+      color: #5eead4;
+      font-weight: 700;
+    }
+
+    .code-trace-lines {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      line-height: 1.32;
+    }
+
+    .code-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      border-left: 2px solid transparent;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .code-line.active {
+      background: rgba(20, 150, 148, 0.34);
+      border-left-color: #2dd4bf;
+      color: #ffffff;
+    }
+
+    .code-ln {
+      color: #7082a3;
+      width: 12px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .bottom-transport {
+      position: absolute;
+      left: 526px;
+      right: 344px;
+      bottom: 16px;
+      min-height: 50px;
+      z-index: 14;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 6px 9px 9px;
+      background: var(--card-solid);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .transport-btns {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .bottom-transport .tb-btn {
+      min-inline-size: 30px;
+      min-block-size: 32px;
+      padding: 4px 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+
+    .nstep-control {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--navy);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .nstep-control input[type="range"] {
+      width: 52px;
+      accent-color: var(--teal);
+    }
+
+    .transport-progress {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 2px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--line-soft);
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    #play-progress-fill {
+      width: 0%;
+      height: 100%;
+      background: var(--teal);
+      border-radius: 999px;
+      transition: width 60ms linear;
+    }
+
+    html[data-thumb="1"] .top-ribbon,
+    html[data-thumb="1"] .right-dock,
+    html[data-thumb="1"] .bottom-left-dock,
+    html[data-thumb="1"] .bottom-transport,
+    html[data-thumb="1"] .thumb-dock {
+      display: none !important;
+    }
+
+    .lang-btn {
+      white-space: nowrap;
+    }
+
+    @media (max-width: 900px) {
+      .artboard-shell {
+        overflow: visible;
+        block-size: auto;
+        min-block-size: 100dvh;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+      }
+
+      .top-ribbon,
+      .right-dock,
+      .bottom-left-dock,
+      .bottom-transport {
+        position: static;
+        width: 100%;
+        height: auto;
+      }
+
+      .top-ribbon {
+        order: 1;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 8px 10px;
+      }
+
+      .param-pills {
+        flex-wrap: wrap;
+      }
+
+      .stage-fullbleed {
+        order: 2;
+        flex-shrink: 0;
+        position: relative;
+        inset: auto;
+        height: 290px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+
+      .thumb-dock {
+        order: 3;
+      }
+
+      .bottom-transport {
+        order: 4;
+        flex-wrap: wrap;
+      }
+
+      .right-dock {
+        order: 5;
+      }
+
+      .bottom-left-dock {
+        order: 6;
+        grid-template-columns: 1fr;
+      }
+
+      .code-trace-card,
+      .bottom-left-dock .chart-card {
+        height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="artboard-shell">
+    <header class="top-ribbon" id="top-ribbon">
+      <nav class="act-stepper" id="act-stepper" aria-label="第 7 章 5 幕推进导航"></nav>
+
+      <div class="param-pills">
+        <div class="param-pill">
+          <span>ε=<strong id="val-eps">0.10</strong></span>
+          <button type="button" id="eps-dec" aria-label="减小 ε">-</button>
+          <button type="button" id="eps-inc" aria-label="增大 ε">+</button>
+        </div>
+        <div class="param-pill">
+          <span>α=<strong id="val-alpha">0.50</strong></span>
+          <button type="button" id="alpha-dec" aria-label="减小 α">-</button>
+          <button type="button" id="alpha-inc" aria-label="增大 α">+</button>
+        </div>
+        <div id="lang-slot"></div>
+        <button type="button" id="btn-palette" class="btn-chip" aria-label="命令面板 Ctrl+K">⌘K</button>
+      </div>
+    </header>
+
+    <main class="stage-fullbleed" aria-label="2.5D 强化学习悬崖实验仪器台">
+      <canvas id="stage-canvas" class="stage-canvas" aria-label="强化学习第 7 章 2.5D 悬崖行走精密仪"></canvas>
+      <svg id="leader-svg" class="leader-svg" aria-hidden="true"></svg>
+      <div id="tags-layer" class="tags-layer" aria-hidden="true"></div>
+      <div id="popups-layer" class="popups-layer" aria-hidden="true"></div>
+      <div id="stage-tooltip" class="stage-tooltip" role="tooltip" hidden></div>
+    </main>
+
+    <section class="thumb-dock" aria-label="移动端快捷控制">
+      <div class="thumb-dock-row">
+        <button type="button" id="mob-prev" class="btn-chip">上一步</button>
+        <button type="button" id="mob-play" class="btn-primary">播放</button>
+        <button type="button" id="mob-next" class="btn-chip">下一步</button>
+        <button type="button" id="mob-probe" class="btn-secondary">⚡ 崖边反例</button>
+      </div>
+    </section>
+
+    <aside class="right-dock" id="right-dock" aria-label="分叉原理与公式表">
+      <div class="dock-header">
+        <h2 id="act-title"></h2>
+        <p id="act-cue" class="guide-cue"></p>
+        <div class="qc-compact">
+          <div id="txt-carries"></div>
+          <div id="txt-hook"></div>
+        </div>
+      </div>
+
+      <div id="fork-panel-slot"></div>
+
+      <div class="cell-inspector">
+        <div class="cell-inspector-head">
+          <span id="inspect-cell-title">格子 (2, 3) · 悬崖正上方</span>
+          <button type="button" id="btn-zoom-cell" class="btn-chip">聚焦格</button>
+        </div>
+        <div class="cell-q-grid" id="cell-q-grid"></div>
+      </div>
+    </aside>
+
+    <div class="bottom-left-dock" id="bottom-left-dock">
+      <section id="chart-card" aria-label="回合回报对照折线图"></section>
+      <div id="code-trace-slot"></div>
+    </div>
+
+    <div class="bottom-transport" id="bottom-transport" role="toolbar" focusgroup="toolbar wrap" aria-label="时间轴与视角">
+      <div class="transport-btns" role="group" aria-label="步进控制">
+        <button type="button" id="tl-prev" class="tb-btn" aria-label="上一幕">◀</button>
+        <button type="button" id="tl-play" class="tb-btn" aria-label="播放/暂停">▶</button>
+        <button type="button" id="tl-next" class="tb-btn" aria-label="下一幕">▶|</button>
+      </div>
+      <label class="nstep-control">
+        <span>n-step=<strong id="val-n">3</strong></span>
+        <input type="range" id="n-slider" min="1" max="6" step="1" value="3" aria-label="调整 n-step 步数">
+      </label>
+      <div class="transport-btns" role="group" aria-label="相机视角">
+        <button type="button" id="view-top" class="tb-btn" aria-pressed="false">俯视</button>
+        <button type="button" id="view-reset" class="tb-btn">复位</button>
+      </div>
+      <div class="transport-progress" aria-hidden="true"><div id="play-progress-fill"></div></div>
+    </div>
+
+    <p id="status-bar" class="visually-hidden" role="status"></p>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

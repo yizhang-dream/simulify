@@ -1,0 +1,10 @@
+{
+  "name": "simulify",
+  "version": "1.0.0",
+  "description": "Interactive 3D/4D mechanism, cutaway, and simulation explainer skill & zero-build ESM kit: teach structures, physical laws, protocols, algorithms, and multi-act chapters through 1:1 isomorphic 3D/2D stages, scrubbable timelines, live maths substitution, and counterfactual controls.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/run-tests.mjs"
+  }
+}

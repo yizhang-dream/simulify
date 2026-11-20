@@ -1,0 +1,16 @@
+{
+  "name": "simulify",
+  "description": "Simulify plugin marketplace",
+  "owner": {
+    "name": "yizhang-dream"
+  },
+  "plugins": [
+    {
+      "name": "simulify",
+      "source": "./",
+      "description": "Interactive 3D/4D mechanism, cutaway and simulation explainers: scrubbable timelines, live equation substitution and counterfactual controls from a zero-build offline ESM kit.",
+      "version": "1.0.0",
+      "category": "visualization"
+    }
+  ]
+}

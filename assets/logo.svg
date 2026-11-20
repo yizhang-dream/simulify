@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="t">
+  <title id="t">Simulify</title>
+  <!-- Card: 10% margin baked in (26px each side); opaque so it reads on light and dark themes -->
+  <rect x="26" y="26" width="204" height="204" rx="40" fill="#0F1B2D"/>
+  <g transform="translate(0 -8)" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Isometric cube: outer faces -->
+    <polygon points="128,62 180,92 128,122 76,92" fill="#5EEAD4" stroke="#0F1B2D" stroke-width="2"/>
+    <polygon points="76,92 128,122 128,182 76,152" fill="#0D9488" stroke="#0F1B2D" stroke-width="2"/>
+    <polygon points="128,122 180,92 180,152 128,182" fill="#0F766E" stroke="#0F1B2D" stroke-width="2"/>
+    <!-- Cutaway: top-front octant removed, three inner faces revealed -->
+    <polygon points="128,152 102,137 128,122 154,137" fill="#FDE68A" stroke="#0F1B2D" stroke-width="2"/>
+    <polygon points="102,107 128,92 128,122 102,137" fill="#F59E0B" stroke="#0F1B2D" stroke-width="2"/>
+    <polygon points="128,92 154,107 154,137 128,122" fill="#B45309" stroke="#0F1B2D" stroke-width="2"/>
+    <!-- Timeline scrub arc: dim remaining track, bright elapsed part, playhead -->
+    <path d="M45.3 152.1 A88 88 0 0 0 210.7 152.1" fill="none" stroke="#3B4A63" stroke-width="7"/>
+    <path d="M45.3 152.1 A88 88 0 0 0 158.1 204.7" fill="none" stroke="#FDE68A" stroke-width="7"/>
+    <circle cx="158.1" cy="204.7" r="10" fill="#FFFFFF" stroke="#F59E0B" stroke-width="4"/>
+  </g>
+</svg>

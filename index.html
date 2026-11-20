@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulify · 3D / 4D 交互原理与实验台画廊</title>
+  <link rel="stylesheet" href="./kit/primer-tokens.css">
+  <style>
+    body {
+      padding: 24px clamp(16px, 4vw, 48px);
+      background-color: var(--bg);
+      background-image: radial-gradient(#cbbda8 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+    .gallery-shell {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .gallery-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--card-solid);
+      box-shadow: var(--shadow-md);
+    }
+    .gallery-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+    .world-card {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--card-solid);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+    .world-thumb {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--bg-deep);
+    }
+    .world-body {
+      padding: 14px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .world-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .world-tag {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--navy);
+    }
+    .world-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .world-actions a {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="gallery-shell">
+    <header class="gallery-head">
+      <div>
+        <h1 class="brand-title" id="gal-title">Simulify · 3D / 4D 交互原理与实验台画廊</h1>
+        <p class="brand-sub" id="gal-sub">真场景自动烘焙缩略图 · 离线 i18n · Ctrl+K 速搜 · 多幕问题链</p>
+      </div>
+      <div class="gallery-tools">
+        <div id="mastery-slot"></div>
+        <div id="lang-slot"></div>
+        <button type="button" id="btn-search" class="btn-chip">⌘K 搜索</button>
+      </div>
+    </header>
+
+    <main class="gallery-grid" id="gallery-grid"></main>
+  </div>
+
+  <script type="module">
+    import { mountLangSwitch, mountMasteryBar } from './shell/app-shell.js';
+    import { CommandPalette } from './shell/command-palette.js';
+    import { createI18n } from './shell/i18n.js';
+    import { createLocalStorage, MasteryStore } from './shell/storage-adapter.js';
+
+    const STAGES = [
+      {
+        id: 'prob-stat-ch5-bench',
+        href: './examples/prob-stat-ch5-bench/index.html',
+        thumb: './examples/thumbs/prob-stat-ch5-bench.png',
+        tags: ['Track A · 2.5D 精密仪', 'T4 · 第 5 章 5 幕', 'L²投影/离散/采样', 'Oracle 4/4'],
+        title: { zh: '概率统计第 5 章 · 5 幕条件期望、变换与采样实验台', en: 'Probability & Statistics Ch.5 · 5-Act Projection, Transform & Sampling Bench' },
+        desc: {
+          zh: '把 L² 条件期望投影、Binomial/超几何计数与有限总体修正、平方变换双尾/重期望、泊松-伽马对偶重尾帕累托与 χ²/t/F 三维靶球串进 5 幕精密实验台。',
+          en: '5-act workbench covering L² conditional expectation & MSE, discrete counts with FPC, square transforms & tower law, Poisson-Gamma duality / Pareto heavy tails, and χ²/t/F 3D sampling domes.',
+        },
+      },
+      {
+        id: 'rl-td-bench',
+        href: './examples/rl-td-bench/index.html',
+        thumb: './examples/thumbs/rl-td-bench.png',
+        tags: ['Track C · 2.5D 精密仪', 'T4 · 整章 5 幕', 'n-step 玻璃弧', 'Oracle 3/3'],
+        title: { zh: 'RL 第 7 章整章 · TD/Sarsa/n-step/Q 2.5D 精密实验台', en: 'RL Ch.7 · 5-Act TD/Sarsa/n-step/Q Instrument Bench' },
+        desc: {
+          zh: '从 TD(0) 状态自举、Sarsa 四向 Q 扇区、3D 悬浮玻璃 n-step 视野弧到同随机数流崖边 ε 跌落分叉显微镜与统一 Python 同步执行。',
+          en: 'Whole Ch.7 workbench: 4-Q beveled ceramic tiles, sunken -100 cliff trench, 3D n-step arc, same-seed TD fork, and synced Python execution.',
+        },
+      },
+      {
+        id: 'cache-bench',
+        href: './examples/cache-bench/index.html',
+        thumb: './examples/thumbs/cache-bench.png',
+        tags: ['Track C · 逻辑+空间', 'T4 · 4幕递进', 'XY + Ghost', 'LiveMaths'],
+        title: { zh: '双槽缓存淘汰实验台 · LRU vs FIFO', en: 'Dual-Bay Cache Workbench · LRU vs FIFO (4 Acts)' },
+        desc: {
+          zh: '对标 2D 时序图：可亲手打破 1 ns 命中与 100 ns 主存平衡，同序列对照 FIFO 淘汰误杀热点，实时刷新 XY 曲线与 AMAT 代入式。',
+          en: 'Benchmark against 2D sequence charts: 4 progressive acts comparing LRU vs FIFO, LinkBus zoom-to-part, XY curves, and live AMAT math.',
+        },
+      },
+      {
+        id: 'hysteresis-bench',
+        href: './examples/hysteresis-bench/index.html',
+        thumb: './examples/thumbs/hysteresis-bench.png',
+        tags: ['Track C · 物理×数学', 'T4 · 3幕对比', '相图滞回环', 'LiveMaths'],
+        title: { zh: '双金属恒温器 · 磁吸回差与防抖拆解', en: 'Bimetallic Thermostat · Hysteresis & Chatter Workbench' },
+        desc: {
+          zh: '铜钢异率膨胀弯曲 + 永磁死区记忆历史状态；切换 0° 无回差即可在真实噪声下复现高频火花抖动。',
+          en: 'Bimetallic strip bends across T, magnetic latch creates a 4 °C memory loop, and 0 °C mode exposes chatter failure under noise.',
+        },
+      },
+    ];
+
+    const params = new URLSearchParams(location.search);
+    const i18n = createI18n({
+      defaultLang: params.get('lang') === 'en' ? 'en' : 'zh',
+      dicts: {
+        zh: {
+          title: 'Simulify · 3D / 4D 交互原理与实验台画廊',
+          sub: '真场景自动烘焙缩略图 · 离线 i18n · Ctrl+K 速搜 · 多幕问题链',
+          enter: '打开实验台',
+          deep: '直达反例幕',
+          search: '⌘K 搜索',
+        },
+        en: {
+          title: 'Simulify · 3D/4D Interactive Mechanism & Simulation Gallery',
+          sub: 'Baked live thumbnails · Offline i18n · Ctrl+K Palette · Multi-Act Chains',
+          enter: 'Open Workbench',
+          deep: 'Jump to Counterexample',
+          search: '⌘K Search',
+        },
+      },
+    });
+
+    const store = new MasteryStore(createLocalStorage('simulify:gallery:'), STAGES.map((w) => w.id));
+    mountMasteryBar(document.getElementById('mastery-slot'), store, {
+      labelFn: (p) => `${p.done}/${p.total}`,
+    });
+    mountLangSwitch(document.getElementById('lang-slot'), i18n, [
+      { code: 'zh', label: '中文' },
+      { code: 'en', label: 'EN' },
+    ]);
+
+    const palette = new CommandPalette({
+      items: STAGES.map((w) => ({
+        id: w.id,
+        title: w.title.zh,
+        subtitle: w.tags.join(' · '),
+        href: w.href,
+      })),
+      onSelect: (item) => {
+        store.markDone(item.id);
+        location.href = item.href;
+      },
+    });
+
+    function render() {
+      const lang = i18n.getLang();
+      document.getElementById('gal-title').textContent = i18n.t('title');
+      document.getElementById('gal-sub').textContent = i18n.t('sub');
+      document.getElementById('btn-search').textContent = i18n.t('search');
+
+      const grid = document.getElementById('gallery-grid');
+      grid.replaceChildren();
+      for (const w of STAGES) {
+        const card = document.createElement('article');
+        card.className = 'world-card';
+
+        const img = document.createElement('img');
+        img.className = 'world-thumb';
+        img.src = w.thumb;
+        img.alt = w.title[lang] || w.title.zh;
+
+        const body = document.createElement('div');
+        body.className = 'world-body';
+
+        const tags = document.createElement('div');
+        tags.className = 'world-tags';
+        for (const tg of w.tags) {
+          const sp = document.createElement('span');
+          sp.className = 'world-tag';
+          sp.textContent = tg;
+          tags.append(sp);
+        }
+
+        const h2 = document.createElement('h2');
+        h2.textContent = w.title[lang] || w.title.zh;
+        const p = document.createElement('p');
+        p.className = 'guide-cue';
+        p.textContent = w.desc[lang] || w.desc.zh;
+
+        const actions = document.createElement('div');
+        actions.className = 'world-actions';
+
+        const aEnter = document.createElement('a');
+        aEnter.className = 'btn-primary';
+        aEnter.href = `${w.href}?lang=${lang}`;
+        aEnter.textContent = i18n.t('enter');
+        aEnter.onclick = () => store.markDone(w.id);
+
+        const aDeep = document.createElement('a');
+        aDeep.className = 'btn-secondary';
+        aDeep.href = (w.id === 'cache-bench' || w.id === 'rl-td-bench')
+          ? `${w.href}?stage=act-4&end&lang=${lang}`
+          : `${w.href}?stage=act-3&end&lang=${lang}`;
+        aDeep.textContent = i18n.t('deep');
+        aDeep.onclick = () => store.markDone(w.id);
+
+        actions.append(aEnter, aDeep);
+        body.append(tags, h2, p, actions);
+        card.append(img, body);
+        grid.append(card);
+      }
+    }
+
+    document.getElementById('btn-search').onclick = () => palette.open();
+    i18n.subscribe(render);
+    render();
+    window.__simulify = { i18n, store };
+    window.__ready = true;
+  </script>
+</body>
+</html>

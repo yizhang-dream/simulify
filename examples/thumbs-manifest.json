@@ -1,0 +1,34 @@
+[
+  {
+    "id": "prob-stat-ch5-bench",
+    "url": "examples/prob-stat-ch5-bench/index.html?stage=act-1&end&thumb=1",
+    "out": "examples/thumbs/prob-stat-ch5-bench.png",
+    "width": 960,
+    "height": 600,
+    "waitMs": 550
+  },
+  {
+    "id": "rl-td-bench",
+    "url": "examples/rl-td-bench/index.html?stage=act-4&end&thumb=1",
+    "out": "examples/thumbs/rl-td-bench.png",
+    "width": 960,
+    "height": 600,
+    "waitMs": 550
+  },
+  {
+    "id": "cache-bench",
+    "url": "examples/cache-bench/index.html?stage=act-4&end&thumb=1",
+    "out": "examples/thumbs/cache-bench.png",
+    "width": 960,
+    "height": 600,
+    "waitMs": 450
+  },
+  {
+    "id": "hysteresis-bench",
+    "url": "examples/hysteresis-bench/index.html?stage=act-2&end&thumb=1",
+    "out": "examples/thumbs/hysteresis-bench.png",
+    "width": 960,
+    "height": 600,
+    "waitMs": 450
+  }
+]

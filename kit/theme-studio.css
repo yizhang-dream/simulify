@@ -1,0 +1,206 @@
+/* ==========================================================================
+   Optional Studio & Bio Cutaway Themes (Load after primer-tokens.css)
+   Activate via <html data-theme="dark-studio"> or <html data-theme="bio-cutaway">
+   ========================================================================== */
+
+:root[data-theme="dark-studio"] {
+  color-scheme: dark;
+  --bg: #12161f;
+  --bg-deep: #0b0e15;
+  --card: #1a2130;
+  --card-solid: rgba(24, 31, 46, 0.94);
+  --line: #323e56;
+  --line-soft: #252f43;
+  --navy: #eef3fa;
+  --navy-2: #cbd6e6;
+  --ink: #d4dce9;
+  --muted: #8b97ad;
+  --teal: #2dd4bf;
+  --teal-soft: rgba(45, 212, 191, 0.16);
+  --amber: #f59e0b;
+  --amber-soft: rgba(245, 158, 11, 0.16);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.16);
+  --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark-studio"] .artboard-shell {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 46% 42%, rgba(45, 72, 114, 0.22), rgba(11, 14, 21, 0.92) 72%),
+    radial-gradient(#273247 1px, transparent 1px);
+}
+
+:root[data-theme="dark-studio"] .brand-mark {
+  background: var(--teal);
+  color: #091318;
+}
+
+:root[data-theme="dark-studio"] .lesson-pill[aria-pressed="true"],
+:root[data-theme="dark-studio"] .tb-btn[aria-pressed="true"],
+:root[data-theme="dark-studio"] .film-step[aria-current="step"],
+:root[data-theme="dark-studio"] .btn-primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #081416;
+}
+
+:root[data-theme="dark-studio"] .lesson-pill[aria-pressed="true"] .pill-num {
+  background: #081416;
+  color: var(--teal);
+}
+
+:root[data-theme="dark-studio"] .part-btn,
+:root[data-theme="dark-studio"] .btn-secondary,
+:root[data-theme="dark-studio"] .choice-btn,
+:root[data-theme="dark-studio"] .film-step,
+:root[data-theme="dark-studio"] .compare-row,
+:root[data-theme="dark-studio"] .verdict-box,
+:root[data-theme="dark-studio"] .chart-fold,
+:root[data-theme="dark-studio"] .inspector-close,
+:root[data-theme="dark-studio"] .hyst-svg {
+  background: #171e2c;
+  color: var(--ink);
+}
+
+:root[data-theme="dark-studio"] .guide-readout {
+  background: rgba(37, 47, 67, 0.72);
+}
+
+:root[data-theme="dark-studio"] .latency-pill[data-kind="hit"],
+:root[data-theme="dark-studio"] .callout-tag[data-tone="teal"],
+:root[data-theme="dark-studio"] .heater-badge {
+  background: rgba(15, 58, 57, 0.92);
+  color: #79f2e4;
+}
+
+:root[data-theme="dark-studio"] .callout-tag[data-tone="teal"] span {
+  color: #5eead4;
+}
+
+:root[data-theme="dark-studio"] .latency-pill[data-kind="miss"],
+:root[data-theme="dark-studio"] .callout-tag[data-tone="amber"],
+:root[data-theme="dark-studio"] .heater-badge[data-on="true"] {
+  background: rgba(67, 42, 12, 0.94);
+  color: #fcd34d;
+}
+
+:root[data-theme="dark-studio"] .callout-tag[data-tone="amber"] span {
+  color: #fbbf24;
+}
+
+:root[data-theme="dark-studio"] .stage-tooltip {
+  background: rgba(11, 14, 21, 0.96);
+  border-color: var(--teal);
+  color: #eef3fa;
+}
+
+:root[data-theme="dark-studio"] .live-maths-badge,
+:root[data-theme="dark-studio"] .eq-block,
+:root[data-theme="dark-studio"] .live-table,
+:root[data-theme="dark-studio"] .breakdown-item {
+  background: #171e2c;
+  color: var(--ink);
+}
+
+:root[data-theme="dark-studio"] .live-table th {
+  background: #20293b;
+  color: var(--navy);
+}
+
+:root[data-theme="dark-studio"] .live-table tbody tr.is-active {
+  background: rgba(45, 212, 191, 0.18);
+  color: #99f6e4;
+}
+
+:root[data-theme="dark-studio"] .eq-term.is-emph {
+  background: rgba(238, 243, 250, 0.14);
+}
+
+:root[data-theme="dark-studio"] .eq-term[data-tone="teal"],
+:root[data-theme="dark-studio"] .breakdown-tag[data-tone="teal"] {
+  background: rgba(15, 58, 57, 0.92);
+  color: #79f2e4;
+}
+
+:root[data-theme="dark-studio"] .eq-term[data-tone="amber"],
+:root[data-theme="dark-studio"] .breakdown-tag[data-tone="amber"] {
+  background: rgba(67, 42, 12, 0.94);
+  color: #fcd34d;
+}
+
+:root[data-theme="dark-studio"] .eq-term[data-tone="danger"],
+:root[data-theme="dark-studio"] .breakdown-tag[data-tone="danger"] {
+  background: rgba(91, 27, 27, 0.9);
+  color: #fca5a5;
+}
+
+:root[data-theme="dark-studio"] .timeline-dock {
+  background: var(--card-solid);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark-studio"] .timeline-stage-btn,
+:root[data-theme="dark-studio"] .timeline-btn {
+  background: #171e2c;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark-studio"] .timeline-stage-btn[aria-current="step"],
+:root[data-theme="dark-studio"] .timeline-btn[aria-pressed="true"] {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #081416;
+}
+
+:root[data-theme="dark-studio"] .leader-shadow {
+  stroke: rgba(11, 14, 21, 0.85);
+}
+
+:root[data-theme="dark-studio"] .xy-svg,
+:root[data-theme="dark-studio"] .palette-input,
+:root[data-theme="dark-studio"] .qc-chip {
+  background: #171e2c;
+  color: var(--ink);
+}
+
+:root[data-theme="dark-studio"] .qc-carries {
+  background: rgba(67, 42, 12, 0.42);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--ink);
+}
+
+:root[data-theme="dark-studio"] .lang-btn[aria-pressed="true"] {
+  background: var(--teal);
+  color: #081416;
+}
+
+/* ==========================================================================
+   Bio / Science Cutaway Theme
+   ========================================================================== */
+:root[data-theme="bio-cutaway"] {
+  color-scheme: light;
+  --bg: #eef2f0;
+  --bg-deep: #e1e8e5;
+  --card: #f8fbfa;
+  --card-solid: rgba(248, 251, 250, 0.96);
+  --line: #c2d0ca;
+  --line-soft: #d9e3df;
+  --navy: #142b2e;
+  --navy-2: #224448;
+  --ink: #2c3f41;
+  --muted: #5a7072;
+  --teal: #0f8b8d;
+  --teal-soft: #d5f0ef;
+  --amber: #d45d48;
+  --amber-soft: #fbe3de;
+}
+
+:root[data-theme="bio-cutaway"] .artboard-shell {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 46% 42%, rgba(255, 255, 255, 0.78), rgba(225, 232, 229, 0.45) 68%),
+    radial-gradient(#bfd0c9 1px, transparent 1px);
+}

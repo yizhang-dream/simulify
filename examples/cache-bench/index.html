@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulify · 双槽缓存淘汰实验台 (LRU vs FIFO)</title>
+  <link rel="stylesheet" href="../../kit/primer-tokens.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../shared/vendor/three/three.module.js",
+      "three/addons/": "../shared/vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="artboard-shell">
+    <header class="hud-top-left">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="8" height="7" rx="1.5"/>
+            <rect x="13" y="4" width="8" height="7" rx="1.5"/>
+            <path d="M7 15v4h10v-4"/>
+            <path d="M12 11v8"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title" id="brand-title">双槽缓存 · 4 幕淘汰实验台</h1>
+          <p class="brand-sub" id="brand-sub">点卡盒干预执行 · 对照 1 ns 命中与 100 ns 主存回源</p>
+        </div>
+      </div>
+
+      <div class="hud-status-row">
+        <div id="latency-pill" class="latency-pill">
+          <span id="latency-label">准备就绪</span>
+          <span id="latency-value" class="mono">0 ns</span>
+        </div>
+        <div id="lang-slot"></div>
+        <button type="button" id="btn-palette" class="btn-chip" aria-label="打开命令搜索面板 (Ctrl+K)">⌘K 搜索</button>
+      </div>
+    </header>
+
+    <main class="stage-fullbleed" aria-label="三维缓存实验工作台">
+      <canvas id="stage-canvas" class="stage-canvas" aria-label="三维缓存工作台"></canvas>
+      <svg id="leader-svg" class="leader-svg" aria-hidden="true"></svg>
+      <div id="tags-layer" class="tags-layer" aria-hidden="true"></div>
+      <div id="popups-layer" class="popups-layer" aria-hidden="true"></div>
+      <div id="stage-tooltip" class="stage-tooltip" role="tooltip" hidden></div>
+    </main>
+
+    <section class="thumb-dock" aria-label="移动端快捷取用">
+      <div class="thumb-dock-row" id="thumb-parts"></div>
+    </section>
+
+    <aside class="hud-guide" id="hud-guide" aria-label="当前幕引导与问题链">
+      <div>
+        <h2 id="lesson-title"></h2>
+        <p id="lesson-cue" class="guide-cue"></p>
+        <div class="question-chain" id="question-chain">
+          <div class="qc-carries" id="qc-carries" hidden></div>
+          <div class="qc-hook" id="qc-hook" hidden></div>
+        </div>
+      </div>
+
+      <div id="prediction-box" class="prediction-box" hidden>
+        <p id="prediction-prompt"></p>
+        <div id="prediction-choices" class="prediction-choices"></div>
+        <div id="prediction-verdict" class="verdict-box" hidden></div>
+      </div>
+
+      <div class="guide-section">
+        <p class="guide-label" id="parts-heading">反事实手动干预 (点击 1–4 抢发请求)</p>
+        <div id="part-grid" class="part-grid"></div>
+      </div>
+
+      <div id="guide-readout" class="guide-readout">
+        <span id="readout-slots">槽位: 空</span>
+        <span id="readout-totals">0/0 · 0 ns</span>
+      </div>
+    </aside>
+
+    <div class="hud-bottom-left" id="hud-bottom-left">
+      <section id="chart-card" aria-label="LRU 与 FIFO 命中率 XY 曲线"></section>
+      <div id="live-maths-slot"></div>
+      <section id="inspector-float" class="inspector-float" hidden aria-label="部件详情">
+        <div class="inspector-head">
+          <span id="inspector-title" class="inspector-title">部件</span>
+          <button type="button" id="inspector-zoom" class="inspector-close">聚焦</button>
+          <button type="button" id="inspector-close" class="inspector-close" aria-label="关闭检查器">×</button>
+        </div>
+        <p id="inspector-note"></p>
+      </section>
+    </div>
+
+    <div class="hud-bottom-center" id="hud-bottom-center">
+      <div id="timeline-slot"></div>
+      <div class="viewbar" role="toolbar" focusgroup="toolbar wrap" aria-label="视角与辅助工具">
+        <div role="group" aria-label="相机">
+          <button type="button" id="view-left" class="tb-btn" aria-label="左转 (Q)" title="Q">↺</button>
+          <button type="button" id="view-right" class="tb-btn" aria-label="右转 (E)" title="E">↻</button>
+          <button type="button" id="view-top" class="tb-btn" aria-pressed="false" aria-label="俯视图 (T)" title="T"><span>俯视</span></button>
+          <button type="button" id="view-reset" class="tb-btn" aria-label="复位相机 (R)" title="R"><span>复位</span></button>
+        </div>
+        <span role="separator" aria-orientation="vertical" class="tb-sep"></span>
+        <div role="group" aria-label="标注与声音">
+          <button type="button" id="toggle-callouts" class="tb-btn" aria-pressed="true"><span>标注</span></button>
+          <button type="button" id="toggle-sound" class="tb-btn" aria-pressed="true"><span>音效</span></button>
+        </div>
+      </div>
+    </div>
+
+    <p id="status-bar" class="visually-hidden" role="status"></p>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
