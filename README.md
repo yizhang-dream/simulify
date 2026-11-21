@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.zh-CN.md">简体中文</a> · <a href="SKILL.md">Agent Skill Spec</a> · <a href="INSTALL.md">Install</a> · <a href="examples/index.html">Live Examples</a> · <a href="#quick-start">Quick Start</a>
+  <a href="README.zh-CN.md">简体中文</a> · <a href="https://simulify.xn--ltr42g543b.cn/">Live Gallery</a> · <a href="SKILL.md">Agent Skill Spec</a> · <a href="INSTALL.md">Install</a> · <a href="examples/index.html">Local Examples</a> · <a href="#quick-start">Quick Start</a>
 </p>
 
 ---
@@ -50,6 +50,7 @@ Run an offline HTTP server inside `simulify/` and inspect [`examples/index.html`
 - **`examples/rl-td-bench/`** *(Flagship Whole-Chapter 5-Act Bench · Concept A 2.5D Instrument)*: Covers RL Chapter 7 (`TD(0) → Sarsa → n-step → Q-Fork → Unified Code`) with a brushed aluminum + recessed `-100` crimson chasm tray, 4-facet beveled Q tiles, floating frosted-glass 3D `n-step` arc, live `TD Fork` schematic, synchronized Python trace, and live Oracle falsification suite.
 - **`examples/cache-bench/`** *(Direct benchmark to 2D sequence diagrams)*: Turns cache hits/misses into a **4-Act 3D Dual-Bay Memory Workbench** comparing `LRU` vs `FIFO` side by side (`1 ns` SRAM vs `100 ns` DRAM trays), `LinkBus` part-to-table highlighting, live `ChartCard.updateXY` hit-rate vs `ghost` baseline curve, and collapsible live $\text{AMAT}$ equation substitution.
 - **`examples/hysteresis-bench/`** *(Physical × Math Dual Simulation Workbench)*: Demonstrates why a **single switching threshold triggers rapid relay chatter** in noisy physics, then lets you expand the **$\Delta T$ hysteresis band** across 3 acts while watching a physical bimetallic strip, LED/heater glow, phase-space loop, and switching inequality table update from one simulation core.
+- **`examples/prob-stat-ch5-bench/`** *(Whole-Chapter 5-Act Probability & Statistics Instrument Bench)*: Unifies $L^2$ conditional expectation projection & MSE decomposition, discrete counts with finite-population correction, non-monotonic square transforms & tower law, Poisson–Gamma duality / Pareto heavy tails, and 3D $\chi^2 / t / F$ sampling domes with a 4/4 live falsification Oracle.
 
 ---
 

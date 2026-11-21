@@ -55,6 +55,8 @@ assert.ok(fmMatch && fmMatch[1].includes('name: simulify'), 'SKILL.md must decla
 
 const mdFiles = [
   path.join(ROOT, 'SKILL.md'),
+  path.join(ROOT, 'skills', 'simulify', 'SKILL.md'),
+  path.join(ROOT, 'INSTALL.md'),
   path.join(ROOT, 'README.md'),
   path.join(ROOT, 'README.zh-CN.md'),
   ...fs.readdirSync(path.join(ROOT, 'references')).filter((f) => f.endsWith('.md')).map((f) => path.join(ROOT, 'references', f)),

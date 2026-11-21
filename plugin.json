@@ -5,6 +5,7 @@
   "description": "Turn mechanisms, physical structures, protocols, math laws and algorithms into offline interactive 3D/4D explainers: cutaway views, scrubbable multi-act timelines, live equation substitution and what-if controls, built from a zero-build ESM kit.",
   "logo": "assets/logo.svg",
   "author": "yizhang-dream",
+  "homepage": "https://simulify.xn--ltr42g543b.cn",
   "repository": "https://github.com/yizhang-dream/simulify",
   "suggestedPrompts": [
     "Build a 3D cutaway explainer of how a bimetallic thermostat switches, with a scrubbable timeline and an adjustable hysteresis band",

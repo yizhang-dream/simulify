@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="SKILL.md">Agent Skill 规范</a> · <a href="INSTALL.md">安装指南</a> · <a href="examples/index.html">本地示范展台</a> · <a href="#快速开始">快速开始</a>
+  <a href="README.md">English</a> · <a href="https://simulify.xn--ltr42g543b.cn/">在线展台</a> · <a href="SKILL.md">Agent Skill 规范</a> · <a href="INSTALL.md">安装指南</a> · <a href="examples/index.html">本地示范展台</a> · <a href="#快速开始">快速开始</a>
 </p>
 
 ---
@@ -47,6 +47,7 @@
 - **`examples/rl-td-bench/`**（⭐ RL 第 7 章整章 5 幕标杆 · 方案 A 2.5D 精密仪器台）：覆盖 `TD(0) → Sarsa → n-step → Q-Fork → 统一视角与代码`，内置阳极氧化铝下沉式 `-100` 深红悬崖、26 块倒角四向 Q 扇区瓷砖、悬浮半透明 3D 玻璃 `n-step` 弧、`TD Fork` 分叉电路与实时 Python 单步追踪，全量接入质量裁判 Oracle。
 - **`examples/cache-bench/`**（直接对标二维 `cache-miss` 时序图）：把缓存命中/缺页变成 **4 幕演进的 3D 双槽对照工作台**——1 ns 与 100 ns 路径速度差、`LRU` vs `FIFO` 同序列反例分叉、[`LinkBus`](kit/link-bus.js) 3D↔表格双向联动高亮、`ChartCard.updateXY` 实时命中率 vs `ghost` 基准线、以及可折叠 $\text{AMAT}$ 活代入算式。
 - **`examples/hysteresis-bench/`**（物理 × 数学双真源 3D 仿真实验台）：真实演示噪声环境里单阈值控温如何触发高频机械抖动，再分 3 幕拉宽 $\Delta T$ 回差带，同一 `solve()` 实时联动双金属片弯曲、加热灯丝、滞回相图与 $T_{\text{on}}/T_{\text{off}}$ 切换不等式表。
+- **`examples/prob-stat-ch5-bench/`**（概率统计第 5 章整章 5 幕精密仪器台）：串联 $L^2$ 条件期望正交投影与 MSE 分解、超几何有限总体修正、平方变换双尾/重期望法则、泊松-伽马对偶重尾帕累托与 $\chi^2 / t / F$ 三维采样穹顶，内置 4/4 反例证伪 Oracle。
 
 ---
 
