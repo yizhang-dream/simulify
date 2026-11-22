@@ -129,6 +129,7 @@
       letter-spacing: -0.014em;
       color: var(--navy);
       line-height: 1.28;
+      text-wrap: balance;
     }
     .world-card.is-flagship .world-body h2 {
       font-size: 20px;
@@ -361,7 +362,17 @@
         });
 
         const h2 = document.createElement('h2');
-        h2.textContent = w.title[lang] || w.title.zh;
+        const titleText = w.title[lang] || w.title.zh;
+        for (const part of titleText.split(/(Q-Learning|n-step)/g)) {
+          if (part === 'Q-Learning' || part === 'n-step') {
+            const nb = document.createElement('span');
+            nb.style.whiteSpace = 'nowrap';
+            nb.textContent = part;
+            h2.append(nb);
+          } else if (part) {
+            h2.append(document.createTextNode(part));
+          }
+        }
         const p = document.createElement('p');
         p.className = 'guide-cue';
         p.textContent = w.desc[lang] || w.desc.zh;

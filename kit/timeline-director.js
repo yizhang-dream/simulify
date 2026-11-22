@@ -1345,10 +1345,20 @@ export function exposeTestHooks(controller, extra = {}) {
     if (!hasExplicitSync && callouts && typeof callouts.update === 'function') {
       callouts.update();
     }
+    const resultSnap = snap || (controller?.getState ? controller.getState() : { t });
+    const hasPendingHtml = Boolean(stage?.htmlSurfaces?.hasPendingVisible?.());
+    const needsAsyncStageRender = Boolean(
+      stage &&
+      typeof stage.renderNowAsync === 'function' &&
+      (hasPendingHtml || (stage._manualMode && stage.backendKind === 'webgpu'))
+    );
+    if (needsAsyncStageRender) {
+      return stage.renderNowAsync().then(() => resultSnap);
+    }
     if (stage && typeof stage.renderNow === 'function') {
       stage.renderNow();
     }
-    return snap || (controller?.getState ? controller.getState() : { t });
+    return resultSnap;
   };
 
   const enterExportMode = ({ hud = 'caption', width = null, height = null, dpr = 1, muteAudio = true } = {}) => {

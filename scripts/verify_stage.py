@@ -471,6 +471,13 @@ def build_browser_args(backend: str = 'auto', no_hic: bool = False):
     )
     common = [hic_flag]
     if backend == 'webgpu':
+        if sys.platform in ('win32', 'darwin'):
+            # Windows (D3D12 ANGLE) and macOS (Metal) expose hardware WebGPU natively;
+            # forcing Linux Vulkan flags on Windows breaks hardware WebGPU and falls back to WebGL2.
+            return common + [
+                '--enable-unsafe-webgpu',
+                '--ignore-gpu-blocklist',
+            ]
         return common + [
             '--use-gl=angle',
             '--use-angle=vulkan',
@@ -925,6 +932,7 @@ def check_target(
     run_4d_checks: bool = False,
     strict_4d: bool = False,
     is_probe: bool = False,
+    requested_backend: str = 'auto',
 ):
     for attempt in range(2):
         console_errors = []
@@ -1194,12 +1202,25 @@ def check_target(
             },
             'geometryDiversity': geo_res,
             'cameraOwnership': camera_ownership,
+            'backend': {
+                'requested': requested_backend,
+                'actual': metrics['rendererBackend'],
+                'enforced': bool(requested_backend == 'webgpu' and metrics['hasCanvas']),
+                'passed': not (
+                    requested_backend == 'webgpu'
+                    and metrics['hasCanvas']
+                    and metrics['rendererBackend'] != 'webgpu'
+                ),
+            },
         }
+
+        backend_ok = bool(oracle['backend']['passed'])
 
         telemetry = {
             'v2Active': v2_active,
             'simulifyVersion': metrics['simulifyVersion'],
             'rendererBackend': metrics['rendererBackend'],
+            'requestedBackend': requested_backend,
             'htmlInCanvasSupported': metrics['htmlInCanvasSupported'],
             'canvasNonBlank': canvas_non_blank,
             'canvasStd': canvas_std,
@@ -1211,6 +1232,7 @@ def check_target(
             and len(page_errors) == 0
             and len(failed_requests) == 0
             and (width <= 900 or not any_guide_overflow)
+            and backend_ok
             and prose_ok
             and frame_ok
             and chart_ok
@@ -1293,6 +1315,7 @@ def main():
                         run_4d_checks=(idx == 0),
                         strict_4d=args.strict_4d,
                         is_probe=False,
+                        requested_backend=args.backend,
                     )
                 )
 
@@ -1312,6 +1335,7 @@ def main():
                         run_4d_checks=False,
                         strict_4d=args.strict_4d,
                         is_probe=True,
+                        requested_backend=args.backend,
                     )
                 )
 
@@ -1393,10 +1417,14 @@ def main():
         else:
             co_str = f'FAIL(d={co.get("dragDelta")},drift={co.get("driftAfterWait")},lock={co.get("userCameraLocked")})'
         mb_cnt = ora.get('multiBeat', {}).get('sampledCount', 0)
+        bk_info = ora.get('backend', {})
+        bk_str = str(tel.get('rendererBackend'))
+        if bk_info.get('enforced') and not bk_info.get('passed', True):
+            bk_str = f'{bk_str}(FAIL:expected={bk_info.get("requested")})'
 
         print(
             f'  [{tag}] {r["url"]} @ {r["viewport"]} | '
-            f'backend={tel.get("rendererBackend")} hic={tel.get("htmlInCanvasSupported")} beats={mb_cnt} | '
+            f'backend={bk_str} hic={tel.get("htmlInCanvasSupported")} beats={mb_cnt} | '
             f'console={len(r["consoleErrors"])} pageErr={len(r["pageErrors"])} '
             f'reqFail={len(r["failedRequests"])} overflow={r["metrics"]["guideOverflow"]} '
             f'oracle=[prose:{p_str} frame:{f_str} chart:{c_str} hud:{h_str} falsify:{fal_str} '

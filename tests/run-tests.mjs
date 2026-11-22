@@ -268,12 +268,22 @@ assert.equal(
 );
 
 const pluginJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugin.json'), 'utf8'));
+const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const marketJson = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
-assert.ok(pluginJson.version && marketJson.plugins?.[0]?.version, 'plugin.json & marketplace.json must declare versions');
+assert.ok(pluginJson.version && packageJson.version && marketJson.plugins?.[0]?.version, 'plugin.json, package.json & marketplace.json must declare versions');
 assert.equal(
   pluginJson.version,
   marketJson.plugins[0].version,
   'plugin.json and .claude-plugin/marketplace.json versions must match'
+);
+assert.equal(
+  packageJson.version,
+  pluginJson.version,
+  'package.json and plugin.json versions must match'
+);
+assert.ok(
+  fs.existsSync(path.join(ROOT, 'examples', 'shared', 'vendor', 'three', 'addons', 'utils', 'BufferGeometryUtils.js')),
+  'examples/shared/vendor/three/addons/utils/BufferGeometryUtils.js must exist'
 );
 
 const mdFiles = [
@@ -1322,6 +1332,120 @@ const mat4 = computeCanvasMatrix4(
   orthoCam
 );
 assert.ok(mat4 && mat4.elements.length === 16 && mat4.elements.every(Number.isFinite));
+
+// HtmlSurfaceManager native hidden->visible awaitingPaint guard & __simulify.seek async coordination
+{
+  const prevHtmlCanvas = globalThis.HTMLCanvasElement;
+  const prevGpuUsage = globalThis.GPUTextureUsage;
+  globalThis.HTMLCanvasElement = {
+    prototype: { content: '', requestPaint() {}, updateElementGeometry() {} },
+  };
+  globalThis.GPUTextureUsage = { COPY_DST: 8, RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4 };
+  try {
+    let paintReqCount = 0;
+    let drawElCount = 0;
+    let renderReqCount = 0;
+    const mockHicCanvas = {
+      width: 2560,
+      height: 1600,
+      clientWidth: 1280,
+      clientHeight: 800,
+      onpaint: null,
+      setAttribute() {},
+      appendChild(el) { el.parentElement = this; },
+      requestPaint() { paintReqCount += 1; },
+      updateElementGeometry() {},
+      clearElementGeometry() {},
+    };
+    const mockGpuDevice = {
+      createTexture: (desc) => ({ width: desc.size.width, height: desc.size.height, destroy() {} }),
+      queue: {
+        drawElementImageToTexture() { drawElCount += 1; },
+        submit() {},
+      },
+    };
+    const mockHicStage = {
+      canvas: mockHicCanvas,
+      camera: orthoCam,
+      size: { width: 1280, height: 800, dpr: 2, physicalWidth: 2560, physicalHeight: 1600 },
+      _manualMode: false,
+      _rendererReady: true,
+      backendKind: 'webgpu',
+      renderer: { isWebGPURenderer: true, backend: { isWebGPUBackend: true, device: mockGpuDevice } },
+      getMaxAnisotropy: () => 16,
+      requestRender() { renderReqCount += 1; },
+    };
+    const mgr = new HtmlSurfaceManager(mockHicStage, { enabled: true });
+    assert.equal(mgr.nativeEnabled, true);
+
+    const panelEl = createMockElement('section');
+    panelEl.offsetWidth = 468;
+    panelEl.offsetHeight = 206;
+    panelEl.dataset.hudHidden = 'true';
+    const handle = mgr.mount('trace', panelEl, { worldWidth: 4, worldHeight: 2 });
+    handle.setVisible(false);
+
+    // Hidden element must never be uploaded or mark pending visible
+    assert.equal(mgr.hasPendingVisible(), false);
+    assert.equal(mgr.syncPaint(null), false);
+    assert.equal(drawElCount, 0);
+
+    // hidden -> visible transition: synchronous syncPaint(null) BEFORE onpaint must NOT upload or clear dirty!
+    panelEl.dataset.hudHidden = 'false';
+    handle.setVisible(true);
+    const surf = mgr.surfaces.get('trace');
+    assert.equal(surf.dirty, true);
+    assert.equal(surf.awaitingPaint, true);
+    assert.equal(mgr.hasPendingVisible(), true);
+
+    assert.equal(mgr.syncPaint(null), false, 'syncPaint(null) outside onpaint must defer awaitingPaint surface');
+    assert.equal(drawElCount, 0, 'Must not call drawElementImageToTexture before Blink onpaint');
+    assert.equal(surf.dirty, true, 'syncPaint(null) must preserve surf.dirty until onpaint uploads a valid frame');
+    assert.equal(surf.awaitingPaint, true);
+
+    // Once Blink fires canvas.onpaint (even with empty changedElements), upload succeeds & clears flags
+    mockHicCanvas.onpaint({ changedElements: [] });
+    assert.equal(drawElCount, 1, 'onpaint must upload visible awaitingPaint surface exactly once');
+    assert.equal(surf.dirty, false);
+    assert.equal(surf.awaitingPaint, false);
+    assert.equal(surf.uploadedOnce, true);
+    assert.equal(mgr.hasPendingVisible(), false);
+    assert.ok(paintReqCount >= 1 && renderReqCount >= 1);
+
+    // exposeTestHooks.seek(t) must coordinate with stage.renderNowAsync() when a visible HIC surface is pending
+    panelEl.dataset.hudHidden = 'false';
+    handle.markDirty();
+    assert.equal(mgr.hasPendingVisible(), true);
+    let asyncRenders = 0;
+    const seekClock = new SpacetimeClock({ duration: 44, manualMode: true });
+    const seekStage = {
+      ...mockHicStage,
+      htmlSurfaces: mgr,
+      unlockUserCamera() {},
+      renderNow() {},
+      async renderNowAsync() {
+        asyncRenders += 1;
+        mockHicCanvas.onpaint({ changedElements: [panelEl] });
+        return true;
+      },
+    };
+    const seekHooks = exposeTestHooks(seekClock, { stage: seekStage });
+    const seekPromise = seekHooks.seek(41.0);
+    assert.equal(typeof seekPromise?.then, 'function', '__simulify.seek must return a Promise when HIC surface is pending');
+    await seekPromise;
+    assert.equal(asyncRenders, 1, '__simulify.seek must await stage.renderNowAsync() for pending HIC surfaces');
+    assert.equal(mgr.hasPendingVisible(), false);
+    seekClock.destroy();
+    delete globalThis.__simulify;
+    delete globalThis.__ready;
+    mgr.dispose();
+  } finally {
+    if (prevHtmlCanvas === undefined) delete globalThis.HTMLCanvasElement;
+    else globalThis.HTMLCanvasElement = prevHtmlCanvas;
+    if (prevGpuUsage === undefined) delete globalThis.GPUTextureUsage;
+    else globalThis.GPUTextureUsage = prevGpuUsage;
+  }
+}
 
 // StageManipulator & GridBrush Node smoke lifecycle
 const fakeCanvas = {

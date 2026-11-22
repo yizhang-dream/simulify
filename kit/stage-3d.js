@@ -1369,14 +1369,19 @@ export class IsometricStage {
       await this.ready;
     }
     if (this._disposed || !this._rendererReady || !this.renderer) return false;
+    this.scene.updateMatrixWorld();
+    this.camera.updateMatrixWorld();
     if (this.htmlSurfaces?.flushPaint) {
       await this.htmlSurfaces.flushPaint();
     }
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
     if (this.htmlSurfaces) {
-      this.htmlSurfaces.syncPaint(null);
       this.htmlSurfaces.updateGeometries(this.camera);
+      if (this.htmlSurfaces.hasPendingVisible?.() && this.htmlSurfaces.flushPaint) {
+        await this.htmlSurfaces.flushPaint();
+      }
+      this.htmlSurfaces.syncPaint(null);
     }
     if (this.outline && this.outlineEnabled) {
       await this.outline.renderAsync(this.scene, this.camera);
