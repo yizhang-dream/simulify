@@ -4,7 +4,7 @@
 # dependencies = ["playwright>=1.45", "numpy>=1.24", "pillow>=9.0"]
 # ///
 """
-Automated 3-viewport, deep-link, multi-beat, and Simulify v2.1 4D Quality Oracle.
+Automated 3-viewport, deep-link, multi-beat, and Simulify v2.2 Layout-Aware 4D Quality Oracle.
 
 Spins up an ephemeral loopback HTTP server, verifies zero console/page/request errors,
 zero guide-card overflow on desktop, mobile thumb-dock visibility, optional URL probes,
@@ -64,9 +64,12 @@ GPU_ERROR_PATTERNS = (
 
 
 EVAL_FRAME_METRICS_JS = """() => {
+  const shellEl = document.querySelector('.artboard-shell, .scrolly-shell');
+  const layoutArchetype = shellEl?.dataset?.layout || (document.querySelector('.scrolly-shell') ? 'scrolly-stage' : 'fullbleed-hud');
+  const isScrollableWorkspace = layoutArchetype === 'split-bench' || layoutArchetype === 'scrolly-stage';
   const guide = document.querySelector('.hud-guide') || document.querySelector('.right-dock');
   const thumbDock = document.querySelector('.thumb-dock');
-  const canvas = document.querySelector('canvas');
+  const canvas = document.querySelector('.stage-canvas') || document.querySelector('canvas');
   const hook = window.__simulify || null;
   const stageObj = hook?.stage?.stage || hook?.stage || hook?.scene?.stage || null;
 
@@ -79,17 +82,17 @@ EVAL_FRAME_METRICS_JS = """() => {
   };
 
   const guideVisible = isVisibleEl(guide);
-  const guideOverflow = guideVisible ? (guide.scrollHeight > guide.clientHeight + 2) : false;
+  const guideOverflow = (!isScrollableWorkspace && guideVisible) ? (guide.scrollHeight > guide.clientHeight + 2) : false;
   const thumbVisible = thumbDock ? getComputedStyle(thumbDock).display !== 'none' : null;
   const thumbTop = thumbDock ? thumbDock.getBoundingClientRect().top : null;
   const canvasRect = canvas ? canvas.getBoundingClientRect() : null;
 
-  // 1. Prose lint (AI clichés check on visible HUD prose)
+  // 1. Prose lint (AI clichés check on visible prose across all layout archetypes)
   const AI_CLICHES = [
     '本质上', '值得注意的是', '总而言之', '综上所述', '不难发现', '众所周知',
     '至关重要', '深入探讨', '赋能', '旨在', '极大地', '正如我们所见'
   ];
-  const proseEls = document.querySelectorAll('.hud-guide, .right-dock, .question-chain, .brand-sub, .beat-caption-pill');
+  const proseEls = document.querySelectorAll('.hud-guide, .right-dock, .split-aside, .scrolly-prose, .question-chain, .brand-sub, .beat-caption-pill, .hero-act-banner');
   const proseHits = [];
   for (const el of proseEls) {
     if (!isVisibleEl(el)) continue;
@@ -99,10 +102,11 @@ EVAL_FRAME_METRICS_JS = """() => {
     }
   }
 
-  // 2. HUD panel mutual overlap check (desktop > 900px), including .beat-caption-pill
+  // 2. HUD panel mutual overlap check (desktop > 900px), including .beat-caption-pill & .view-cube-dock
   const hudSelectors = [
     '.hud-top-left', '.top-ribbon', '.beat-caption-pill', '.hud-guide', '.right-dock',
-    '.hud-bottom-left', '.bottom-left-dock', '.hud-bottom-center', '.bottom-transport'
+    '.split-aside', '.scrolly-prose', '.hud-bottom-left', '.bottom-left-dock',
+    '.hud-bottom-center', '.bottom-transport', '.view-cube-dock'
   ];
   const visibleHud = [];
   const seenHudEls = new Set();
@@ -236,9 +240,9 @@ EVAL_FRAME_METRICS_JS = """() => {
     }
   }
 
-  // 3. Chart legibility bounds (inspect every visible XY / hysteresis SVG chart)
+  // 3. Chart legibility bounds (inspect every visible scientific SVG chart)
   let chartSize = null;
-  for (const chartEl of document.querySelectorAll('.xy-svg, .hyst-svg')) {
+  for (const chartEl of document.querySelectorAll('.xy-svg, .hyst-svg, .dist-svg, .heatmap-svg, .timing-svg')) {
     if (!isVisibleEl(chartEl)) continue;
     const r = chartEl.getBoundingClientRect();
     const sz = { width: Math.round(r.width), height: Math.round(r.height) };
@@ -247,10 +251,10 @@ EVAL_FRAME_METRICS_JS = """() => {
     }
   }
 
-  // 4. Horizontal truncation audit on visible code/guide/maths/caption cards
+  // 4. Horizontal truncation audit on visible code/guide/maths/caption/split cards
   const truncSelectors = [
     '.code-trace-card', '.code-trace-card pre', '.hud-guide',
-    '.right-dock', '.live-maths-panel', '.beat-caption-pill'
+    '.right-dock', '.split-aside', '.scrolly-prose', '.live-maths-panel', '.beat-caption-pill'
   ];
   const horizontalTruncations = [];
   for (const sel of truncSelectors) {
@@ -344,7 +348,7 @@ EVAL_FRAME_METRICS_JS = """() => {
       inspectTextEl(desc);
     }
   }
-  for (const svgText of document.querySelectorAll('.xy-svg text, .hyst-svg text, .stage-2d-svg text')) {
+  for (const svgText of document.querySelectorAll('.xy-svg text, .hyst-svg text, .dist-svg text, .heatmap-svg text, .timing-svg text, .stage-2d-svg text')) {
     inspectTextEl(svgText);
   }
 
@@ -412,6 +416,7 @@ EVAL_FRAME_METRICS_JS = """() => {
 
   return {
     title: document.title,
+    layoutArchetype,
     ready: Boolean(window.__ready),
     simulifyVersion: Number(hook?.version || 1),
     hasDirector: Boolean(hook && (hook.director || hook.clock)),
@@ -1159,8 +1164,9 @@ def check_target(
         metrics['guideOverflow'] = any_guide_overflow
 
         prose_ok = len(all_prose_hits_list) == 0
+        min_canvas_w_ratio = 0.40 if metrics.get('layoutArchetype') in ('ab-compare', 'multi-view') else 0.45
         frame_ok = (width <= 900) or (not metrics['hasCanvas']) or (
-            metrics['canvasWidth'] >= width * 0.45 and metrics['canvasHeight'] >= height * 0.45
+            metrics['canvasWidth'] >= width * min_canvas_w_ratio and metrics['canvasHeight'] >= height * 0.45
         )
         chart_ok = len(chart_fail_beats) == 0
         hud_ok = (width <= 900) or (len(all_hud_overlaps) == 0 and len(all_surface_occlusions) == 0)
@@ -1306,6 +1312,7 @@ def check_target(
         telemetry = {
             'v2Active': v2_active,
             'simulifyVersion': metrics['simulifyVersion'],
+            'layoutArchetype': metrics.get('layoutArchetype', 'fullbleed-hud'),
             'rendererBackend': metrics['rendererBackend'],
             'requestedBackend': requested_backend,
             'htmlInCanvasSupported': metrics['htmlInCanvasSupported'],

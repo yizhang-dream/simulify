@@ -1,14 +1,24 @@
 /* ==========================================================================
-   Optional Studio & Bio Cutaway Themes (Load after primer-tokens.css)
-   Activate via <html data-theme="dark-studio"> or <html data-theme="bio-cutaway">
+   Simulify Visual Skins (Load after primer-tokens.css)
+   Activate via <html data-theme="...">:
+     - paper-ink (default in primer-tokens.css)
+     - dark-studio       : Dark scientific oscilloscope & high-contrast instrument lab
+     - bio-cutaway       : Cool clinical laboratory & anatomical/chemical cutaway
+     - blueprint         : Swiss engineering Prussian-blue drafting blueprint
+     - monochrome-print  : Tufte high-contrast editorial print & archival plate
+     - obsidian-gallery  : Warm museum velvet & turned-brass precision showcase
    ========================================================================== */
 
+/* --------------------------------------------------------------------------
+   1. Dark Studio (`dark-studio`)
+   -------------------------------------------------------------------------- */
 :root[data-theme="dark-studio"] {
   color-scheme: dark;
   --bg: #12161f;
   --bg-deep: #0b0e15;
+  --bg-elevated: #171e2c;
   --card: #1a2130;
-  --card-solid: rgba(24, 31, 46, 0.94);
+  --card-solid: rgba(24, 31, 46, 0.95);
   --line: #323e56;
   --line-soft: #252f43;
   --navy: #eef3fa;
@@ -21,191 +31,31 @@
   --amber-soft: rgba(245, 158, 11, 0.16);
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.16);
+  --accent-contrast: #081416;
+  --cat-1: #56b4e9;
+  --cat-2: #f59e0b;
+  --cat-3: #2dd4bf;
+  --cat-4: #f472b6;
+  --cat-5: #facc15;
+  --cat-6: #93c5fd;
+  --cat-7: #e2e8f0;
+  --cat-8: #c084fc;
   --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.48);
+  --stage-backdrop-grad: radial-gradient(circle at 46% 42%, rgba(45, 72, 114, 0.24), rgba(11, 14, 21, 0.92) 72%);
+  --stage-dot-pattern: radial-gradient(#273247 1px, transparent 1px);
+  --scrollbar-thumb: rgba(203, 214, 230, 0.28);
+  accent-color: var(--teal);
 }
 
-:root[data-theme="dark-studio"] .artboard-shell {
-  background-color: var(--bg);
-  background-image:
-    radial-gradient(circle at 46% 42%, rgba(45, 72, 114, 0.22), rgba(11, 14, 21, 0.92) 72%),
-    radial-gradient(#273247 1px, transparent 1px);
-}
-
-:root[data-theme="dark-studio"] .brand-mark {
-  background: var(--teal);
-  color: #091318;
-}
-
-:root[data-theme="dark-studio"] .lesson-pill[aria-pressed="true"],
-:root[data-theme="dark-studio"] .tb-btn[aria-pressed="true"],
-:root[data-theme="dark-studio"] .film-step[aria-current="step"],
-:root[data-theme="dark-studio"] .btn-primary {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: #081416;
-}
-
-:root[data-theme="dark-studio"] .lesson-pill[aria-pressed="true"] .pill-num {
-  background: #081416;
-  color: var(--teal);
-}
-
-:root[data-theme="dark-studio"] .part-btn,
-:root[data-theme="dark-studio"] .btn-secondary,
-:root[data-theme="dark-studio"] .choice-btn,
-:root[data-theme="dark-studio"] .film-step,
-:root[data-theme="dark-studio"] .compare-row,
-:root[data-theme="dark-studio"] .verdict-box,
-:root[data-theme="dark-studio"] .chart-fold,
-:root[data-theme="dark-studio"] .inspector-close,
-:root[data-theme="dark-studio"] .hyst-svg {
-  background: #171e2c;
-  color: var(--ink);
-}
-
-:root[data-theme="dark-studio"] .guide-readout {
-  background: rgba(37, 47, 67, 0.72);
-}
-
-:root[data-theme="dark-studio"] .latency-pill[data-kind="hit"],
-:root[data-theme="dark-studio"] .callout-tag[data-tone="teal"],
-:root[data-theme="dark-studio"] .heater-badge {
-  background: rgba(15, 58, 57, 0.92);
-  color: #79f2e4;
-}
-
-:root[data-theme="dark-studio"] .callout-tag[data-tone="teal"] span {
-  color: #5eead4;
-}
-
-:root[data-theme="dark-studio"] .latency-pill[data-kind="miss"],
-:root[data-theme="dark-studio"] .callout-tag[data-tone="amber"],
-:root[data-theme="dark-studio"] .heater-badge[data-on="true"] {
-  background: rgba(67, 42, 12, 0.94);
-  color: #fcd34d;
-}
-
-:root[data-theme="dark-studio"] .callout-tag[data-tone="amber"] span {
-  color: #fbbf24;
-}
-
-:root[data-theme="dark-studio"] .stage-tooltip {
-  background: rgba(11, 14, 21, 0.96);
-  border-color: var(--teal);
-  color: #eef3fa;
-}
-
-:root[data-theme="dark-studio"] .live-maths-badge,
-:root[data-theme="dark-studio"] .eq-block,
-:root[data-theme="dark-studio"] .live-table,
-:root[data-theme="dark-studio"] .breakdown-item {
-  background: #171e2c;
-  color: var(--ink);
-}
-
-:root[data-theme="dark-studio"] .eq-line,
-:root[data-theme="dark-studio"] .lm-op-sym {
-  color: var(--navy);
-}
-
-:root[data-theme="dark-studio"] .lm-frac-num {
-  border-bottom-color: rgba(238, 243, 250, 0.72);
-}
-
-:root[data-theme="dark-studio"] .brand-title,
-:root[data-theme="dark-studio"] .hud-guide h2,
-:root[data-theme="dark-studio"] .display-title,
-:root[data-theme="dark-studio"] .act-title,
-:root[data-theme="dark-studio"] .export-caption-title {
-  color: var(--navy);
-  letter-spacing: -0.01em;
-}
-
-:root[data-theme="dark-studio"] .export-caption-eq {
-  color: #5eead4;
-}
-
-:root[data-theme="dark-studio"] .live-table th {
-  background: #20293b;
-  color: var(--navy);
-}
-
-:root[data-theme="dark-studio"] .live-table tbody tr.is-active {
-  background: rgba(45, 212, 191, 0.18);
-  color: #99f6e4;
-}
-
-:root[data-theme="dark-studio"] .eq-term.is-emph {
-  background: rgba(238, 243, 250, 0.14);
-}
-
-:root[data-theme="dark-studio"] .eq-term[data-tone="teal"],
-:root[data-theme="dark-studio"] .breakdown-tag[data-tone="teal"] {
-  background: rgba(15, 58, 57, 0.92);
-  color: #79f2e4;
-}
-
-:root[data-theme="dark-studio"] .eq-term[data-tone="amber"],
-:root[data-theme="dark-studio"] .breakdown-tag[data-tone="amber"] {
-  background: rgba(67, 42, 12, 0.94);
-  color: #fcd34d;
-}
-
-:root[data-theme="dark-studio"] .eq-term[data-tone="danger"],
-:root[data-theme="dark-studio"] .breakdown-tag[data-tone="danger"] {
-  background: rgba(91, 27, 27, 0.9);
-  color: #fca5a5;
-}
-
-:root[data-theme="dark-studio"] .timeline-dock {
-  background: var(--card-solid);
-  border-color: var(--line);
-}
-
-:root[data-theme="dark-studio"] .timeline-stage-btn,
-:root[data-theme="dark-studio"] .timeline-btn {
-  background: #171e2c;
-  color: var(--ink);
-  border-color: var(--line);
-}
-
-:root[data-theme="dark-studio"] .timeline-stage-btn[aria-current="step"],
-:root[data-theme="dark-studio"] .timeline-btn[aria-pressed="true"] {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: #081416;
-}
-
-:root[data-theme="dark-studio"] .leader-shadow {
-  stroke: rgba(11, 14, 21, 0.85);
-}
-
-:root[data-theme="dark-studio"] .xy-svg,
-:root[data-theme="dark-studio"] .palette-input,
-:root[data-theme="dark-studio"] .qc-chip {
-  background: #171e2c;
-  color: var(--ink);
-}
-
-:root[data-theme="dark-studio"] .qc-carries {
-  background: rgba(67, 42, 12, 0.42);
-  border-color: rgba(245, 158, 11, 0.4);
-  color: var(--ink);
-}
-
-:root[data-theme="dark-studio"] .lang-btn[aria-pressed="true"] {
-  background: var(--teal);
-  color: #081416;
-}
-
-/* ==========================================================================
-   Bio / Science Cutaway Theme
-   ========================================================================== */
+/* --------------------------------------------------------------------------
+   2. Bio / Lab Cutaway (`bio-cutaway`)
+   -------------------------------------------------------------------------- */
 :root[data-theme="bio-cutaway"] {
   color-scheme: light;
   --bg: #eef2f0;
   --bg-deep: #e1e8e5;
+  --bg-elevated: #fbfdfd;
   --card: #f8fbfa;
   --card-solid: rgba(248, 251, 250, 0.96);
   --line: #c2d0ca;
@@ -218,27 +68,212 @@
   --teal-soft: #d5f0ef;
   --amber: #d45d48;
   --amber-soft: #fbe3de;
+  --danger: #b83b3b;
+  --danger-soft: #fae1df;
+  --accent-contrast: #ffffff;
+  --stage-backdrop-grad: radial-gradient(circle at 46% 42%, rgba(255, 255, 255, 0.78), rgba(225, 232, 229, 0.45) 68%);
+  --stage-dot-pattern: radial-gradient(#bfd0c9 1px, transparent 1px);
+  --scrollbar-thumb: rgba(20, 43, 46, 0.26);
 }
 
-:root[data-theme="bio-cutaway"] .artboard-shell {
-  background-color: var(--bg);
+/* --------------------------------------------------------------------------
+   3. Swiss Engineering Blueprint (`blueprint`)
+   -------------------------------------------------------------------------- */
+:root[data-theme="blueprint"] {
+  color-scheme: dark;
+  --bg: #0c2340;
+  --bg-deep: #07172b;
+  --bg-elevated: #102d52;
+  --card: #0e2849;
+  --card-solid: rgba(12, 35, 64, 0.94);
+  --line: rgba(147, 213, 255, 0.34);
+  --line-soft: rgba(147, 213, 255, 0.16);
+  --navy: #f0f8ff;
+  --navy-2: #bae6fd;
+  --ink: #dbeeff;
+  --muted: #8ec1e6;
+  --teal: #38e8ff;
+  --teal-soft: rgba(56, 232, 255, 0.16);
+  --amber: #ffbe3d;
+  --amber-soft: rgba(255, 190, 61, 0.18);
+  --danger: #ff7a7a;
+  --danger-soft: rgba(255, 122, 122, 0.18);
+  --accent-contrast: #07172b;
+  --cat-1: #38e8ff;
+  --cat-2: #ffbe3d;
+  --cat-3: #6ee7b7;
+  --cat-4: #f9a8d4;
+  --cat-5: #fde047;
+  --cat-6: #93c5fd;
+  --cat-7: #f8fafc;
+  --cat-8: #d8b4fe;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 4px 16px rgba(4, 12, 26, 0.42);
+  --shadow-md: 0 12px 28px rgba(4, 12, 26, 0.56);
+  --stage-backdrop-grad:
+    linear-gradient(to right, rgba(147, 213, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(147, 213, 255, 0.08) 1px, transparent 1px);
+  --stage-dot-pattern: radial-gradient(circle at 50% 44%, rgba(30, 82, 142, 0.32), rgba(7, 23, 43, 0.72) 74%);
+  --stage-dot-size: 100% 100%;
+  --scrollbar-thumb: rgba(147, 213, 255, 0.34);
+  accent-color: var(--teal);
+}
+
+:root[data-theme="blueprint"] .artboard-shell,
+:root[data-theme="blueprint"] .scrolly-shell {
+  background-size: 28px 28px, 28px 28px, 100% 100%;
   background-image:
-    radial-gradient(circle at 46% 42%, rgba(255, 255, 255, 0.78), rgba(225, 232, 229, 0.45) 68%),
-    radial-gradient(#bfd0c9 1px, transparent 1px);
+    linear-gradient(to right, rgba(147, 213, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(147, 213, 255, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 50% 44%, rgba(30, 82, 142, 0.28), rgba(7, 23, 43, 0.76) 76%);
 }
 
-:root[data-theme="bio-cutaway"] .eq-block,
-:root[data-theme="bio-cutaway"] .live-table,
-:root[data-theme="bio-cutaway"] .breakdown-item,
-:root[data-theme="bio-cutaway"] .xy-svg,
-:root[data-theme="bio-cutaway"] .hyst-svg {
-  background: #fbfdfd;
+/* --------------------------------------------------------------------------
+   4. Tufte High-Contrast Editorial Print (`monochrome-print`)
+   -------------------------------------------------------------------------- */
+:root[data-theme="monochrome-print"] {
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --bg-deep: #f2f0ea;
+  --bg-elevated: #ffffff;
+  --card: #ffffff;
+  --card-solid: rgba(255, 255, 255, 0.97);
+  --line: #23262d;
+  --line-soft: #d9d6ce;
+  --navy: #111317;
+  --navy-2: #2f343d;
+  --ink: #22262e;
+  --muted: #5c616b;
+  --teal: #c23616;
+  --teal-soft: #fceae5;
+  --amber: #8a5a10;
+  --amber-soft: #f9efd9;
+  --danger: #9b1c1c;
+  --danger-soft: #fbe5e5;
+  --accent-contrast: #ffffff;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px rgba(17, 19, 23, 0.06);
+  --stage-backdrop-grad: linear-gradient(180deg, #fcfbf8 0%, #f6f4ee 100%);
+  --stage-dot-pattern: none;
+  --scrollbar-thumb: rgba(17, 19, 23, 0.3);
 }
 
-:root[data-theme="bio-cutaway"] .eq-line,
-:root[data-theme="bio-cutaway"] .brand-title,
-:root[data-theme="bio-cutaway"] .hud-guide h2,
-:root[data-theme="bio-cutaway"] .display-title,
-:root[data-theme="bio-cutaway"] .act-title {
+:root[data-theme="monochrome-print"] .artboard-shell,
+:root[data-theme="monochrome-print"] .scrolly-shell {
+  background-image: var(--stage-backdrop-grad);
+  background-size: 100% 100%;
+}
+
+/* --------------------------------------------------------------------------
+   5. Obsidian Museum Gallery (`obsidian-gallery`)
+   -------------------------------------------------------------------------- */
+:root[data-theme="obsidian-gallery"] {
+  color-scheme: dark;
+  --bg: #141312;
+  --bg-deep: #0c0b0a;
+  --bg-elevated: #1e1c19;
+  --card: #1b1916;
+  --card-solid: rgba(27, 25, 22, 0.95);
+  --line: #3b352d;
+  --line-soft: #2a2620;
+  --navy: #f5efe4;
+  --navy-2: #d8ccb8;
+  --ink: #dcd3c4;
+  --muted: #9a8f7e;
+  --teal: #d9b061;
+  --teal-soft: rgba(217, 176, 97, 0.16);
+  --amber: #38b2ac;
+  --amber-soft: rgba(56, 178, 172, 0.16);
+  --danger: #e06c65;
+  --danger-soft: rgba(224, 108, 101, 0.16);
+  --accent-contrast: #141312;
+  --cat-1: #d9b061;
+  --cat-2: #38b2ac;
+  --cat-3: #e07a5f;
+  --cat-4: #9db4c0;
+  --cat-5: #e9c46a;
+  --cat-6: #c792ea;
+  --cat-7: #f5efe4;
+  --cat-8: #81b29a;
+  --shadow-sm: 0 4px 18px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.62);
+  --stage-backdrop-grad: radial-gradient(circle at 48% 38%, rgba(168, 134, 78, 0.14), rgba(10, 9, 8, 0.94) 70%);
+  --stage-dot-pattern: none;
+  --scrollbar-thumb: rgba(217, 176, 97, 0.3);
+  accent-color: var(--teal);
+}
+
+:root[data-theme="obsidian-gallery"] .artboard-shell,
+:root[data-theme="obsidian-gallery"] .scrolly-shell {
+  background-image: var(--stage-backdrop-grad);
+  background-size: 100% 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Shared Dark-Skin Contrast Polish (`dark-studio`, `blueprint`, `obsidian-gallery`)
+   -------------------------------------------------------------------------- */
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .brand-mark,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .ribbon-mark {
+  background: var(--teal);
+  color: var(--accent-contrast);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lesson-pill[aria-pressed="true"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .tb-btn[aria-pressed="true"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .film-step[aria-current="step"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .timeline-stage-btn[aria-current="step"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .timeline-btn[aria-pressed="true"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .view-cube-btn[aria-pressed="true"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lang-btn[aria-pressed="true"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .btn-primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--accent-contrast);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lesson-pill[aria-pressed="true"] .pill-num {
+  background: var(--accent-contrast);
+  color: var(--teal);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="teal"] span,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="teal"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="teal"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .export-caption-badge {
+  color: var(--teal);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="amber"] span,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="amber"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="amber"] {
+  color: var(--amber);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="danger"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="danger"] {
+  color: var(--danger);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .live-table tbody tr.is-active {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term.is-emph {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .leader-shadow {
+  stroke: rgba(8, 12, 20, 0.88);
+}
+
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .stage-tooltip {
+  background: var(--bg-deep);
+  border-color: var(--teal);
   color: var(--navy);
 }

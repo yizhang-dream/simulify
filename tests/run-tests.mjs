@@ -20,10 +20,16 @@ import {
 import { LinkBus } from '../kit/link-bus.js';
 import {
   LiveMathsPanel,
+  mathAccent,
+  mathAlign,
+  mathCases,
+  mathFence,
   mathFrac,
   mathGroup,
+  mathMatrix,
   mathNum,
   mathOp,
+  mathSqrt,
   mathSub,
   mathSubSup,
   mathSup,
@@ -31,6 +37,17 @@ import {
   mathVar,
   normalizeUnicodeScripts,
 } from '../kit/live-maths.js';
+import {
+  ICONS,
+  LAYOUT_ARCHETYPES,
+  mountScaleBar,
+  mountViewCube,
+  ScrollyBridge,
+  THEME_PRESETS,
+  toggleZenMode,
+  WipeCompareController,
+} from '../kit/layout-shell.js';
+import { SvgFlowStage } from '../kit/stage-2d.js';
 import {
   defaultInterpolateState,
   SimulationTape,
@@ -1802,4 +1819,317 @@ assert.ok(extH > 0.85, `Extended bellows height must grow cleanly, got ${extH}`)
 assertValidSculpt(bellows, 'bellows', 'createPleatedBellows.extended');
 
 console.log('[OK] Cross-domain non-cuboid 3D sculpting kit (kit/geo-sculpt.js: all 5 families, 10 PBR presets & zero-GC updates) verified');
-console.log('[OK] All Simulify v1 + v2.1 unit, typography, geo-sculpt, mathematical, muxer, syntax, and link-integrity tests PASSED');
+
+// ============================================================================
+// 16. Verify Simulify v2.2 Visual Presentation, Multi-Layout, Lighting, Cutaway,
+//     Field-Viz, Choreography, ClearType Callouts, Extended Maths & Charts
+// ============================================================================
+
+// 16a. Layout Archetypes, 6 Themes, ScrollyBridge, WipeCompare, ViewCube, ScaleBar
+assert.deepEqual(LAYOUT_ARCHETYPES, ['fullbleed-hud', 'split-bench', 'ab-compare', 'multi-view', 'scrolly-stage']);
+assert.equal(THEME_PRESETS.length, 6);
+assert.ok(ICONS.cutaway.includes('<svg') && ICONS.explode.includes('<svg'));
+
+withMockDocument(() => {
+  const shellEl = createMockElement('div');
+  assert.equal(toggleZenMode(shellEl), true);
+  assert.equal(shellEl.dataset.zen, 'true');
+  assert.equal(toggleZenMode(shellEl), false);
+  assert.equal(shellEl.dataset.zen, undefined);
+
+  // ScrollyBridge bidirectional deterministic mapping
+  const sClock = new SpacetimeClock({ duration: 30, manualMode: true });
+  const step0 = createMockElement('section');
+  step0.dataset.tStart = '0';
+  step0.dataset.tEnd = '10';
+  const step1 = createMockElement('section');
+  step1.dataset.tStart = '10';
+  step1.dataset.tEnd = '20';
+  const step2 = createMockElement('section');
+  step2.dataset.tStart = '20';
+  step2.dataset.tEnd = '30';
+  const progEl = createMockElement('div');
+  progEl.style.setProperty = (k, v) => { progEl.style[k] = v; };
+
+  const bridge = new ScrollyBridge({ clock: sClock, steps: [step0, step1, step2], scrollTarget: null, progressEl: progEl });
+  const midRes = bridge.applyComputed(
+    bridge.computeTimeFromRects(
+      [
+        { top: -600, bottom: -100, height: 500 },
+        { top: -100, bottom: 500, height: 600 },
+        { top: 500, bottom: 1100, height: 600 },
+      ],
+      1000 // anchorY = 420 -> inside step1 at (420 - -100)/600 = 520/600 -> t ≈ 18.67
+    )
+  );
+  assert.equal(midRes.activeIndex, 1);
+  assert.ok(midRes.t > 18 && midRes.t < 19, `Expected t ~ 18.67, got ${midRes.t}`);
+  assert.equal(step1.classList.contains('is-active'), true);
+
+  // Scroll back up -> rewinds clock deterministically
+  const backRes = bridge.applyComputed(
+    bridge.computeTimeFromRects(
+      [
+        { top: 100, bottom: 700, height: 600 },
+        { top: 700, bottom: 1300, height: 600 },
+        { top: 1300, bottom: 1900, height: 600 },
+      ],
+      1000
+    )
+  );
+  assert.equal(backRes.activeIndex, 0);
+  assert.ok(backRes.t > 5 && backRes.t < 6);
+  assert.equal(step0.classList.contains('is-active'), true);
+  assert.equal(step1.classList.contains('is-active'), false);
+  bridge.dispose();
+  sClock.destroy();
+
+  // WipeCompareController clamping + CSS property
+  const wipeHost = createMockElement('div');
+  wipeHost.style.setProperty = (k, v) => { wipeHost.style[k] = v; };
+  const wipe = new WipeCompareController(wipeHost, { initial: 0.5 });
+  assert.equal(wipe.setFraction(0.75), 0.75);
+  assert.equal(wipeHost.style['--wipe'], '75%');
+  assert.equal(wipe.setFraction(0.01), 0.08, 'Wipe must clamp to min');
+  assert.equal(wipe.setFraction(0.99), 0.92, 'Wipe must clamp to max');
+  wipe.dispose();
+});
+
+// 16b. Stage-3D aligned key/shadow light, rim light, 6 studio themes, GLASS_LAYER, cutaway cap, camera sync
+const { STUDIO_THEMES, GLASS_LAYER } = await import('../kit/stage-3d.js');
+assert.equal(GLASS_LAYER, 3);
+for (const th of THEME_PRESETS) {
+  assert.ok(STUDIO_THEMES[th], `STUDIO_THEMES must define "${th}"`);
+  assert.ok(STUDIO_THEMES[th].rimColor !== undefined, `STUDIO_THEMES.${th} must define rimColor`);
+}
+
+const stageA = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false, theme: 'blueprint' });
+const stageB = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false, theme: 'obsidian-gallery' });
+assert.equal(stageA._keyLight, stageA._shadowLight, 'Key light and shadow-casting light must be aligned (same light)');
+assert.equal(stageA._keyLight.castShadow, true, 'Key light must cast shadows');
+assert.ok(stageA._rimLight && stageA._rimLight.isDirectionalLight, 'Stage must include dedicated rim light');
+assert.equal(stageA.setGridStyle('polar'), 'polar');
+assert.equal(stageA.setGridStyle('plinth'), 'plinth');
+const cShadow = stageA.addContactShadow({ radiusX: 2, radiusZ: 2 });
+const accLight = stageA.createAccentLight({ color: 0xffaa44, intensity: 1.8 });
+const cutSolid = createLathedSolid([[0.01, 0], [1.0, 0.4], [0.8, 1.8], [0.01, 2.0]], { preset: 'brass' });
+stageA.scene.add(cutSolid);
+const cutPlane = stageA.createCutawayPlane([0, -1, 0], 1.2);
+const cutCap = stageA.createCutawayCap(cutSolid, cutPlane, { capSize: 8 });
+cutCap.setConstant(0.8);
+assert.equal(cutPlane.constant, 0.8);
+assert.equal(stageA.getGeometryAudit().cuboidMeshes, 0, 'Internal cutaway cap & contact shadow must not pollute cuboid count');
+const unlinkSync = stageA.syncCameraWith(stageB);
+stageA.setCameraImmediate({ azimuthDeg: 62, elevationDeg: 35, zoom: 1.4 });
+assert.ok(Math.abs(stageB.getCameraState().azimuthDeg - 62) < 0.2, 'syncCameraWith must mirror camera to peer stage');
+unlinkSync();
+
+withMockDocument(() => {
+  const vcHost = createMockElement('div');
+  const vc = mountViewCube(vcHost, stageA, { lang: 'zh' });
+  assert.equal(vc.root.className, 'view-cube-dock');
+  const sb = mountScaleBar(vcHost, stageA, { unitScale: 10, unitLabel: 'mm' });
+  assert.ok(sb.sync().barPx >= 36);
+  vc.unmount();
+  sb.unmount();
+});
+cutCap.dispose();
+cShadow.dispose();
+accLight.dispose();
+stageA.dispose();
+stageB.dispose();
+
+// 16c. Procedural PBR Micro-Textures, Fresnel X-Ray & GLASS_LAYER on glass vessels
+const { createProceduralSurfaceMaps, createXRayMaterial } = GeoSculpt;
+const brushedMap = createProceduralSurfaceMaps('brushed');
+assert.equal(brushedMap, createProceduralSurfaceMaps('brushed'), 'Micro-textures must be cached');
+const brassMat = createSculptMaterial('brass');
+assert.ok(brassMat.bumpMap && brassMat.roughnessMap, 'Brass PBR preset must auto-wire procedural brushed micro-maps');
+const flatBrass = createSculptMaterial('brass', { microTexture: false });
+assert.equal(flatBrass.bumpMap, null, 'microTexture: false must opt out of micro-maps');
+const xrayMat = createXRayMaterial({ color: 'teal', opacity: 0.22 });
+assert.equal(xrayMat.isMeshPhysicalMaterial, true);
+assert.equal(xrayMat.userData.recommendedLayer, GLASS_LAYER);
+const glassFlask = createGlassVessel({ style: 'flask', fillLevel: 0.6 });
+assert.equal(glassFlask.glassMesh.layers.isEnabled(GLASS_LAYER), true, 'Glass shell must default onto GLASS_LAYER');
+brassMat.dispose();
+flatBrass.dispose();
+xrayMat.dispose();
+
+// 16d. Dynamic Field, Flow, Particle & Engineering Annotation Primitives (`kit/field-viz.js`)
+const FieldViz = await import('../kit/field-viz.js');
+assert.ok(Object.keys(FieldViz.COLORMAPS).length >= 6);
+const cmCol = FieldViz.sampleColormap('viridis', 0.5);
+assert.ok(Number.isFinite(cmCol.r) && cmCol.g > 0.3);
+assert.ok(FieldViz.colormapCssGradient('thermal').startsWith('linear-gradient('));
+
+const flowCond = FieldViz.createFlowConduit([[0, 0, 0], [1, 0.5, 0], [2, 0, 0.5]]);
+flowCond.setFlowPhase(0.35);
+flowCond.setDrawProgress(0.5);
+assert.ok(flowCond.geometry.drawRange.count > 0);
+
+const vField = FieldViz.createVectorField(9, { colormap: 'coolwarm' });
+const updatedVecs = vField.updateVectors([
+  { origin: [0, 0, 0], vec: [1, 0, 0] },
+  { origin: [1, 0, 0], vec: [0, 1, 0] },
+]);
+assert.equal(updatedVecs, 2);
+
+const swarm = FieldViz.createDeterministicSwarm(16);
+const visA = swarm.update(2.5, (i, t, out) => {
+  out.x = Math.cos(t + i) * 1.5;
+  out.y = 0.5;
+  out.z = Math.sin(t + i) * 1.5;
+  out.scale = 1;
+});
+assert.equal(visA, 16);
+
+const trail = FieldViz.createMotionTrail(20, { strobeCount: 4 });
+assert.equal(trail.updateTrail([[0, 0, 0], [0.5, 0.4, 0], [1, 0.6, 0.2], [1.5, 0.2, 0.5]]), 4);
+assert.equal(trail.strobeMesh.count, 4);
+
+const dimAnn = FieldViz.createDimensionMeasure([0, 0, 0], [3, 0, 0], { label: '3.0 m' });
+dimAnn.updateMeasure([0, 0, 0], [4, 0, 0], '4.0 m');
+const fArrow = FieldViz.createForceArrow([0, 0, 0], [0, 2, 0], { label: 'F=2N' });
+assert.ok(Math.abs(fArrow.updateArrow([0, 0, 0], [3, 4, 0]) - 5) < 1e-5);
+const angArc = FieldViz.createAngleArc([0, 0, 0], [1, 0, 0], [0, 1, 0]);
+assert.ok(Math.abs(angArc.updateAngle([0, 0, 0], [1, 0, 0], [0, 1, 0]) - 90) < 1e-4);
+
+const contour = FieldViz.createContourField({ width: 4, depth: 4, segsX: 12, segsZ: 12, textureSize: 64 });
+assert.ok(contour.contourTexture && contour.topMaterial.map === contour.contourTexture);
+assert.ok(Array.isArray(contour.material) && contour.material.length === 2, 'Contour field with skirt must separate top map & matte skirt material');
+contour.updateField((u, v) => Math.cos(u * Math.PI) * 0.5 + 0.5);
+
+// 16e. Choreography v2.2: matte/wireframe focus, explodeGroup, clipSweep, draw & blueprint transitions
+const matteMat = new THREE.MeshStandardMaterial({ color: 0x149694, roughness: 0.4 });
+const matteActor = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), matteMat);
+const heroActor = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), new THREE.MeshStandardMaterial({ color: 0xc96d24 }));
+const drawTarget = { mesh: flowCond, drawn: 0, setDrawProgress(u) { this.drawn = u; } };
+const sweepPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 3);
+
+const c22 = new ActorChoreographer({ defaultFocusMode: 'matte' });
+c22
+  .register('bgPart', matteActor, { kind: '3d', initiallyVisible: true })
+  .register('heroPart', heroActor, { kind: '3d', initiallyVisible: true })
+  .register('flow', flowCond, { kind: '3d' })
+  .enter('flow', 2, 2, 'draw')
+  .focus(['heroPart'], 1, 0.5, { mode: 'matte', holdUntil: 5, releaseDur: 0.5 })
+  .explodeGroup('asm', [{ object: heroActor, restPos: [0, 0, 0], offset: [0, 2, 0] }], 3, 1)
+  .clipSweep('cut', sweepPlane, 3, 2, { from: 3, to: 0 });
+
+c22.evaluate(2.0, { apply: true });
+assert.equal(matteMat.transparent, false, 'Matte focus mode must NEVER enable alpha transparency sorting artifacts');
+assert.equal(matteMat.depthWrite, true, 'Matte focus mode must preserve depthWrite');
+assert.ok(matteMat.color.getHex() !== 0x149694, 'Matte focus must desaturate/mute dimmed actor color');
+
+c22.evaluate(4.0, { apply: true });
+assert.ok(Math.abs(heroActor.position.y - 2.0) < 1e-5, 'explodeGroup must offset part at t=4');
+assert.ok(Math.abs(sweepPlane.constant - 1.5) < 1e-4, 'clipSweep must interpolate plane.constant to midpoint');
+
+c22.evaluate(6.0, { apply: true });
+assert.equal(matteMat.color.getHex(), 0x149694, 'Releasing matte focus must losslessly restore original color');
+
+// 16f. ClearType-safe CalloutLayer (zero steady-state translate3d) + editorial style + quietMode
+withMockDocument(() => {
+  const mockStage = { size: { width: 1280, height: 800 }, projectToScreen: ([x, y]) => ({ x, y, visible: true }) };
+  const svgEl = createMockElement('svg', 'http://www.w3.org/2000/svg');
+  const tagsEl = createMockElement('div');
+  const clBus = new LinkBus();
+  const cl = new CalloutLayer(mockStage, svgEl, tagsEl, { style: 'editorial', quietMode: true, linkBus: clBus });
+  cl.setItems([
+    { id: 'pin', label: 'Pinned', pinned: true, getWorldPos: () => [200, 200, 0] },
+    { id: 'quiet', label: 'HoverMe', linkId: 'q1', getWorldPos: () => [420, 260, 0] },
+  ]);
+  assert.equal(cl.getExportSnapshot().items.length, 1, 'quietMode must hide unpinned non-hovered callouts');
+  const pinTag = cl.items.get('pin').tag;
+  assert.equal(pinTag.style.transform, '', 'CalloutLayer must NOT use steady-state translate3d (ClearType)');
+  assert.ok(pinTag.style.left.endsWith('px') && pinTag.style.top.endsWith('px'));
+  assert.equal(pinTag.dataset.style, 'editorial');
+  clBus.hover('q1', 'test');
+  assert.equal(cl.getExportSnapshot().items.length, 2, 'Hovering LinkBus id must reveal quiet callout');
+});
+
+// 16g. Extended LiveMathsPanel AST: sqrt, matrix, cases, accent, fence, align
+withMockDocument(() => {
+  const host = createMockElement('div');
+  const lm = new LiveMathsPanel(host, { title: 'Extended Maths' });
+  lm.update({
+    equations: [
+      {
+        label: 'Vector & Matrix',
+        tokens: [
+          mathAccent(mathVar('F'), 'vec'),
+          '=',
+          mathMatrix([[mathVar('a'), mathVar('b')], [mathVar('c'), mathVar('d')]], { fence: 'brackets' }),
+          mathFence(mathFrac(mathSqrt(mathVar('x')), mathNum(2))),
+        ],
+      },
+      {
+        label: 'Piecewise & Align',
+        tokens: [
+          mathCases([[mathNum(1), 'x ≥ 0'], [mathNum(0), 'x < 0']]),
+          mathAlign([[mathVar('E'), '=', mathGroup([mathVar('m'), mathSup(mathVar('c'), 2)])]]),
+        ],
+      },
+    ],
+  });
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-sqrt')).length === 1);
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-matrix')).length === 1);
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-cases')).length === 1);
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-accent')).length === 1);
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-fence')).length === 1);
+  assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-align')).length === 1);
+});
+
+// 16h. Extended ChartCard modes (distribution, heatmap, timing, spark-kpi, generic hysteresis) + 4D SvgFlowStage
+withMockDocument(() => {
+  const makeCardHost = () => {
+    const titleEl = createMockElement('span');
+    const badgeEl = createMockElement('span');
+    const foldBtn = createMockElement('button');
+    const bodyEl = createMockElement('div');
+    const root = createMockElement('section');
+    root.querySelector = (sel) => ({ '.chart-title': titleEl, '.chart-badge': badgeEl, '.chart-fold': foldBtn, '.chart-body': bodyEl }[sel] || null);
+    return { root, bodyEl };
+  };
+  const { root, bodyEl } = makeCardHost();
+  const chart = new ChartCard(root, { title: 'Multi-Mode' });
+  chart.updateHysteresis({ onLabel: 'HIGH', offLabel: 'LOW', unit: 'V', ariaLabel: 'Schmitt Trigger' });
+  assert.equal(bodyEl.children[0].getAttribute('aria-label'), 'Schmitt Trigger');
+  chart.updateDistribution({
+    xMin: -3, xMax: 3,
+    bins: [0.1, 0.3, 0.4, 0.2],
+    curve: [{ x: -3, y: 0.01 }, { x: 0, y: 0.4 }, { x: 3, y: 0.01 }],
+    shadeRange: [-1, 1],
+    markers: [{ x: 0, label: 'μ=0' }],
+  });
+  assert.equal(bodyEl.children[0].getAttribute('class'), 'dist-svg');
+  chart.updateHeatmap({ matrix: [[0.1, 0.9], [0.6, 0.2]], rowLabels: ['S0', 'S1'], colLabels: ['A', 'B'] });
+  assert.equal(bodyEl.children[0].getAttribute('class'), 'heatmap-svg');
+  chart.updateTiming({
+    channels: [{ name: 'CLK', segments: [{ t0: 0, t1: 2, level: 0 }, { t0: 2, t1: 4, level: 1 }] }],
+    tMin: 0, tMax: 4, cursorT: 2.5,
+  });
+  assert.equal(bodyEl.children[0].getAttribute('class'), 'timing-svg');
+  chart.updateSparkKpi({ value: '98.4', unit: '%', delta: '+2.1%', points: [82, 88, 95, 98.4] });
+  assert.equal(chart.mode, 'spark-kpi');
+
+  // Deterministic 4D Track B SvgFlowStage
+  const s2dHost = createMockElement('div');
+  const s2d = new SvgFlowStage(s2dHost);
+  s2d.setTopology({
+    nodes: [{ id: 'A', x: 100, y: 200, label: 'Client' }, { id: 'B', x: 500, y: 200, label: 'Server' }],
+    edges: [{ id: 'e1', from: 'A', to: 'B', arc: 30 }],
+  });
+  s2d.setPacketSchedule([{ id: 'syn', from: 'A', to: 'B', edgeId: 'e1', start: 1, end: 3, label: 'SYN', tone: 'teal' }]);
+  assert.equal(s2d.evaluate(0.5).length, 0);
+  const midPkt = s2d.evaluate(2.0);
+  assert.equal(midPkt.length, 1);
+  assert.ok(Math.abs(midPkt[0].x - 300) < 2, 'Packet midpoint must travel centered between trimmed node borders');
+  const e1 = s2d.edges.get('e1');
+  assert.ok(e1.pStart.x > 160 && e1.pEnd.x < 440, 'Stage2D edges must trim cleanly to node box boundaries');
+  assert.equal(s2d.evaluate(0.5).length, 0, 'Backward seek must cleanly hide future packet');
+});
+
+console.log('[OK] Simulify v2.2 upgrades verified (6 layouts, 6 themes, aligned lights/rim/cutaway-cap, micro-PBR/X-Ray, field-viz, matte focus, ClearType callouts, extended maths/charts & 4D stage-2d)');
+console.log('[OK] All Simulify v1 + v2.2 unit, typography, geo-sculpt, field-viz, layout, mathematical, muxer, syntax, and link-integrity tests PASSED');

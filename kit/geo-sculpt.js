@@ -14,6 +14,7 @@
  */
 
 import * as THREE from 'three';
+import { GLASS_LAYER } from './outline-pass.js';
 
 export const SCULPT_GEO_KINDS = Object.freeze([
   'lathe',
@@ -244,22 +245,96 @@ function resolveMaterial(opts, defaultPreset, extraOverrides = null) {
 }
 
 // ============================================================================
-// 5. Lit PBR Material Factory (`createSculptMaterial`)
+// 5. Procedural Micro-Textures, Lit PBR Material Factory & Fresnel X-Ray
 // ============================================================================
+
+const DARK_THEMES = new Set(['dark-studio', 'blueprint', 'obsidian-gallery']);
+const PRESET_MICRO_TEX = Object.freeze({
+  brass: { kind: 'brushed', bumpScale: 0.012, repeat: [2, 2] },
+  steel: { kind: 'brushed', bumpScale: 0.01, repeat: [2, 2] },
+  copper: { kind: 'brushed', bumpScale: 0.012, repeat: [2, 2] },
+  travertine: { kind: 'grain', bumpScale: 0.022, repeat: [3, 3] },
+  obsidian: { kind: 'grain', bumpScale: 0.016, repeat: [3, 3] },
+  anodized: { kind: 'anodized', bumpScale: 0.008, repeat: [4, 4] },
+  ceramic: { kind: 'anodized', bumpScale: 0.004, repeat: [3, 3] },
+});
+
+const _microTexCache = new Map();
+
+/**
+ * Generate a cached, deterministic, seamless procedural DataTexture for PBR micro-surface detail
+ * (`roughnessMap` / `bumpMap`). Zero DOM/CDN dependencies — works identically in WebGPU, WebGL2, and Node.
+ *
+ * @param {'brushed'|'grain'|'anodized'|'hatch45'|'grid-pcb'} kind
+ * @param {{ size?: number, seed?: number }} [opts]
+ * @returns {THREE.DataTexture}
+ */
+export function createProceduralSurfaceMaps(kind = 'grain', { size = 128, seed = 73 } = {}) {
+  const key = `${kind}:${size}:${seed}`;
+  if (_microTexCache.has(key)) {
+    return _microTexCache.get(key);
+  }
+  const n = Math.max(32, Math.min(256, Math.round(size)));
+  const data = new Uint8Array(n * n * 4);
+
+  for (let y = 0; y < n; y += 1) {
+    const v = y / n;
+    for (let x = 0; x < n; x += 1) {
+      const u = x / n;
+      let val = 0.5;
+      if (kind === 'brushed') {
+        const streak = valueNoise2(u * 3.0, v * 58.0, seed) * 0.65 + valueNoise2(u * 8.0, v * 116.0, seed + 17) * 0.35;
+        val = 0.38 + streak * 0.44;
+      } else if (kind === 'anodized') {
+        const fine = hash2(x, y, seed + 31);
+        const macro = fbm2(u * 12, v * 12, seed + 5, 2);
+        val = 0.42 + fine * 0.24 + macro * 0.22;
+      } else if (kind === 'hatch45') {
+        const diag = (x + y) % 12;
+        val = diag < 2 ? 0.22 : 0.88;
+      } else if (kind === 'grid-pcb') {
+        const gx = x % 16;
+        const gy = y % 16;
+        val = gx === 0 || gy === 0 ? 0.28 : 0.78 + hash2(x, y, seed) * 0.08;
+      } else {
+        // 'grain': porous stone / travertine / plaster micro-detail
+        const coarse = fbm2(u * 14, v * 14, seed, 3);
+        const pit = hash2(x, y, seed + 19);
+        val = 0.34 + coarse * 0.46 + (pit > 0.92 ? -0.18 : pit * 0.14);
+      }
+      const byte = Math.max(0, Math.min(255, Math.round(val * 255)));
+      const idx = (y * n + x) * 4;
+      data[idx] = byte;
+      data[idx + 1] = byte;
+      data[idx + 2] = byte;
+      data[idx + 3] = 255;
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  _microTexCache.set(key, tex);
+  return tex;
+}
 
 /**
  * Create a physically lit PBR material (`MeshStandardMaterial` or `MeshPhysicalMaterial`)
- * tuned for Simulify paper-ink, dark-studio, and bio-cutaway lighting rigs across
- * both `WebGPURenderer` and `WebGLRenderer`.
+ * tuned across all 6 Simulify studio themes with automatic procedural micro-surface textures
+ * (`brushed`, `grain`, `anodized`) for tactile realism instead of flat plastic surfaces.
  *
  * @param {'ceramic'|'travertine'|'brass'|'anodized'|'copper'|'obsidian'|'steel'|'glass'|'frostedGlass'|'ember'} [preset='ceramic']
  * @param {Record<string, any>} [overrides]
  */
 export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
   const spec = SCULPT_MATERIAL_PRESETS[preset] || SCULPT_MATERIAL_PRESETS.ceramic;
-  const { theme: explicitTheme, ...restOverrides } = overrides || {};
+  const { theme: explicitTheme, microTexture = true, ...restOverrides } = overrides || {};
   const theme = detectActiveTheme(explicitTheme);
-  const isDark = theme === 'dark-studio';
+  const isDark = DARK_THEMES.has(theme);
 
   const baseColor = isDark && spec.darkColor !== undefined ? spec.darkColor : spec.color;
   const params = {
@@ -268,6 +343,14 @@ export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
     metalness: spec.metalness,
     envMapIntensity: isDark ? spec.envMapIntensity * 1.18 : spec.envMapIntensity,
   };
+
+  if (microTexture && preset in PRESET_MICRO_TEX && !restOverrides.bumpMap && !restOverrides.roughnessMap) {
+    const mt = PRESET_MICRO_TEX[preset];
+    const map = createProceduralSurfaceMaps(mt.kind);
+    params.bumpMap = map;
+    params.bumpScale = mt.bumpScale;
+    params.roughnessMap = map;
+  }
 
   if (spec.emissive !== undefined) {
     params.emissive = spec.emissive;
@@ -295,13 +378,52 @@ export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
     params.clearcoat !== undefined ||
     params.transmission !== undefined ||
     params.ior !== undefined ||
-    params.iridescence !== undefined;
+    params.iridescence !== undefined ||
+    params.sheen !== undefined;
 
   const mat = usePhysical
     ? new THREE.MeshPhysicalMaterial(params)
     : new THREE.MeshStandardMaterial(params);
 
   mat.userData = { ...(mat.userData || {}), simulifyPreset: preset, simulifyTheme: theme };
+  return mat;
+}
+
+/**
+ * Create a clean Fresnel X-Ray shell material (`MeshPhysicalMaterial`) for transparent
+ * cutaway housings. Renders crisp rim sheen with zero opaque depth occlusion when placed
+ * on `GLASS_LAYER = 3`, keeping internal solid outlines razor sharp.
+ *
+ * @param {{ color?: string|number, rimColor?: string|number, opacity?: number, emissiveIntensity?: number, doubleSide?: boolean }} [opts]
+ */
+export function createXRayMaterial({
+  color = 'teal',
+  rimColor = 0x7ef2ee,
+  opacity = 0.22,
+  emissiveIntensity = 0.28,
+  doubleSide = false,
+} = {}) {
+  const baseHex = resolveColorInput(color, 0x149694);
+  const rimHex = resolveColorInput(rimColor, baseHex);
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: baseHex,
+    emissive: rimHex,
+    emissiveIntensity,
+    roughness: 0.14,
+    metalness: 0.06,
+    transparent: true,
+    opacity: Math.max(0.05, Math.min(0.85, Number(opacity) || 0.22)),
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.08,
+    sheen: 1.0,
+    sheenRoughness: 0.22,
+    sheenColor: new THREE.Color(rimHex),
+    ior: 1.52,
+    reflectivity: 0.95,
+    depthWrite: false,
+    side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+  });
+  mat.userData = { simulifyPreset: 'xray', recommendedLayer: GLASS_LAYER };
   return mat;
 }
 
@@ -463,7 +585,7 @@ export function createGlassVessel(opts = {}) {
     theme: opts.theme,
     castShadow: opts.castShadow ?? false,
     receiveShadow: opts.receiveShadow ?? true,
-    layer: opts.layer,
+    layer: opts.glassLayer ?? opts.layer ?? GLASS_LAYER,
     name: opts.name ? `${opts.name}-glass` : 'glass-vessel',
   });
 
@@ -1598,6 +1720,7 @@ export function createHeightfieldSurface(opts = {}) {
       indices.push(a, c, b, b, c, dIdx);
     }
   }
+  const topIndexCount = indices.length;
 
   const skirtCol = new THREE.Color(resolveColorInput(skirtColor, 0xc8baa4));
   const setSkirtVert = (vi, x, y, z, nx, ny, nz, u, v) => {
@@ -1807,8 +1930,18 @@ export function createHeightfieldSurface(opts = {}) {
     side: skirt ? THREE.FrontSide : THREE.DoubleSide,
   });
 
-  const mesh = new THREE.Mesh(geo, mat);
+  let finalMat = mat;
+  if (skirt && opts.skirtMaterial && indices.length > topIndexCount) {
+    geo.clearGroups();
+    geo.addGroup(0, topIndexCount, 0);
+    geo.addGroup(topIndexCount, indices.length - topIndexCount, 1);
+    finalMat = [mat, opts.skirtMaterial];
+  }
+
+  const mesh = new THREE.Mesh(geo, finalMat);
   tagSculptMesh(mesh, 'heightfield', opts);
+  mesh.topMaterial = mat;
+  mesh.skirtMaterial = skirt && opts.skirtMaterial ? opts.skirtMaterial : null;
 
   mesh.updateHeights = updateHeights;
   mesh.sampleHeight = (x, z) => {

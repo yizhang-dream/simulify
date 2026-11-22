@@ -92,16 +92,51 @@ export function resolveCalloutRects(rects, bounds, blockers = []) {
  * and cache layout snapshots (`getExportSnapshot()`) for Canvas2D video export fallback.
  */
 export class CalloutLayer {
-  constructor(stage, svgEl, tagsEl) {
+  constructor(stage, svgEl, tagsEl, { style = 'pill', quietMode = false, linkBus = null } = {}) {
     this.stage = stage;
     this.svg = svgEl;
     this.tagsEl = tagsEl;
+    this.defaultStyle = style === 'editorial' ? 'editorial' : 'pill';
+    this.quietMode = Boolean(quietMode);
+    this.linkBus = linkBus || null;
+    this._linkUnsubs = [];
     this.items = new Map();
     this.enabled = true;
     this.currentStep = Number.POSITIVE_INFINITY;
     this._blockersFn = null;
     this._choreographer = null;
     this._lastLayout = { width: 0, height: 0, items: [] };
+    if (this.linkBus) this.setLinkBus(this.linkBus);
+  }
+
+  /** Switch default callout visual style: `'pill' | 'editorial'`. */
+  setStyle(style = 'pill') {
+    this.defaultStyle = style === 'editorial' ? 'editorial' : 'pill';
+    for (const item of this.items.values()) {
+      const s = item.style || this.defaultStyle;
+      if (s === 'editorial') item.tag.dataset.style = 'editorial';
+      else delete item.tag.dataset.style;
+    }
+    this.update();
+  }
+
+  /** Toggle quiet mode (when enabled, shows only `pinned: true` and LinkBus hovered/selected callouts). */
+  setQuietMode(enabled) {
+    this.quietMode = Boolean(enabled);
+    this.update();
+  }
+
+  /** Bind a `LinkBus` for clickable/hoverable callouts and quiet-mode filtering. */
+  setLinkBus(linkBus) {
+    for (const u of this._linkUnsubs) u?.();
+    this._linkUnsubs = [];
+    this.linkBus = linkBus || null;
+    if (this.linkBus) {
+      const refresh = () => this.update();
+      if (typeof this.linkBus.onHover === 'function') this._linkUnsubs.push(this.linkBus.onHover(refresh));
+      if (typeof this.linkBus.onSelect === 'function') this._linkUnsubs.push(this.linkBus.onSelect(refresh));
+    }
+    this.update();
   }
 
   /** Optional binding to an `ActorChoreographer` for pure-function-of-`t` callout opacity. */
@@ -160,6 +195,17 @@ export class CalloutLayer {
       const tag = document.createElement('div');
       tag.className = 'callout-tag';
       if (def.tone) tag.dataset.tone = def.tone;
+      const effStyle = def.style || this.defaultStyle;
+      if (effStyle === 'editorial') tag.dataset.style = 'editorial';
+      if (def.linkId) {
+        tag.dataset.linkId = String(def.linkId);
+        tag.dataset.interactive = 'true';
+        tag.addEventListener('pointerenter', () => this.linkBus?.hover(String(def.linkId), 'callout'));
+        tag.addEventListener('pointerleave', () => {
+          if (this.linkBus?.hoveredId === String(def.linkId)) this.linkBus.clearHover('callout');
+        });
+        tag.addEventListener('click', () => this.linkBus?.select(String(def.linkId), 'callout'));
+      }
 
       const title = document.createElement('strong');
       title.textContent = def.label;
@@ -271,9 +317,19 @@ export class CalloutLayer {
     for (const [id, item] of this.items.entries()) {
       const stepOk = item.afterStep === undefined || this.currentStep >= item.afterStep;
       const userVis = typeof item.visible === 'function' ? item.visible() : item.visible !== false;
+      const linkedKey = item.linkId ? String(item.linkId) : String(id);
+      const isHot = Boolean(this.linkBus && this.linkBus.hoveredId === linkedKey);
+      const isSel = Boolean(this.linkBus && this.linkBus.selectedId === linkedKey);
+      if (item.tag.dataset) {
+        if (isHot) item.tag.dataset.linkedHot = 'true';
+        else delete item.tag.dataset.linkedHot;
+        if (isSel) item.tag.dataset.linkedSelected = 'true';
+        else delete item.tag.dataset.linkedSelected;
+      }
+      const quietOk = !this.quietMode || Boolean(item.pinned) || isHot || isSel;
       const effOpacity = this.#resolveOpacity(id, item);
 
-      if (!stepOk || !userVis || effOpacity <= 0.01) {
+      if (!stepOk || !userVis || !quietOk || effOpacity <= 0.01) {
         item.shadow.style.display = 'none';
         item.polyline.style.display = 'none';
         item.dot.style.display = 'none';
@@ -331,9 +387,13 @@ export class CalloutLayer {
     resolved.forEach((rect, idx) => {
       const entry = visibleEntries[idx];
       const { id, item, pt, width: tagW, height: tagH, opacity } = entry;
-      item.tag.style.transform = `translate3d(${Math.round(rect.left)}px, ${Math.round(rect.top)}px, 0)`;
+      // Integer left/top with cleared transform keeps Windows ClearType subpixel AA razor sharp
+      item.tag.style.left = `${Math.round(rect.left)}px`;
+      item.tag.style.top = `${Math.round(rect.top)}px`;
+      item.tag.style.transform = '';
 
-      const elbowY = rect.top + tagH / 2;
+      const isEditorial = (item.style || this.defaultStyle) === 'editorial';
+      const elbowY = isEditorial ? rect.top + tagH - 1 : rect.top + tagH / 2;
       const attachX = pt.x <= rect.left ? rect.left : rect.left + tagW;
       const kneeX = Math.round(pt.x + (attachX - pt.x) * 0.45);
       const pts = `${pt.x.toFixed(1)},${pt.y.toFixed(1)} ${kneeX.toFixed(1)},${elbowY.toFixed(1)} ${attachX.toFixed(1)},${elbowY.toFixed(1)}`;

@@ -101,6 +101,15 @@ function styleTransform(style, u, restPos, restScale, opts = {}) {
       scale[2] *= sc;
       break;
     }
+    case 'explode': {
+      const delta = readVec3(opts.offset ?? opts.offsetVec ?? opts.from, [0, opts.distance ?? 1.2, 0]);
+      pos[0] = restPos[0] + delta[0] * inv;
+      pos[1] = restPos[1] + delta[1] * inv;
+      pos[2] = restPos[2] + delta[2] * inv;
+      break;
+    }
+    case 'draw':
+    case 'blueprint':
     case 'fade':
     default:
       break;
@@ -113,11 +122,14 @@ function styleTransform(style, u, restPos, restScale, opts = {}) {
  * Pure-function-of-`t` choreography engine for progressive temporal storytelling.
  */
 export class ActorChoreographer {
-  constructor({ initialCamera = null } = {}) {
+  constructor({ initialCamera = null, defaultFocusMode = null } = {}) {
     this.actors = new Map();
     this._focusEvents = [];
     this._cameraBeats = [];
     this._calloutEvents = new Map();
+    this._explodeBeats = [];
+    this._clipBeats = [];
+    this._defaultFocusMode = defaultFocusMode;
     this._initialCamera = initialCamera ? this.#normalizePose(initialCamera) : null;
     this._matOriginals = new WeakMap();
     this._lastT = 0;
@@ -264,20 +276,36 @@ export class ActorChoreographer {
   }
 
   /**
-   * Highlight `activeIds` and smoothly dim all other actors to `dimOpacity` starting at `t0`.
-   * Pass `null` or `'all'` as `activeIds` to restore full brightness to every actor.
+   * Highlight `activeIds` and smoothly de-emphasize all other actors starting at `t0`.
+   * Supports three 3D de-emphasis modes:
+   * - `'matte'` (recommended default when `dimOpacity` is omitted): desaturates & dims colors
+   *   in-place while keeping `transparent: false, depthWrite: true` (zero 3D alpha sorting artifacts!)
+   * - `'wireframe'`: turns non-focused 3D actors into clean technical wireframes
+   * - `'opacity'`: classic alpha fade (`dimOpacity`, default when caller explicitly specifies `dimOpacity` without `mode`)
    */
-  focus(activeIds, t0, dur = 0.45, { dimOpacity = 0.2, holdUntil = Infinity, releaseDur = 0.4, ease = easeInOutCubic } = {}) {
+  focus(
+    activeIds,
+    t0,
+    dur = 0.45,
+    { mode, dimOpacity, holdUntil = Infinity, releaseDur = 0.4, ease = easeInOutCubic, muteColor = null } = {}
+  ) {
     const isAll = activeIds === null || activeIds === 'all' || (Array.isArray(activeIds) && activeIds.length === 0);
     const set = isAll ? null : new Set((Array.isArray(activeIds) ? activeIds : [activeIds]).map(String));
     const start = Math.max(0, Number(t0) || 0);
     const length = Math.max(0, Number(dur) || 0);
+    const resolvedMode =
+      mode ||
+      this._defaultFocusMode ||
+      (dimOpacity !== undefined ? 'opacity' : 'matte');
+    const resolvedDim = Math.max(0.02, Math.min(1, Number(dimOpacity ?? 0.25)));
 
     this._focusEvents.push({
       activeSet: set,
       t0: start,
       dur: length,
-      dimOpacity: Math.max(0.02, Math.min(1, Number(dimOpacity) ?? 0.2)),
+      mode: resolvedMode,
+      dimOpacity: resolvedDim,
+      muteColor,
       ease: typeof ease === 'function' ? ease : easeInOutCubic,
     });
 
@@ -286,12 +314,68 @@ export class ActorChoreographer {
         activeSet: null,
         t0: holdUntil,
         dur: Math.max(0, Number(releaseDur) || 0),
+        mode: resolvedMode,
         dimOpacity: 1,
+        muteColor,
         ease: typeof ease === 'function' ? ease : easeInOutCubic,
       });
     }
 
     this._focusEvents.sort((a, b) => a.t0 - b.t0);
+    return this;
+  }
+
+  /**
+   * Schedule a pure-function mechanical Exploded-View expansion over `[t0, t0 + dur]`
+   * (optionally re-assembling at `holdUntil`).
+   * Each entry in `parts` is `{ object, offset: [dx, dy, dz], restPos?: [x, y, z] }`.
+   */
+  explodeGroup(
+    id,
+    parts,
+    t0,
+    dur = 1.2,
+    { ease = easeInOutCubic, from = 0, to = 1, holdUntil = Infinity, collapseDur = 1.0 } = {}
+  ) {
+    const normalized = (Array.isArray(parts) ? parts : []).map((p) => ({
+      object: p.object,
+      restPos: p.restPos ? readVec3(p.restPos) : readVec3(p.object?.position),
+      offset: readVec3(p.offset, [0, 1, 0]),
+    }));
+    const start = Math.max(0, Number(t0) || 0);
+    const length = Math.max(0, Number(dur) || 0);
+    this._explodeBeats.push({
+      id: String(id),
+      parts: normalized,
+      t0: start,
+      dur: length,
+      from: Number(from) || 0,
+      to: Number(to ?? 1),
+      holdUntil: Number.isFinite(holdUntil) ? holdUntil : Infinity,
+      collapseDur: Math.max(0, Number(collapseDur) || 0),
+      ease: typeof ease === 'function' ? ease : easeInOutCubic,
+    });
+    return this;
+  }
+
+  /**
+   * Schedule a pure-function Cutaway Clip-Plane sweep (`plane.constant` moving from `from` to `to`)
+   * over `[t0, t0 + dur]`. Accepts either a `THREE.Plane` or a `stage.createCutawayCap()` handle.
+   */
+  clipSweep(id, planeOrCap, t0, dur = 1.4, { from = 4, to = 0, ease = easeInOutCubic } = {}) {
+    const plane = planeOrCap?.plane || planeOrCap;
+    const cap = planeOrCap?.plane ? planeOrCap : null;
+    this._clipBeats.push({
+      id: String(id),
+      plane,
+      cap,
+      t0: Math.max(0, Number(t0) || 0),
+      dur: Math.max(0, Number(dur) || 0),
+      from: Number(from) || 0,
+      to: Number(to) || 0,
+      ease: typeof ease === 'function' ? ease : easeInOutCubic,
+    });
+    this._clipBeats.sort((a, b) => a.t0 - b.t0);
     return this;
   }
 
@@ -421,15 +505,20 @@ export class ActorChoreographer {
     for (const actor of this.actors.values()) {
       const base = this.#computeActorState(actor, time);
       const focusOpacity = this.#focusMultiplierFor(actor.id, focusInfo);
-      const finalOpacity = clamp01(base.opacity * focusOpacity);
-      const visible = base.visible && finalOpacity > 0.005;
+      const focusMode = focusInfo.mode || 'opacity';
+      const effectiveOpacity =
+        actor.kind === '3d' && focusMode !== 'opacity' ? base.opacity : clamp01(base.opacity * focusOpacity);
+      const visible = base.visible && effectiveOpacity > 0.005;
       const state = {
         id: actor.id,
         kind: actor.kind,
         visible,
-        opacity: finalOpacity,
+        opacity: effectiveOpacity,
         lifecycleOpacity: base.opacity,
         focusOpacity,
+        focusMode,
+        muteColor: focusInfo.muteColor ?? null,
+        style: base.style,
         progress: base.progress,
         pos: base.pos,
         scale: base.scale,
@@ -446,6 +535,11 @@ export class ActorChoreographer {
       if (apply) {
         this.#applyActorState(actor, state, time);
       }
+    }
+
+    if (apply) {
+      this.#applyExplodeBeats(time);
+      this.#applyClipBeats(time);
     }
 
     if (apply && stage && cameraPose) {
@@ -489,17 +583,19 @@ export class ActorChoreographer {
     let progress = visible ? 1 : 0;
     let pos = [...actor.restPos];
     let scale = [...actor.restScale];
+    let style = null;
 
     for (const ev of actor.events) {
       if (t < ev.t0) break;
       const raw = ev.dur > 0 ? clamp01((t - ev.t0) / ev.dur) : 1;
       const eased = ev.ease(raw);
+      style = ev.style;
 
       if (ev.type === 'enter') {
         const tf = styleTransform(ev.style, eased, actor.restPos, actor.restScale, ev.opts);
         pos = tf.pos;
         scale = tf.scale;
-        opacity = clamp01(raw >= 1 ? 1 : easeOutCubic(raw));
+        opacity = ev.style === 'draw' ? 1 : clamp01(raw >= 1 ? 1 : easeOutCubic(raw));
         progress = raw;
         visible = opacity > 0.005 || raw > 0;
       } else {
@@ -509,28 +605,32 @@ export class ActorChoreographer {
         const tf = styleTransform(ev.style, invEased, actor.restPos, actor.restScale, ev.opts);
         pos = tf.pos;
         scale = tf.scale;
-        opacity = clamp01(invRaw);
+        opacity = ev.style === 'draw' ? (invRaw > 0.005 ? 1 : 0) : clamp01(invRaw);
         progress = invRaw;
-        visible = raw < 1 && opacity > 0.005;
+        visible = raw < 1 && (opacity > 0.005 || invRaw > 0.005);
       }
     }
 
-    return { visible, opacity, progress, pos, scale };
+    return { visible, opacity, progress, pos, scale, style };
   }
 
   #computeFocusAt(t) {
     if (this._focusEvents.length === 0) {
-      return { activeIds: null, prevSet: null, prevDim: 1, nextSet: null, nextDim: 1, blend: 1 };
+      return { activeIds: null, prevSet: null, prevDim: 1, nextSet: null, nextDim: 1, blend: 1, mode: 'opacity', muteColor: null };
     }
     let prevSet = null;
     let prevDim = 1;
     let nextSet = null;
     let nextDim = 1;
     let blend = 1;
+    let mode = this._focusEvents[0].mode || 'opacity';
+    let muteColor = this._focusEvents[0].muteColor ?? null;
 
     for (const ev of this._focusEvents) {
       if (t < ev.t0) break;
       const raw = ev.dur > 0 ? clamp01((t - ev.t0) / ev.dur) : 1;
+      mode = ev.mode || mode;
+      muteColor = ev.muteColor ?? muteColor;
       if (raw >= 1) {
         prevSet = ev.activeSet;
         prevDim = ev.activeSet ? ev.dimOpacity : 1;
@@ -552,6 +652,8 @@ export class ActorChoreographer {
       nextSet,
       nextDim,
       blend,
+      mode,
+      muteColor,
     };
   }
 
@@ -559,6 +661,45 @@ export class ActorChoreographer {
     const startMult = focusInfo.prevSet === null || focusInfo.prevSet.has(actorId) ? 1 : focusInfo.prevDim;
     const endMult = focusInfo.nextSet === null || focusInfo.nextSet.has(actorId) ? 1 : focusInfo.nextDim;
     return lerp(startMult, endMult, focusInfo.blend);
+  }
+
+  #applyExplodeBeats(t) {
+    for (const beat of this._explodeBeats) {
+      let factor = beat.from;
+      if (t >= beat.t0) {
+        const u = beat.dur > 0 ? beat.ease(clamp01((t - beat.t0) / beat.dur)) : 1;
+        factor = lerp(beat.from, beat.to, u);
+        if (t >= beat.holdUntil) {
+          const back = beat.collapseDur > 0 ? beat.ease(clamp01((t - beat.holdUntil) / beat.collapseDur)) : 1;
+          factor = lerp(beat.to, beat.from, back);
+        }
+      }
+      for (const p of beat.parts) {
+        if (!p.object?.position?.set) continue;
+        p.object.position.set(
+          p.restPos[0] + p.offset[0] * factor,
+          p.restPos[1] + p.offset[1] * factor,
+          p.restPos[2] + p.offset[2] * factor
+        );
+      }
+    }
+  }
+
+  #applyClipBeats(t) {
+    const activeByPlane = new Map();
+    for (const beat of this._clipBeats) {
+      if (!beat.plane) continue;
+      if (!activeByPlane.has(beat.plane)) {
+        activeByPlane.set(beat.plane, { constant: beat.from, cap: beat.cap });
+      }
+      if (t < beat.t0) continue;
+      const u = beat.dur > 0 ? beat.ease(clamp01((t - beat.t0) / beat.dur)) : 1;
+      activeByPlane.set(beat.plane, { constant: lerp(beat.from, beat.to, u), cap: beat.cap });
+    }
+    for (const [plane, info] of activeByPlane.entries()) {
+      plane.constant = info.constant;
+      info.cap?.sync?.();
+    }
   }
 
   #applyActorState(actor, state, t) {
@@ -570,8 +711,24 @@ export class ActorChoreographer {
       if (actor.obj3d.scale?.set) {
         actor.obj3d.scale.set(state.scale[0], state.scale[1], state.scale[2]);
       }
+      if (state.style === 'draw') {
+        if (typeof actor.target?.setDrawProgress === 'function') {
+          actor.target.setDrawProgress(state.progress);
+        } else if (actor.obj3d.geometry?.setDrawRange) {
+          const total = actor.obj3d.geometry.index
+            ? actor.obj3d.geometry.index.count
+            : (actor.obj3d.geometry.attributes?.position?.count || 0);
+          actor.obj3d.geometry.setDrawRange(0, Math.round(total * clamp01(state.progress)));
+        }
+      }
       if (actor.kind !== 'surface') {
-        this.#apply3dOpacity(actor.obj3d, state.opacity);
+        const forceBlueprintWire = state.style === 'blueprint' && state.progress < 0.72;
+        this.#apply3dAppearance(actor.obj3d, state.opacity, {
+          focusMode: state.focusMode,
+          focusWeight: state.focusOpacity,
+          muteColor: state.muteColor,
+          blueprintWire: forceBlueprintWire,
+        });
       }
     }
 
@@ -614,17 +771,25 @@ export class ActorChoreographer {
     }
   }
 
-  #apply3dOpacity(obj3d, opacity) {
+  #apply3dAppearance(obj3d, opacity, { focusMode = 'opacity', focusWeight = 1, muteColor = null, blueprintWire = false } = {}) {
     const mats = collect3dMaterials(obj3d);
+    const dimAmt = clamp01(1 - focusWeight);
+    const defaultMute = muteColor || { r: 0.72, g: 0.69, b: 0.64 };
+
     for (const mat of mats) {
       if (!this._matOriginals.has(mat)) {
         this._matOriginals.set(mat, {
           opacity: mat.opacity ?? 1,
           transparent: Boolean(mat.transparent),
           depthWrite: mat.depthWrite !== undefined ? mat.depthWrite : true,
+          wireframe: Boolean(mat.wireframe),
+          color: mat.color ? { r: mat.color.r, g: mat.color.g, b: mat.color.b } : null,
+          emissiveIntensity: mat.emissiveIntensity,
         });
       }
       const orig = this._matOriginals.get(mat);
+
+      // 1. Lifecycle / opacity-mode alpha control
       const targetOpacity = orig.opacity * opacity;
       if (opacity < 0.999) {
         mat.transparent = true;
@@ -638,6 +803,34 @@ export class ActorChoreographer {
         if ('depthWrite' in mat) {
           mat.depthWrite = orig.depthWrite;
         }
+      }
+
+      // 2. Wireframe (blueprint transition OR wireframe focus mode)
+      if ('wireframe' in mat || blueprintWire || focusMode === 'wireframe') {
+        mat.wireframe = blueprintWire || (focusMode === 'wireframe' && dimAmt > 0.25) ? true : orig.wireframe;
+      }
+
+      // 3. Clean artifact-free Matte desaturation focus (keeps opaque depthWrite intact!)
+      if (orig.color && mat.color && typeof mat.color.setRGB === 'function') {
+        if (focusMode === 'matte' && dimAmt > 0.005) {
+          const luma = orig.color.r * 0.299 + orig.color.g * 0.587 + orig.color.b * 0.114;
+          const mr = lerp(luma * 0.82, defaultMute.r, 0.35);
+          const mg = lerp(luma * 0.82, defaultMute.g, 0.35);
+          const mb = lerp(luma * 0.82, defaultMute.b, 0.35);
+          const mixAmt = dimAmt * 0.82;
+          mat.color.setRGB(
+            lerp(orig.color.r, mr, mixAmt),
+            lerp(orig.color.g, mg, mixAmt),
+            lerp(orig.color.b, mb, mixAmt)
+          );
+        } else {
+          mat.color.setRGB(orig.color.r, orig.color.g, orig.color.b);
+        }
+      }
+
+      if (orig.emissiveIntensity !== undefined && 'emissiveIntensity' in mat) {
+        mat.emissiveIntensity =
+          focusMode === 'matte' && dimAmt > 0.005 ? orig.emissiveIntensity * focusWeight : orig.emissiveIntensity;
       }
     }
   }

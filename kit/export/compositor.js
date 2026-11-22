@@ -24,7 +24,7 @@ function readThemePalette(rootEl) {
   const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
   const get = (name, fallback) => (cs?.getPropertyValue(name)?.trim() || fallback);
   const theme = document.documentElement?.dataset?.theme || 'paper-ink';
-  const dark = theme === 'dark-studio';
+  const dark = theme === 'dark-studio' || theme === 'blueprint' || theme === 'obsidian-gallery';
   return {
     theme,
     dark,
@@ -54,9 +54,18 @@ function drawStudioBackdrop(ctx, width, height, pal) {
   const gy = height * 0.42;
   const rad = Math.max(width, height) * 0.68;
   const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, rad);
-  if (pal.dark) {
+  if (pal.theme === 'blueprint') {
+    grad.addColorStop(0, 'rgba(30, 82, 142, 0.32)');
+    grad.addColorStop(1, 'rgba(7, 23, 43, 0.78)');
+  } else if (pal.theme === 'obsidian-gallery') {
+    grad.addColorStop(0, 'rgba(168, 134, 78, 0.16)');
+    grad.addColorStop(1, 'rgba(10, 9, 8, 0.92)');
+  } else if (pal.dark) {
     grad.addColorStop(0, 'rgba(45, 72, 114, 0.22)');
     grad.addColorStop(1, 'rgba(11, 14, 21, 0.88)');
+  } else if (pal.theme === 'monochrome-print') {
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
+    grad.addColorStop(1, 'rgba(242, 240, 234, 0.4)');
   } else if (pal.theme === 'bio-cutaway') {
     grad.addColorStop(0, 'rgba(255, 255, 255, 0.78)');
     grad.addColorStop(1, 'rgba(225, 232, 229, 0.45)');
@@ -67,12 +76,29 @@ function drawStudioBackdrop(ctx, width, height, pal) {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
-  // Subtle archival dot grid matching primer-tokens.css
-  const step = Math.max(18, Math.round(22 * (width / 1280)));
-  ctx.fillStyle = pal.dark ? 'rgba(68, 86, 120, 0.32)' : 'rgba(190, 174, 152, 0.42)';
-  for (let y = step * 0.5; y < height; y += step) {
-    for (let x = step * 0.5; x < width; x += step) {
-      ctx.fillRect(Math.round(x), Math.round(y), 1.2, 1.2);
+  if (pal.theme === 'blueprint') {
+    const step = Math.max(20, Math.round(28 * (width / 1280)));
+    ctx.strokeStyle = 'rgba(147, 213, 255, 0.1)';
+    ctx.lineWidth = 1;
+    for (let x = step; x < width; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, height);
+      ctx.stroke();
+    }
+    for (let y = step; y < height; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(width, y + 0.5);
+      ctx.stroke();
+    }
+  } else if (pal.theme !== 'monochrome-print' && pal.theme !== 'obsidian-gallery') {
+    const step = Math.max(18, Math.round(22 * (width / 1280)));
+    ctx.fillStyle = pal.dark ? 'rgba(68, 86, 120, 0.32)' : 'rgba(190, 174, 152, 0.42)';
+    for (let y = step * 0.5; y < height; y += step) {
+      for (let x = step * 0.5; x < width; x += step) {
+        ctx.fillRect(Math.round(x), Math.round(y), 1.2, 1.2);
+      }
     }
   }
   ctx.restore();

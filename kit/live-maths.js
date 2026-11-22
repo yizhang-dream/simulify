@@ -195,6 +195,63 @@ export function mathGroup(parts, opts = {}) {
   return { ...opts, kind: 'group', parts: Array.isArray(parts) ? parts : [parts] };
 }
 
+/**
+ * Create a radical / nth-root token (`\sqrt{x}` or `\sqrt[n]{x}`).
+ * @param {any} radicand
+ * @param {{ index?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathSqrt(radicand, opts = {}) {
+  return { ...opts, kind: 'sqrt', radicand };
+}
+
+/**
+ * Create a 2D matrix or column vector with crisp stretchy SVG delimiters.
+ * @param {Array<Array<any>>} rows
+ * @param {{ fence?: 'brackets'|'parens'|'bars'|'braces'|'none', tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathMatrix(rows, opts = {}) {
+  return { ...opts, kind: 'matrix', rows: Array.isArray(rows) ? rows : [], fence: opts.fence ?? 'brackets' };
+}
+
+/**
+ * Create a piecewise function block (`\begin{cases} ... \end{cases}`) with a stretchy left curly brace.
+ * Each branch is `[valueNode, conditionNode]` or `{ value, cond }`.
+ * @param {Array<[any, any] | { value: any, cond?: any }>} branches
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathCases(branches, opts = {}) {
+  return { ...opts, kind: 'cases', branches: Array.isArray(branches) ? branches : [] };
+}
+
+/**
+ * Create an accented mathematical symbol (`\vec{F}`, `\hat{v}`, `\bar{x}`, `\dot{q}`, `\ddot{q}`, `\tilde{u}`).
+ * @param {any} base
+ * @param {'vec'|'hat'|'bar'|'dot'|'ddot'|'tilde'} [accent='vec']
+ * @param {{ sub?: any, sup?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathAccent(base, accent = 'vec', opts = {}) {
+  return { ...opts, kind: 'accent', base, accent };
+}
+
+/**
+ * Wrap tall expressions (e.g. fractions or sums) in stretchy delimiters (`(`, `)`, `[`, `]`, `{`, `}`, `|`).
+ * @param {any} inner
+ * @param {{ left?: string, right?: string, sub?: any, sup?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathFence(inner, opts = {}) {
+  return { ...opts, kind: 'fence', inner, left: opts.left ?? '(', right: opts.right ?? ')' };
+}
+
+/**
+ * Create a multi-row aligned derivation block (`\begin{aligned} lhs &= rhs \end{aligned}`).
+ * Each row is `[lhs, rel, rhs]` or `{ lhs, rel, rhs }`.
+ * @param {Array<[any, string, any] | { lhs: any, rel?: string, rhs: any }>} rows
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathAlign(rows, opts = {}) {
+  return { ...opts, kind: 'align', rows: Array.isArray(rows) ? rows : [] };
+}
+
 function isUnarySign(str, index, op) {
   if (op !== '+' && op !== '-' && op !== '−') return false;
   const before = str.slice(0, index).trimEnd();
@@ -309,6 +366,57 @@ function appendScripts(parent, subVal, supVal) {
     sup.className = 'lm-sup';
     renderMathContent(sup, supVal, { inScript: true });
     parent.append(sup);
+  }
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ACCENT_GLYPHS = Object.freeze({
+  vec: '→',
+  hat: '^',
+  bar: '',
+  dot: '·',
+  ddot: '··',
+  tilde: '~',
+});
+
+function createStretchyDelim(glyph) {
+  if (!glyph || glyph === '.' || glyph === 'none') return null;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('viewBox', glyph === '{' || glyph === '}' ? '0 0 14 48' : '0 0 10 48');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('class', glyph === '{' || glyph === '}' ? 'lm-delim lm-delim-brace' : 'lm-delim');
+
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.45');
+  path.setAttribute('vector-effect', 'non-scaling-stroke');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+
+  const paths = {
+    '(': 'M 8.5 1.5 C 2 10, 2 38, 8.5 46.5',
+    ')': 'M 1.5 1.5 C 8 10, 8 38, 1.5 46.5',
+    '[': 'M 8.5 1.5 L 2.2 1.5 L 2.2 46.5 L 8.5 46.5',
+    ']': 'M 1.5 1.5 L 7.8 1.5 L 7.8 46.5 L 1.5 46.5',
+    '|': 'M 5 1.5 L 5 46.5',
+    '{': 'M 12.5 1.5 C 6.5 1.5, 6.5 7, 6.5 16 C 6.5 21.5, 4.5 24, 1.5 24 C 4.5 24, 6.5 26.5, 6.5 32 C 6.5 41, 6.5 46.5, 12.5 46.5',
+    '}': 'M 1.5 1.5 C 7.5 1.5, 7.5 7, 7.5 16 C 7.5 21.5, 9.5 24, 12.5 24 C 9.5 24, 7.5 26.5, 7.5 32 C 7.5 41, 7.5 46.5, 1.5 46.5',
+  };
+  path.setAttribute('d', paths[glyph] || paths['(']);
+  svg.append(path);
+  return svg;
+}
+
+function resolveMatrixFences(fence) {
+  switch (fence) {
+    case 'parens': return ['(', ')'];
+    case 'bars': return ['|', '|'];
+    case 'braces': return ['{', '}'];
+    case 'none': return ['', ''];
+    case 'brackets':
+    default: return ['[', ']'];
   }
 }
 
@@ -430,6 +538,150 @@ function renderMathContent(parent, node, { inScript = false } = {}) {
       }
     }
     parent.append(op);
+    return;
+  }
+
+  if (kind === 'sqrt') {
+    const wrap = document.createElement('span');
+    wrap.className = 'lm-sqrt';
+    if (node.index !== undefined && node.index !== null && node.index !== '') {
+      const idx = document.createElement('span');
+      idx.className = 'lm-sqrt-index';
+      renderMathContent(idx, node.index, { inScript: true });
+      wrap.append(idx);
+    }
+    const rad = document.createElementNS(SVG_NS, 'svg');
+    rad.setAttribute('class', 'lm-sqrt-rad');
+    rad.setAttribute('viewBox', '0 0 14 28');
+    rad.setAttribute('preserveAspectRatio', 'none');
+    rad.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', 'M 1 16 L 4.2 14 L 7.4 26 L 13.5 1.5');
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 'currentColor');
+    p.setAttribute('stroke-width', '1.45');
+    p.setAttribute('vector-effect', 'non-scaling-stroke');
+    p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
+    rad.append(p);
+
+    const body = document.createElement('span');
+    body.className = 'lm-sqrt-body';
+    renderMathContent(body, node.radicand, { inScript: false });
+    wrap.append(rad, body);
+    parent.append(wrap);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'matrix') {
+    const wrap = document.createElement('span');
+    wrap.className = 'lm-matrix-wrap';
+    const [lDelim, rDelim] = resolveMatrixFences(node.fence);
+    const leftSvg = createStretchyDelim(lDelim);
+    if (leftSvg) wrap.append(leftSvg);
+
+    const rows = Array.isArray(node.rows) ? node.rows : [];
+    const cols = rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 1), 1);
+    const grid = document.createElement('span');
+    grid.className = 'lm-matrix';
+    grid.style.gridTemplateColumns = `repeat(${cols}, auto)`;
+    for (const row of rows) {
+      const cells = Array.isArray(row) ? row : [row];
+      for (let c = 0; c < cols; c += 1) {
+        const cell = document.createElement('span');
+        cell.className = 'lm-matrix-cell';
+        renderMathContent(cell, cells[c] ?? '', { inScript: false });
+        grid.append(cell);
+      }
+    }
+    wrap.append(grid);
+    const rightSvg = createStretchyDelim(rDelim);
+    if (rightSvg) wrap.append(rightSvg);
+    parent.append(wrap);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'cases') {
+    const wrap = document.createElement('span');
+    wrap.className = 'lm-cases-wrap';
+    const brace = createStretchyDelim('{');
+    if (brace) wrap.append(brace);
+    const grid = document.createElement('span');
+    grid.className = 'lm-cases';
+    for (const br of node.branches || []) {
+      const val = Array.isArray(br) ? br[0] : br?.value;
+      const cond = Array.isArray(br) ? br[1] : br?.cond;
+      const valEl = document.createElement('span');
+      valEl.className = 'lm-cases-val';
+      renderMathContent(valEl, val, { inScript: false });
+      const condEl = document.createElement('span');
+      condEl.className = 'lm-cases-cond';
+      renderMathContent(condEl, cond ?? '', { inScript: false });
+      grid.append(valEl, condEl);
+    }
+    wrap.append(grid);
+    parent.append(wrap);
+    return;
+  }
+
+  if (kind === 'accent') {
+    const wrap = document.createElement('span');
+    wrap.className = 'lm-accent';
+    const mark = document.createElement('span');
+    mark.className = 'lm-accent-mark';
+    const accKey = String(node.accent || 'vec');
+    mark.dataset.accent = accKey;
+    mark.textContent = ACCENT_GLYPHS[accKey] ?? accKey;
+    const base = document.createElement('span');
+    base.className = 'lm-accent-base';
+    renderMathContent(base, node.base, { inScript });
+    wrap.append(mark, base);
+    parent.append(wrap);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'fence') {
+    const wrap = document.createElement('span');
+    wrap.className = 'lm-fence';
+    const leftSvg = createStretchyDelim(node.left);
+    if (leftSvg) wrap.append(leftSvg);
+    const body = document.createElement('span');
+    body.className = 'lm-fence-body';
+    renderMathContent(body, node.inner, { inScript });
+    wrap.append(body);
+    const rightSvg = createStretchyDelim(node.right);
+    if (rightSvg) wrap.append(rightSvg);
+    parent.append(wrap);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'align') {
+    const grid = document.createElement('div');
+    grid.className = 'lm-align';
+    for (const row of node.rows || []) {
+      const lhs = Array.isArray(row) ? row[0] : row?.lhs;
+      const rel = Array.isArray(row) ? row[1] : (row?.rel ?? '=');
+      const rhs = Array.isArray(row) ? row[2] : row?.rhs;
+
+      const lEl = document.createElement('span');
+      lEl.className = 'lm-align-lhs';
+      renderMathContent(lEl, lhs ?? '', { inScript: false });
+
+      const rEl = document.createElement('span');
+      rEl.className = 'lm-align-rel lm-bin';
+      rEl.textContent = String(rel ?? '=');
+
+      const rhsEl = document.createElement('span');
+      rhsEl.className = 'lm-align-rhs';
+      renderMathContent(rhsEl, rhs ?? '', { inScript: false });
+
+      grid.append(lEl, rEl, rhsEl);
+    }
+    parent.append(grid);
     return;
   }
 

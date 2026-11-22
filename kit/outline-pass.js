@@ -3,6 +3,7 @@ import * as THREE from 'three';
 export const SOLID_LAYER = 0;
 export const GROUND_LAYER = 1;
 export const SURFACE_LAYER = 2;
+export const GLASS_LAYER = 3;
 
 export const OUTLINE_PRESETS = Object.freeze({
   crisp: Object.freeze({
@@ -11,6 +12,7 @@ export const OUTLINE_PRESETS = Object.freeze({
     opacityScale: 1.0,
     depthThreshold: 0.34,
     normalThreshold: 0.26,
+    aoStrength: 0.24,
   }),
   subtle: Object.freeze({
     enabled: true,
@@ -18,6 +20,7 @@ export const OUTLINE_PRESETS = Object.freeze({
     opacityScale: 0.56,
     depthThreshold: 0.42,
     normalThreshold: 0.34,
+    aoStrength: 0.16,
   }),
   none: Object.freeze({
     enabled: false,
@@ -25,6 +28,7 @@ export const OUTLINE_PRESETS = Object.freeze({
     opacityScale: 0,
     depthThreshold: 0.5,
     normalThreshold: 0.5,
+    aoStrength: 0.0,
   }),
 });
 
@@ -56,6 +60,7 @@ const OUTLINE_FRAGMENT = /* glsl */ `
   uniform vec3 lineColor;
   uniform float lineOpacity;
   uniform float focusDim;
+  uniform float aoStrength;
   varying vec2 vUv;
 
   float depthAt(vec2 uv) {
@@ -115,9 +120,30 @@ const OUTLINE_FRAGMENT = /* glsl */ `
       e = clamp(e * lineOpacity, 0.0, 1.0);
     }
 
-    // Unpremultiply linear color target, apply optional focus vignette, blend crisp ink stroke
+    // Unpremultiply linear color target, apply zero-extra-pass screen-space crease AO & focus vignette
     float a = clamp(col.a, 0.0, 1.0);
     vec3 rgb = a > 1e-4 ? col.rgb / a : vec3(0.0);
+    if (aoStrength > 0.001 && n0.a > 0.5) {
+      vec3 cn = n0.xyz * 2.0 - 1.0;
+      vec2 aoOff = texel * 3.0;
+      float occ = 0.0;
+      vec2 dirs[4];
+      dirs[0] = vec2(aoOff.x, aoOff.y);
+      dirs[1] = vec2(-aoOff.x, aoOff.y);
+      dirs[2] = vec2(aoOff.x, -aoOff.y);
+      dirs[3] = vec2(-aoOff.x, -aoOff.y);
+      for (int i = 0; i < 4; i++) {
+        vec4 nn = texture2D(tNormal, vUv + dirs[i]);
+        if (nn.a > 0.5) {
+          float dn = depthAt(vUv + dirs[i]);
+          float dd = d0 - dn;
+          float nearMask = smoothstep(0.02, 0.28, dd) * (1.0 - smoothstep(0.55, 1.35, dd));
+          float crease = smoothstep(0.04, 0.48, 1.0 - dot(cn, nn.xyz * 2.0 - 1.0));
+          occ += nearMask * crease;
+        }
+      }
+      rgb *= 1.0 - clamp(occ * 0.25 * aoStrength, 0.0, 0.34);
+    }
     if (focusDim > 0.001) {
       float radial = length((vUv - 0.5) * vec2(1.15, 1.0));
       float dimMask = smoothstep(0.28, 0.78, radial) * focusDim;
@@ -196,6 +222,8 @@ export class OutlinePass {
     this.normalThreshold = this._explicitNormalThreshold ?? presetCfg.normalThreshold;
     this.lineColor = new THREE.Color(options.lineColor ?? '#141a2c');
     this.focusDim = options.focusDim ?? 0;
+    this._explicitAO = options.aoStrength !== undefined ? Number(options.aoStrength) : null;
+    this.aoStrength = this._explicitAO !== null ? this._explicitAO : presetCfg.aoStrength;
 
     this.isTSL = Boolean(renderer?.isWebGPURenderer && THREE.RenderPipeline && THREE.TSL);
 
@@ -204,6 +232,10 @@ export class OutlinePass {
       if (options.bloom) {
         const bloomOpts = typeof options.bloom === 'object' ? options.bloom : {};
         this.enableBloom(bloomOpts);
+      }
+      if (options.dof) {
+        const dofOpts = typeof options.dof === 'object' ? options.dof : {};
+        this.enableDepthOfField(dofOpts);
       }
     } else {
       this._initLegacyGLSL(options);
@@ -231,6 +263,15 @@ export class OutlinePass {
           threshold: options.bloom.threshold ?? 0.88,
         }
       : { enabled: false, strength: 0.22, radius: 0.35, threshold: 0.88 };
+    this._dofAddon = null;
+    this._dofConfig = options.dof
+      ? {
+          enabled: true,
+          focusDistance: options.dof.focusDistance ?? 16,
+          focalLength: options.dof.focalLength ?? 8,
+          bokehScale: options.dof.bokehScale ?? 1.4,
+        }
+      : { enabled: false, focusDistance: 16, focalLength: 8, bokehScale: 1.4 };
 
     this._uThickness = TSL.uniform(this.enabled ? this.thickness : 0);
     this._uIsOrtho = TSL.uniform(1.0);
@@ -241,8 +282,12 @@ export class OutlinePass {
     this._uLineColor = TSL.uniform(this.lineColor.clone());
     this._uLineOpacity = TSL.uniform(this.enabled ? this.opacity : 0);
     this._uFocusDim = TSL.uniform(this.focusDim);
+    this._uAoStrength = TSL.uniform(this.enabled ? this.aoStrength : 0);
     this._uExposure = TSL.uniform(this.renderer?.toneMappingExposure ?? 1.0);
     this._uBloomStrength = TSL.uniform(this._bloomConfig.enabled ? this._bloomConfig.strength : 0);
+    this._uDofFocus = TSL.uniform(this._dofConfig.focusDistance);
+    this._uDofFocalLength = TSL.uniform(this._dofConfig.focalLength);
+    this._uDofBokeh = TSL.uniform(this._dofConfig.bokehScale);
   }
 
   _buildTSLPipeline(scene, camera) {
@@ -283,21 +328,24 @@ export class OutlinePass {
     this._surfaceCamera = cloneCameraShell(camera);
 
     syncCameraProps(camera, this._solidCamera, [SOLID_LAYER]);
-    syncCameraProps(camera, this._colorCamera, [SOLID_LAYER, GROUND_LAYER]);
+    syncCameraProps(camera, this._colorCamera, [SOLID_LAYER, GROUND_LAYER, GLASS_LAYER]);
     syncCameraProps(camera, this._surfaceCamera, [SURFACE_LAYER]);
 
     // Ensure main camera sees all layers for picking & non-pipeline renders
     camera.layers.enable(SOLID_LAYER);
     camera.layers.enable(GROUND_LAYER);
     camera.layers.enable(SURFACE_LAYER);
+    camera.layers.enable(GLASS_LAYER);
 
     // Force PassNodes to refresh on every explicit pipeline.render() (NodeUpdateType.RENDER),
     // not once per browser rAF (NodeUpdateType.FRAME), so same-frame onpaint + renderNowAsync()
     // and back-to-back deterministic export seeks never composite stale surfacePass/colorPass frames.
     const renderUpdateType = THREE.NodeUpdateType?.RENDER ?? 'render';
 
-    // 1. Lit 3D scene pass (SOLID_LAYER + GROUND_LAYER, keeps renderer MSAA)
-    const colorPass = pass(scene, this._colorCamera);
+    // 1. Lit 3D scene pass (SOLID_LAYER + GROUND_LAYER + GLASS_LAYER, keeps renderer MSAA + stencil for cutaway caps)
+    const colorPass = pass(scene, this._colorCamera, {
+      stencilBuffer: true,
+    });
     colorPass.updateBeforeType = renderUpdateType;
 
     // 2. Non-MSAA nearest-filtered normal+depth pass (SOLID_LAYER only) — zero bilinear pre-blur!
@@ -353,6 +401,7 @@ export class OutlinePass {
     const uLineColor = this._uLineColor;
     const uLineOpacity = this._uLineOpacity;
     const uFocusDim = this._uFocusDim;
+    const uAoStrength = this._uAoStrength;
     const uExposure = this._uExposure;
     const activeToneMapping = this._boundToneMapping;
 
@@ -364,10 +413,19 @@ export class OutlinePass {
       bloomNode.updateBeforeType = renderUpdateType;
     }
 
+    const dofNode =
+      this._dofConfig.enabled && this._dofAddon && typeof colorPass.getViewZNode === 'function'
+        ? this._dofAddon(colorNode, colorPass.getViewZNode(), this._uDofFocus, this._uDofFocalLength, this._uDofBokeh)
+        : null;
+    if (dofNode && 'updateBeforeType' in dofNode) {
+      dofNode.updateBeforeType = renderUpdateType;
+    }
+
     const composite = Fn(() => {
       const texel = vec2(1.0).div(viewportSize);
       const rawCol = colorNode.sample(screenUV);
-      const colPreBase = bloomNode ? rawCol.rgb.add(bloomNode.rgb) : rawCol.rgb;
+      const baseRgb = dofNode ? dofNode.rgb : rawCol.rgb;
+      const colPreBase = bloomNode ? baseRgb.add(bloomNode.rgb) : baseRgb;
       const n0 = normalNode.sample(screenUV);
       const solidDepthRaw = depthNode.sample(screenUV).r;
 
@@ -435,10 +493,33 @@ export class OutlinePass {
       const colLinearStraight = select(a.greaterThan(1e-4), colPreBase.div(a), vec3(0.0));
 
       // Apply tone mapping ONLY to lit 3D colorPass — ink strokes & HTML surfaces stay crisp and uncrushed
-      const colMapped =
+      const colMappedBase =
         activeToneMapping !== THREE.NoToneMapping && typeof tslToneMapping === 'function'
           ? tslToneMapping(activeToneMapping, uExposure, vec4(colLinearStraight, float(1.0))).rgb
           : colLinearStraight;
+
+      // Zero-extra-pass Screen-Space Crease Ambient Occlusion (darkens concave mechanical seams, zero silhouette halo)
+      const aoTap = (off) => {
+        const uvN = screenUV.add(off);
+        const nn = normalNode.sample(uvN);
+        const dn = depthAt(uvN);
+        const dd = d0.sub(dn);
+        const nearMask = smoothstep(0.02, 0.28, dd).mul(float(1.0).sub(smoothstep(0.55, 1.35, dd)));
+        const cn = n0.xyz.mul(2.0).sub(1.0);
+        const crease = smoothstep(0.04, 0.48, float(1.0).sub(dot(cn, nn.xyz.mul(2.0).sub(1.0))));
+        return select(nn.a.greaterThan(0.5), nearMask.mul(crease), float(0.0));
+      };
+      const aoOff = texel.mul(3.0);
+      const aoRaw = aoTap(vec2(aoOff.x, aoOff.y))
+        .add(aoTap(vec2(aoOff.x.negate(), aoOff.y)))
+        .add(aoTap(vec2(aoOff.x, aoOff.y.negate())))
+        .add(aoTap(vec2(aoOff.x.negate(), aoOff.y.negate())));
+      const aoFactor = select(
+        n0.a.greaterThan(0.5).and(uAoStrength.greaterThan(0.001)),
+        float(1.0).sub(clamp(aoRaw.mul(0.25).mul(uAoStrength), 0.0, 0.34)),
+        float(1.0)
+      );
+      const colMapped = colMappedBase.mul(aoFactor);
 
       // Optional peripheral focus-dimming for progressive temporal beats
       const radial = length(screenUV.sub(0.5).mul(vec2(1.15, 1.0)));
@@ -510,11 +591,76 @@ export class OutlinePass {
     }
   }
 
+  /**
+   * Optional async hook to enable TSL Depth-of-Field (DepthOfFieldNode) for macro / cutaway focus.
+   */
+  async enableDepthOfField({ focusDistance = 16, focalLength = 8, bokehScale = 1.4 } = {}) {
+    if (!this.isTSL) return false;
+    try {
+      const mod = await import('three/addons/tsl/display/DepthOfFieldNode.js');
+      this._dofAddon = mod.dof || null;
+      this._dofConfig = {
+        enabled: Boolean(this._dofAddon),
+        focusDistance: Number(focusDistance) || 16,
+        focalLength: Number(focalLength) || 8,
+        bokehScale: Number(bokehScale) || 1.4,
+      };
+      this._uDofFocus.value = this._dofConfig.focusDistance;
+      this._uDofFocalLength.value = this._dofConfig.focalLength;
+      this._uDofBokeh.value = this._dofConfig.bokehScale;
+      if (this._boundScene && this._boundCamera) {
+        this._buildTSLPipeline(this._boundScene, this._boundCamera);
+      }
+      return this._dofConfig.enabled;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Update Depth-of-Field parameters or toggle it off without reloading modules. */
+  setDepthOfField({ enabled, focusDistance, focalLength, bokehScale } = {}) {
+    if (!this.isTSL) return false;
+    let rebuild = false;
+    if (enabled !== undefined && Boolean(enabled) !== this._dofConfig.enabled) {
+      this._dofConfig.enabled = Boolean(enabled) && Boolean(this._dofAddon);
+      rebuild = true;
+    }
+    if (focusDistance !== undefined) {
+      this._dofConfig.focusDistance = Number(focusDistance);
+      this._uDofFocus.value = this._dofConfig.focusDistance;
+    }
+    if (focalLength !== undefined) {
+      this._dofConfig.focalLength = Number(focalLength);
+      this._uDofFocalLength.value = this._dofConfig.focalLength;
+    }
+    if (bokehScale !== undefined) {
+      this._dofConfig.bokehScale = Number(bokehScale);
+      this._uDofBokeh.value = this._dofConfig.bokehScale;
+    }
+    if (rebuild && this._boundScene && this._boundCamera) {
+      this._buildTSLPipeline(this._boundScene, this._boundCamera);
+    }
+    return this._dofConfig.enabled;
+  }
+
+  /** Control zero-extra-pass screen-space crease ambient occlusion strength (0..1). */
+  setAOStrength(strength) {
+    this._explicitAO = Math.max(0, Math.min(1, Number(strength) || 0));
+    this.aoStrength = this._explicitAO;
+    if (this.isTSL) {
+      this._uAoStrength.value = this.enabled ? this.aoStrength : 0;
+    } else if (this.material?.uniforms?.aoStrength) {
+      this.material.uniforms.aoStrength.value = this.enabled ? this.aoStrength : 0;
+    }
+    return this.aoStrength;
+  }
+
   _initLegacyGLSL(options) {
     const samples = this.renderer.capabilities?.isWebGL2 ? (options.samples ?? 4) : 0;
     this.colorTarget = new THREE.WebGLRenderTarget(2, 2, {
       type: THREE.HalfFloatType,
       samples,
+      stencilBuffer: true,
     });
 
     const depthTexture = new THREE.DepthTexture(2, 2, THREE.UnsignedIntType);
@@ -549,6 +695,7 @@ export class OutlinePass {
         lineColor: { value: this.lineColor.clone() },
         lineOpacity: { value: this.enabled ? this.opacity : 0 },
         focusDim: { value: this.focusDim },
+        aoStrength: { value: this.enabled ? this.aoStrength : 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -575,15 +722,20 @@ export class OutlinePass {
     this.opacity = this._baseOpacity * cfg.opacityScale;
     this.depthThreshold = this._explicitDepthThreshold !== null && cfg.enabled ? this._explicitDepthThreshold : cfg.depthThreshold;
     this.normalThreshold = this._explicitNormalThreshold !== null && cfg.enabled ? this._explicitNormalThreshold : cfg.normalThreshold;
+    this.aoStrength = this._explicitAO !== null && cfg.enabled ? this._explicitAO : cfg.aoStrength;
 
     if (this.isTSL) {
       this._uDepthThreshold.value = this.depthThreshold;
       this._uNormalThreshold.value = this.normalThreshold;
       this._uLineOpacity.value = this.enabled ? this.opacity : 0;
+      this._uAoStrength.value = this.enabled ? this.aoStrength : 0;
     } else if (this.material) {
       this.material.uniforms.depthThreshold.value = this.depthThreshold;
       this.material.uniforms.normalThreshold.value = this.normalThreshold;
       this.material.uniforms.lineOpacity.value = this.enabled ? this.opacity : 0;
+      if (this.material.uniforms.aoStrength) {
+        this.material.uniforms.aoStrength.value = this.enabled ? this.aoStrength : 0;
+      }
     }
     this.setLineScale(this.lineScale);
     return this.preset;
@@ -704,7 +856,7 @@ export class OutlinePass {
       this._buildTSLPipeline(scene, camera);
     }
     syncCameraProps(camera, this._solidCamera, [SOLID_LAYER]);
-    syncCameraProps(camera, this._colorCamera, [SOLID_LAYER, GROUND_LAYER]);
+    syncCameraProps(camera, this._colorCamera, [SOLID_LAYER, GROUND_LAYER, GLASS_LAYER]);
     syncCameraProps(camera, this._surfaceCamera, [SURFACE_LAYER]);
     this._uIsOrtho.value = camera.isOrthographicCamera ? 1.0 : 0.0;
     this._uNear.value = camera.near;

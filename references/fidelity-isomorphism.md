@@ -12,7 +12,7 @@
 | **概念处理** | 用童话/玩具隐喻替代机制（如用发光滚筒代替优化拟合、用盲目高低方块代替多维价值展开） | 理论有几层对象与约束，舞台就如实构建几层精确载体 |
 | **3D 造型标准** | 整场全靠 `BoxGeometry` / `RoundedBoxGeometry` / `PlaneGeometry` + 无光 `MeshBasicMaterial` 拼乐高积木 | 用 [`kit/geo-sculpt.js`](../kit/geo-sculpt.js) 5 大构造族 + 受光 PBR 材质打造真实物理/数学器物，`getGeometryAudit()` 满足 `cuboidRatio <= 0.70` 且 `sculptedMeshes > 0` |
 | **载体选择** | 一刀切强套 3D 小模型，或强给纯实物硬挂满屏方程 | **因地制宜**：实物按实物模拟（车削/倒角剖面/X-Ray/弹性形变），数学按形式化界面 + 连续曲面/势能场双联 |
-| **数学排版** | 手写破损 Unicode 下标（`Gₜ:ₜ₊₄`, `γᵏ`）或纯等宽代码字塞公式与中文 | 用 [`kit/live-maths.js`](../kit/live-maths.js) 的 KaTeX AST（`mathVar`/`mathSub`/`mathSup`/`mathFrac`/`mathOp`）真实排版，变量自动真斜体、单位与多字母算符保持正体 |
+| **数学排版** | 手写破损 Unicode 下标（`Gₜ:ₜ₊₄`, `γᵏ`）或纯等宽代码字塞公式与中文 | 用 [`kit/live-maths.js`](../kit/live-maths.js) 的 KaTeX AST（`mathVar`/`mathSub`/`mathSup`/`mathFrac`/`mathOp`/`mathSqrt`/`mathMatrix`/`mathCases`/`mathAccent`/`mathFence`/`mathAlign`）真实排版，变量自动真斜体、单位与多字母算符保持正体 |
 | **反例检验** | 只播正面成功动画，回避故障、短路与发散状态 | 预设并可触发**理论反例**（错接短路、临界无回差抖动、贴崖跌落与目标发散），并由 `window.__simulify.falsify()` 自动证伪 |
 | **单一真相源** | 舞台动画、假进度条与文字数值各算各的 | **单一 `solve()` 引擎**原子刷新 3D 变形、曲线、代码高亮与活公式，严禁硬编码假轨迹与假高亮 |
 
@@ -33,7 +33,8 @@
    - `createParametricSurface`：任意 $(u, v) \mapsto (x, y, z)$ 参数化曲面与原位 `updateSurface()`；
    - `createDeformableStrip`：实心等弧长弹性梁 / 铜钢双金属层压带，零 GC `setCurvature(k)` 返回精确 `{ tipPos, tipAngle, tipNormal }`。
 4. **真 3D 螺旋线圈、变径管路与波纹管（`'helix' | 'conduit' | 'bellows'`）**：`createHelicalCoil`（真螺旋丝/弹簧/电感，支持 `setGlow` / `setCompression`）、`createTaperedConduit`（无扭转平行输运标架变径管/光束/策略流带 + 端盖 + 顶点色渐变）、`createPleatedBellows`（原位 `setExtension(factor)` 保持法兰厚度）。
-5. **受光 PBR 材质工厂**：`createSculptMaterial(preset, overrides)`（`ceramic`、`travertine`、`brass`、`anodized`、`copper`、`obsidian`、`steel`、`glass`、`frostedGlass`、`ember`，自动适配三套主题光棚）。
+5. **微纹理 PBR 与 Fresnel X-Ray 材质工厂**：`createSculptMaterial(preset, overrides)`（10 套材质自动挂接缓存式程序拉丝/磨砂/阳极氧化微法线与粗糙度贴图 `createProceduralSurfaceMaps`，兼容 6 套主题光棚）+ `createXRayMaterial()`（菲涅尔边缘发亮半透明外壳，自动建议挂 `GLASS_LAYER = 3` 免阻断内部墨线）；闭合剖切统一使用 `stage.createCutawayCap(target, plane)` 渲染 45° 实心工程剖面线（告别空心纸壳）。
+6. **科学动态场与工程标注原语（[`kit/field-viz.js`](../kit/field-viz.js)）**：感知均匀色带（`viridis`/`plasma`/`magma`/`coolwarm`/`thermal`/`cividis`）+ `renderColorbar()`、定向脉冲流带 `createFlowConduit`、零 GC 3D 矢量场 `createVectorField`、可逆 4D 粒子群 `createDeterministicSwarm`、频闪轨迹丝带 `createMotionTrail`、3D 尺寸/力矢/夹角标注（自动明暗反差精灵标牌）与带独立哑光裙边的等值线标量高度场 `createContourField`。
 
 ### 跨学科造型映射配方表
 

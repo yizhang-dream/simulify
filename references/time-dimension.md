@@ -6,10 +6,10 @@
 
 ## 1. 严禁的反模式 vs True 4D 渐进编排
 
-| 维度 | v1 伪 4D 反模式（门禁直接驳回） | Simulify v2.1 真 4D 标准 |
+| **维度** | v1 伪 4D 反模式（门禁直接驳回） | Simulify v2.2 真 4D 标准 |
 |---|---|---|
-| **开场 `t = 0`** | 首帧铺满 3 套台面 + 4 角 HUD 塞满屏幕，或加载即调用 `director.showEnd()` 定格终态 | **稀疏起手（`<= 2` 个活跃角色，极简顶/底栏）**；从 `t = 0` 起步自然演化或由学习者轻拖展开 |
-| **物件与 HUD 登场** | 全部网格在构造函数中 `visible = true`，HUD 面板全静态常驻 | 用 [`ActorChoreographer`](../kit/choreography.js) 的 `enter` / `exit` / `focus` / `hudReveal` 按因果触发点逐个揭示与聚焦暗化 |
+| **开场 `t = 0`** | 首帧铺满 3 套台面 + 4 角 HUD 塞满屏幕，或加载即调用 `director.showEnd()` 定格终态 | **稀疏起手（`<= 2` 个活跃角色，极简顶/底栏）**；从 `t = 0` 起步自然演化，或由学习者搓时间轴 / `ScrollyBridge` 滚动连续展开 |
+| **物件与 HUD 登场** | 全部网格在构造函数中 `visible = true`，HUD 面板全静态常驻 | 用 [`ActorChoreographer`](../kit/choreography.js) 的 `enter`（含 `explode`/`draw`/`blueprint`）/ `explodeGroup` / `clipSweep` / `focus`（推荐 `'matte'` 或 `'wireframe'` 去饱和聚焦，杜绝半透明深度穿帮）/ `hudReveal` 按因果触发点逐个揭示 |
 | **时间推进与回调** | `0.01s` 离散瞬移 + 脱钩 `performance.now()` + 双 `rAF` + 单次 `seek` 重复触发 `onSeek`+`onTick` | 单一主时钟 [`SpacetimeClock`](../kit/spacetime.js)（单通道 `seek()` 防 2× 重入）+ [`SimulationTape`](../kit/spacetime.js) 连续可逆采样 `sampleAt(t)` |
 | **反事实对照** | 调参后旧轨迹瞬间消失，全靠记忆回想差异 | `tape.captureGhost()` 在舞台与 [`ChartCard`](../kit/chart-card.js) 上叠加半透明**反事实幽灵轨**（旧参数 vs 现参数同框对比） |
 | **镜头与用户主导权** | 切幕靠 wall-clock 抢镜头，用户拖转视角后立刻被脚本强行弹回 | `choreographer.cameraBeat(t0, dur, pose)` 调用 `stage.setCameraFromScript(pose)`：未锁定时作为 `t` 的纯函数平滑插值；一旦用户拖拽/缩放，立即尊重 `isUserCameraLocked()` 绝不反抢 |
