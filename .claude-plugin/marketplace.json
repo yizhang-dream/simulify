@@ -8,8 +8,8 @@
     {
       "name": "simulify",
       "source": "./",
-      "description": "Interactive 3D/4D mechanism, cutaway and simulation explainers: scrubbable timelines, live equation substitution and counterfactual controls from a zero-build offline ESM kit.",
-      "version": "1.0.0",
+      "description": "Crisp offline 3D/4D mechanism, cutaway and simulation explainers: 1:1 HiDPI WebGPU + HTML-in-Canvas engine, offline four-tier typography & KaTeX live maths, non-cuboid 3D sculpting kit, multi-beat interactive quality oracle, and deterministic video/GIF export.",
+      "version": "2.1.0",
       "category": "visualization"
     }
   ]

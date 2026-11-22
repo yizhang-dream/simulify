@@ -8,8 +8,29 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CalloutLayer, resolveCalloutRects } from '../kit/callout-layer.js';
 import { ChartCard } from '../kit/chart-card.js';
 import { ActorChoreographer } from '../kit/choreography.js';
+import {
+  areFontsReady,
+  canvasFont,
+  createCrispCanvasTexture,
+  FONT_STACKS,
+  getFontStack,
+  onFontsReady,
+  waitForFonts,
+} from '../kit/fonts.js';
 import { LinkBus } from '../kit/link-bus.js';
-import { LiveMathsPanel } from '../kit/live-maths.js';
+import {
+  LiveMathsPanel,
+  mathFrac,
+  mathGroup,
+  mathNum,
+  mathOp,
+  mathSub,
+  mathSubSup,
+  mathSup,
+  mathText,
+  mathVar,
+  normalizeUnicodeScripts,
+} from '../kit/live-maths.js';
 import {
   defaultInterpolateState,
   SimulationTape,
@@ -21,6 +42,7 @@ import {
   applyUrlState,
   easeLinear,
   exposeTestHooks,
+  mountTimelineBar,
   parseUrlState,
   PhaseScrubber,
   TimelineDirector,
@@ -236,6 +258,24 @@ const skillText = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf8');
 const fmMatch = skillText.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 assert.ok(fmMatch && fmMatch[1].includes('name: simulify'), 'SKILL.md must declare name: simulify');
 
+const shimSkillText = fs.readFileSync(path.join(ROOT, 'skills', 'simulify', 'SKILL.md'), 'utf8');
+const shimFmMatch = shimSkillText.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+assert.ok(shimFmMatch, 'skills/simulify/SKILL.md must have YAML frontmatter');
+assert.equal(
+  shimFmMatch[1].replace(/\r\n/g, '\n').trim(),
+  fmMatch[1].replace(/\r\n/g, '\n').trim(),
+  'skills/simulify/SKILL.md frontmatter must stay 100% synced with root SKILL.md'
+);
+
+const pluginJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugin.json'), 'utf8'));
+const marketJson = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
+assert.ok(pluginJson.version && marketJson.plugins?.[0]?.version, 'plugin.json & marketplace.json must declare versions');
+assert.equal(
+  pluginJson.version,
+  marketJson.plugins[0].version,
+  'plugin.json and .claude-plugin/marketplace.json versions must match'
+);
+
 const mdFiles = [
   path.join(ROOT, 'SKILL.md'),
   path.join(ROOT, 'skills', 'simulify', 'SKILL.md'),
@@ -439,6 +479,34 @@ assert.ok(Math.abs(clock.t - 10) < 1e-6);
 assert.ok(tickLog.length > 0 && seekLog.length > 0);
 clock.destroy();
 
+// Wave 1 SpacetimeClock.seek() single-callback guarantee (never fires both onSeek + onTick)
+let singleSeekCalls = 0;
+let singleTickCalls = 0;
+const singleClock = new SpacetimeClock({
+  duration: 12,
+  manualMode: true,
+  onTick: () => { singleTickCalls += 1; },
+  onSeek: () => { singleSeekCalls += 1; },
+});
+singleClock.seek(4.5);
+assert.equal(singleSeekCalls, 1, 'seek() must invoke onSeek exactly once');
+assert.equal(singleTickCalls, 0, 'seek() must NOT also fire onTick when onSeek is registered');
+singleClock.seek(7.0, { notifyHandlers: false });
+assert.equal(singleSeekCalls, 1, 'seek({ notifyHandlers: false }) must suppress onSeek');
+assert.equal(singleTickCalls, 0, 'seek({ notifyHandlers: false }) must suppress onTick');
+singleClock.destroy();
+
+// Fallback to onTick when onSeek is absent
+let tickFallbackCalls = 0;
+const tickOnlyClock = new SpacetimeClock({
+  duration: 10,
+  manualMode: true,
+  onTick: () => { tickFallbackCalls += 1; },
+});
+tickOnlyClock.seek(3.0);
+assert.equal(tickFallbackCalls, 1, 'seek() must fall back to onTick exactly once when onSeek is absent');
+tickOnlyClock.destroy();
+
 // SimulationTape: record, bake, forward/backward sampleAt, ghost immutability
 const tape = new SimulationTape();
 tape.bake({ duration: 10, fps: 2 }, (t, i) => ({
@@ -581,7 +649,54 @@ assert.equal(actorArc.visible, false);
 choreo.evaluate(7.0, { apply: true });
 assert.equal(actorArc.visible, true);
 assert.ok(appliedCameras.length >= 3);
-console.log('[OK] ActorChoreographer (enter/exit/focus/hudReveal/cameraBeat/sparsity) verified');
+
+// Wave 1 ActorChoreographer camera-lock, steady-state DOM ClearType transform & surface target.element alias
+const lockedCamCalls = [];
+let camLocked = true;
+const lockStage = {
+  isUserCameraLocked: () => camLocked,
+  setCameraFromScript: (pose) => {
+    if (camLocked) return false;
+    lockedCamCalls.push(['script', pose]);
+    return true;
+  },
+  setCameraImmediate: (pose) => {
+    lockedCamCalls.push(['immediate', pose]);
+  },
+};
+const surfEl = createMockElement('div');
+const surfMesh = makeMock3dActor([0, 0, 0]);
+const surfOpacities = [];
+const mockSurf = {
+  mesh: surfMesh,
+  element: surfEl,
+  setVisible(v) { this._vis = v; },
+  setOpacity(a) { surfOpacities.push(a); },
+};
+const steadyHudEl = createMockElement('div');
+const lockChoreo = new ActorChoreographer({
+  initialCamera: { azimuth: 0.2, elevation: 0.5, zoom: 1.0, target: [0, 0, 0] },
+});
+lockChoreo
+  .register('code-surf', mockSurf, { kind: 'surface' })
+  .enter('code-surf', 2.0, 1.0, 'fade')
+  .hudReveal('steady-hud', 1.0, 0.5, { el: steadyHudEl })
+  .cameraBeat(1.0, 2.0, { azimuth: 1.2, elevation: 0.7, zoom: 1.3, target: [1, 0, 0] });
+
+lockChoreo.evaluate(2.5, { apply: true, stage: lockStage });
+assert.equal(lockedCamCalls.length, 0, 'Scripted cameraBeat must NOT hijack camera when userCameraLocked is true');
+assert.equal(steadyHudEl.style.transform, '', 'HUD steady state (u=1) must clear transform for crisp ClearType');
+assert.equal(surfEl.classList.contains('hud-reveal'), false, '3D surface element must not get .hud-reveal class');
+assert.equal(surfMesh.material.opacity, 0.9, 'kind=surface must delegate opacity to setOpacity, not mutate material');
+assert.ok(surfOpacities.length >= 1);
+
+lockChoreo.evaluate(2.5, { apply: true, stage: lockStage, forceCamera: true });
+assert.equal(lockedCamCalls.length, 1);
+assert.equal(lockedCamCalls[0][0], 'immediate', 'forceCamera: true must apply camera even when locked');
+camLocked = false;
+lockChoreo.evaluate(3.0, { apply: true, stage: lockStage });
+assert.equal(lockedCamCalls[1][0], 'script', 'Unlocked camera must use stage.setCameraFromScript');
+console.log('[OK] ActorChoreographer (enter/exit/focus/hudReveal/cameraBeat/camera-lock/ClearType) verified');
 
 // ============================================================================
 // 7. Verify TimelineDirector v1 + v2 (`getGlobalDuration`, `seekGlobal`, `?export=`, `exposeTestHooks`)
@@ -696,6 +811,8 @@ for (const fnName of [
   'getCaptionState',
   'getActiveActorCount',
   'getMotionMagnitude',
+  'getGeometryAudit',
+  'getFontAudit',
 ]) {
   assert.equal(typeof hooks[fnName], 'function', `window.__simulify.${fnName} must be a function`);
 }
@@ -712,7 +829,63 @@ hooks.exitExportMode();
 assert.equal(manualFlag, false);
 delete globalThis.__simulify;
 delete globalThis.__ready;
-console.log('[OK] TimelineDirector v1/v2, parseUrlState(?export=), and exposeTestHooks v2 contract verified');
+
+// Wave 1 exposeTestHooks(SpacetimeClock) single-seek 1x dispatch + mountTimelineBar i18n
+let clockHookSyncCount = 0;
+let clockHookOnSeekCount = 0;
+let clockHookRenderCount = 0;
+const syncClock = new SpacetimeClock({
+  duration: 10,
+  manualMode: true,
+  acts: [
+    { id: 'a1', title: '第 1 幕', start: 0, end: 5 },
+    { id: 'a2', title: '第 2 幕', start: 5, end: 10 },
+  ],
+  onSeek: () => { clockHookOnSeekCount += 1; },
+});
+const syncChoreo = new ActorChoreographer();
+syncChoreo.register('base', makeMock3dActor(), { kind: '3d', initiallyVisible: true });
+const syncStage = {
+  setManualMode() {},
+  unlockUserCamera() {},
+  renderNow() { clockHookRenderCount += 1; },
+  getGeometryAudit: () => ({ totalMeshes: 4, cuboidMeshes: 1, sculptedMeshes: 3, cuboidRatio: 0.25 }),
+};
+const clockHooks = exposeTestHooks(syncClock, {
+  stage: syncStage,
+  choreographer: syncChoreo,
+  syncAll: (t) => {
+    clockHookSyncCount += 1;
+    syncChoreo.evaluate(t, { apply: true, stage: syncStage });
+  },
+});
+const evalBefore = syncChoreo._evalCount;
+clockHooks.seek(6.0);
+assert.equal(clockHookSyncCount, 1, 'exposeTestHooks.seek must invoke syncAll strictly once');
+assert.equal(clockHookOnSeekCount, 0, 'exposeTestHooks.seek must suppress redundant clock onSeek when syncAll exists');
+assert.equal(syncChoreo._evalCount - evalBefore, 1, 'choreographer.evaluate must run strictly once per seek');
+assert.equal(clockHookRenderCount, 1, 'stage.renderNow must run strictly once per seek');
+assert.equal(clockHooks.getGeometryAudit().sculptedMeshes, 3);
+assert.equal(clockHooks.getFontAudit().supported, false);
+
+withMockDocument(() => {
+  const barSlot = createMockElement('div');
+  const bar = mountTimelineBar(barSlot, syncClock, { lang: 'zh' });
+  const stageBtns = bar.root.querySelectorAll((n) => n.classList.contains('timeline-stage-btn'));
+  assert.equal(stageBtns.length, 2);
+  assert.equal(stageBtns[0].textContent, '第 1 幕');
+  bar.setLang('en', { stages: ['Act 1', 'Act 2'] });
+  assert.equal(stageBtns[0].textContent, 'Act 1');
+  assert.equal(stageBtns[1].textContent, 'Act 2');
+  bar.setStageLabels({ a1: 'Intro', a2: 'Fork' });
+  assert.equal(stageBtns[0].textContent, 'Intro');
+  assert.equal(stageBtns[1].textContent, 'Fork');
+  bar.unmount();
+});
+syncClock.destroy();
+delete globalThis.__simulify;
+delete globalThis.__ready;
+console.log('[OK] TimelineDirector v1/v2, SpacetimeClock 1x seek, mountTimelineBar i18n, and exposeTestHooks v2 verified');
 
 // ============================================================================
 // 8. Verify Spring negative `dt` guard (`kit/spring.js`)
@@ -780,32 +953,112 @@ withMockDocument(() => {
   assert.ok(yLabelEl, 'ChartCard.updateXY must render yLabel');
   assert.equal(yLabelEl.getAttribute('x'), '36', 'yLabel sits at padL=36 clear of left tick gutter');
   assert.equal(yLabelEl.getAttribute('y'), '11', 'yLabel sits above top plot line (padT=24)');
+  for (const tx of texts) {
+    assert.ok(Number(tx.getAttribute('font-size')) >= 11.5, 'ChartCard axis/tick labels must be >= 11.5px');
+  }
   assert.equal(svg.querySelectorAll((n) => n.getAttribute('class') === 'xy-ghost').length, 1);
   assert.equal(card._scrubMeta.xSpan, 100);
 
-  // LiveMathsPanel v2: surfaceMode + bidirectional LinkBus binding
+  // Wave 1 ChartCard persistent SVG node reuse (no pointerCapture loss) + movingAverageWindow trend smoothing
+  const noisyPts = Array.from({ length: 12 }, (_, i) => ({
+    x: i * 10,
+    y: -50 + (i % 2 === 0 ? 30 : -30),
+  }));
+  card.updateXY({
+    badge: 'MA5',
+    xMin: 0,
+    xMax: 110,
+    yMin: -100,
+    yMax: 0,
+    xLabel: 'Episode',
+    yLabel: 'Return',
+    movingAverageWindow: 5,
+    rawOpacity: 0.25,
+    series: [{ tone: 'teal', points: noisyPts }],
+    dot: { x: 60, y: -50, tone: 'teal' },
+  });
+  assert.equal(bodyEl.children[0], svg, 'Consecutive updateXY() must reuse the exact same persistent SVG root node');
+  const rawPolys = svg.querySelectorAll((n) => n.getAttribute('class') === 'xy-series-raw');
+  const smoothPolys = svg.querySelectorAll((n) => (n.getAttribute('class') || '').includes('xy-series-smooth'));
+  assert.equal(rawPolys.length, 1, 'movingAverageWindow must emit dimmed raw underlay polyline');
+  assert.equal(rawPolys[0].getAttribute('stroke-opacity'), '0.25');
+  assert.equal(smoothPolys.length, 1, 'movingAverageWindow must emit smoothed trend polyline');
+  const parseYRange = (poly) => {
+    const ys = String(poly.getAttribute('points') || '')
+      .trim()
+      .split(/\s+/)
+      .map((pair) => Number(pair.split(',')[1]));
+    return Math.max(...ys) - Math.min(...ys);
+  };
+  assert.ok(
+    parseYRange(smoothPolys[0]) < parseYRange(rawPolys[0]),
+    'Moving-average smoothed curve must strictly damp raw oscillation amplitude'
+  );
+
+  // LiveMathsPanel v2 + Wave 1 KaTeX AST helpers & normalizeUnicodeScripts rescue
+  const rescuedSegs = normalizeUnicodeScripts('Gₜ:ₜ₊₄ = Σ γᵏ R + γ⁴ V(Sₜ₊₄)');
+  assert.ok(rescuedSegs.some((s) => s.type === 'sub' && s.value === 't:t+4'), 'Must rescue Unicode subscript range t:t+4');
+  assert.ok(rescuedSegs.some((s) => s.type === 'sup' && s.value === 'k'), 'Must rescue Unicode superscript k');
+  assert.ok(rescuedSegs.some((s) => s.type === 'sup' && s.value === '4'), 'Must rescue Unicode superscript 4');
+  assert.ok(rescuedSegs.some((s) => s.type === 'sub' && s.value === 't+4'), 'Must rescue Unicode subscript t+4');
+  assert.equal(
+    rescuedSegs.some((s) => /[ₜ₊ₖ⁴]/.test(s.value)),
+    false,
+    'Normalized segments must contain zero leftover Unicode micro-scripts'
+  );
+
   const mathsBus = new LinkBus();
   const panel = new LiveMathsPanel(null, { title: 'TD(0)', surfaceMode: true, linkBus: mathsBus });
   assert.equal(panel.getElement().dataset.surfaceMode, 'true');
   panel.update({
     badge: 'α=0.5',
-    equations: [{
-      label: 'Update',
-      tokens: [
-        { text: 'V(S)', tone: 'teal', linkId: 'cell-2-1' },
-        { text: ' + α·δ', tone: 'amber', linkId: 'delta-td' },
-      ],
-    }],
+    equations: [
+      {
+        label: 'Structured AST',
+        tokens: [
+          mathSub(mathVar('G'), 't:t+n', { tone: 'teal', linkId: 'cell-2-1' }),
+          ' = ',
+          mathOp('∑', { lower: 'k=0', upper: 'n-1', display: true }),
+          mathSup(mathVar('γ'), 'k'),
+          mathSub(mathVar('R'), 't+k+1'),
+          ' + ',
+          mathFrac(mathSubSup(mathVar('V'), 't', 'π'), mathNum('100')),
+          mathGroup([mathText(' ns'), ' · AMAT'], { tone: 'amber' }),
+        ],
+      },
+      {
+        label: 'Legacy Unicode Rescue',
+        tokens: [{ text: 'V(Sₜ) ← V(Sₜ) + α·δₜ + γ⁴', tone: 'navy' }],
+      },
+    ],
   });
-  mathsBus.hover('cell-2-1', '3d');
-  const linkedTerms = panel.getElement().querySelectorAll((n) => n.dataset?.linkId === 'cell-2-1');
+  const panelRoot = panel.getElement();
+  const linkedTerms = panelRoot.querySelectorAll((n) => n.dataset?.linkId === 'cell-2-1');
   assert.equal(linkedTerms.length, 1);
+  mathsBus.hover('cell-2-1', '3d');
   assert.equal(linkedTerms[0].dataset.linkedHot, 'true');
   mathsBus.select('cell-2-1', '3d');
   assert.equal(linkedTerms[0].dataset.linkedSelected, 'true');
+
+  assert.ok(panelRoot.querySelectorAll((n) => n.tagName === 'VAR' && n.classList?.contains('lm-var')).length >= 4);
+  assert.ok(panelRoot.querySelectorAll((n) => n.tagName === 'SUB' && n.classList?.contains('lm-sub')).length >= 3);
+  assert.ok(panelRoot.querySelectorAll((n) => n.tagName === 'SUP' && n.classList?.contains('lm-sup')).length >= 2);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-subsup')).length, 1);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-frac')).length, 1);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-frac-num')).length, 1);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-frac-den')).length, 1);
+  assert.ok(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-op')).length >= 1);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-op-lower')).length, 1);
+  assert.equal(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-op-upper')).length, 1);
+  assert.ok(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-num')).length >= 1);
+  assert.ok(panelRoot.querySelectorAll((n) => n.classList?.contains('lm-text')).length >= 1);
+  const italicWords = panelRoot
+    .querySelectorAll((n) => n.tagName === 'VAR')
+    .map((n) => n.textContent);
+  assert.equal(italicWords.includes('AMAT'), false, 'Multi-letter Roman identifiers like AMAT must stay upright');
   panel.destroy();
 });
-console.log('[OK] PhaseScrubber, ChartCard v2 (Y-label/ghosts/scrub), and LiveMathsPanel v2 (surfaceMode/LinkBus) verified');
+console.log('[OK] PhaseScrubber, ChartCard v2 (persistent SVG/MA/11.5px), and LiveMathsPanel v2 (KaTeX AST/Unicode rescue) verified');
 
 // ============================================================================
 // 10. Verify Shell i18n (including RTL) & MasteryStore
@@ -1108,4 +1361,314 @@ assert.equal(caps.png, true);
 assert.equal(caps.htmlInCanvas, false);
 
 console.log('[OK] Node smoke checks passed for html-surface, manipulator, GridBrush, stage-exporter, and compositor');
-console.log('[OK] All Simulify v1 + v2 unit, mathematical, muxer, syntax, and link-integrity tests PASSED');
+
+// ============================================================================
+// 14. Verify Offline Four-Tier Typography & Crisp CanvasTexture (`kit/fonts.js`)
+// ============================================================================
+for (const role of ['display', 'sans', 'math', 'mathItalic', 'mono']) {
+  assert.ok(typeof FONT_STACKS[role] === 'string' && FONT_STACKS[role].length > 8, `FONT_STACKS.${role} must be non-empty`);
+}
+
+const monoFontStr = canvasFont('mono', 14, 600);
+assert.ok(monoFontStr.includes('JetBrains Mono'), 'canvasFont("mono") must lead with JetBrains Mono');
+assert.ok(
+  /Simulify Sans SC|Noto Sans SC|Source Han Sans/.test(monoFontStr),
+  `canvasFont("mono") must include offline CJK fallback, got: ${monoFontStr}`
+);
+assert.ok(monoFontStr.startsWith('normal 600 14px '), `Unexpected mono font spec: ${monoFontStr}`);
+
+const sansFontStr = canvasFont('sans', 13.5, 500);
+assert.ok(sansFontStr.includes('Inter') && sansFontStr.includes('Simulify Sans SC'));
+const displayFontStr = canvasFont('display', 22, 700);
+assert.ok(displayFontStr.includes('Newsreader') && displayFontStr.includes('Simulify Display SC'));
+const mathItStr = canvasFont('mathItalic', 15, 400);
+assert.ok(mathItStr.startsWith('italic 400 15px ') && mathItStr.includes('KaTeX_Math'));
+
+// Verify getFontStack appends CJK fallback even if a custom theme CSS var omits CJK
+const prevGetComputedStyle = globalThis.getComputedStyle;
+withMockDocument(() => {
+  globalThis.getComputedStyle = () => ({
+    getPropertyValue: (prop) => (prop === '--font-mono' ? '"JetBrains Mono", monospace' : ''),
+  });
+  const resolvedMono = getFontStack('mono');
+  assert.ok(
+    resolvedMono.includes('JetBrains Mono') && resolvedMono.includes('Simulify Sans SC'),
+    'getFontStack("mono") must append CJK fallback when CSS var omits CJK'
+  );
+});
+if (prevGetComputedStyle === undefined) delete globalThis.getComputedStyle;
+else globalThis.getComputedStyle = prevGetComputedStyle;
+
+let waitCbRes = null;
+const fontWaitRes = await waitForFonts(50, (res) => { waitCbRes = res; });
+assert.equal(fontWaitRes.status, 'unavailable', 'waitForFonts() must resolve safely in Node without DOM fonts');
+assert.deepEqual(waitCbRes, fontWaitRes, 'waitForFonts(ms, onReady) must deliver result to callback');
+assert.equal(areFontsReady(), true);
+assert.equal(typeof onFontsReady, 'function');
+
+// Verify createCrispCanvasTexture configures sRGB, mipmaps, 16x anisotropy, redraw & resize
+let crispDrawCalls = 0;
+let lastDrawSize = null;
+withMockDocument((doc) => {
+  const origCreate = doc.createElement;
+  doc.createElement = (tag) => {
+    if (tag === 'canvas') {
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          setTransform() {},
+          clearRect() {},
+          fillRect() {},
+          fillText() {},
+          imageSmoothingEnabled: false,
+          imageSmoothingQuality: 'low',
+        }),
+      };
+    }
+    return origCreate(tag);
+  };
+  const tex = createCrispCanvasTexture(THREE, {
+    width: 512,
+    height: 512,
+    anisotropy: 16,
+    draw: (ctx, w, h, meta) => {
+      crispDrawCalls += 1;
+      lastDrawSize = [w, h];
+      assert.equal(typeof meta.canvasFont, 'function');
+      assert.equal(ctx.imageSmoothingQuality, 'high');
+    },
+  });
+  assert.equal(tex.texture, tex, 'createCrispCanvasTexture must alias .texture to itself');
+  assert.equal(tex.anisotropy, 16);
+  assert.equal(tex.generateMipmaps, true);
+  assert.equal(tex.colorSpace, THREE.SRGBColorSpace);
+  assert.equal(crispDrawCalls, 1);
+  assert.deepEqual(lastDrawSize, [512, 512]);
+  tex.redraw({ step: 2 });
+  assert.equal(crispDrawCalls, 2);
+  tex.resize(1024, 512);
+  assert.equal(crispDrawCalls, 3);
+  assert.deepEqual(lastDrawSize, [1024, 512]);
+  tex.dispose();
+  tex.redraw();
+  assert.equal(crispDrawCalls, 3, 'Disposed texture must ignore subsequent redraw() calls');
+});
+console.log('[OK] Offline typography kit (kit/fonts.js: FONT_STACKS/canvasFont CJK/waitForFonts/createCrispCanvasTexture) verified');
+
+// ============================================================================
+// 15. Verify Cross-Domain Non-Cuboid 3D Sculpting Library (`kit/geo-sculpt.js`)
+// ============================================================================
+const GeoSculpt = await import('../kit/geo-sculpt.js');
+const {
+  SCULPT_GEO_KINDS,
+  SCULPT_MATERIAL_PRESETS,
+  createSculptMaterial,
+  createLathedSolid,
+  createGlassVessel,
+  createSculptedProbe,
+  createBeaconLighthouse,
+  createBevelledProfile,
+  createGearWheel,
+  createHorseshoeYoke,
+  createArchSpan,
+  createAirfoilVane,
+  createHeightfieldSurface,
+  createFracturedChasm,
+  createParametricSurface,
+  createDeformableStrip,
+  createHelicalCoil,
+  createTaperedConduit,
+  createPleatedBellows,
+} = GeoSculpt;
+
+assert.ok(Array.isArray(SCULPT_GEO_KINDS) && SCULPT_GEO_KINDS.length === 9);
+assert.ok(Object.keys(SCULPT_MATERIAL_PRESETS).length >= 10);
+
+// 15a. Lit PBR Material Factory (zero MeshBasicMaterial, adapts to paper-ink & dark-studio)
+for (const presetName of Object.keys(SCULPT_MATERIAL_PRESETS)) {
+  const matLight = createSculptMaterial(presetName, { theme: 'paper-ink' });
+  const matDark = createSculptMaterial(presetName, { theme: 'dark-studio' });
+  for (const m of [matLight, matDark]) {
+    assert.ok(
+      m.isMeshStandardMaterial || m.isMeshPhysicalMaterial,
+      `Preset "${presetName}" must construct a physically lit PBR material`
+    );
+    assert.equal(Boolean(m.isMeshBasicMaterial), false, `Preset "${presetName}" must never use MeshBasicMaterial`);
+    m.dispose();
+  }
+}
+
+// Helper to verify every generated mesh has finite vertices/normals, valid indices, simulifyGeoKind & PBR material
+function assertValidSculpt(root, expectedKinds, label) {
+  const allowed = new Set(Array.isArray(expectedKinds) ? expectedKinds : [expectedKinds]);
+  let meshCount = 0;
+  root.traverse((obj) => {
+    if (!obj || !obj.isMesh) return;
+    meshCount += 1;
+    const meshKind = obj.userData?.simulifyGeoKind;
+    const geoKind = obj.geometry?.userData?.simulifyGeoKind;
+    assert.ok(
+      SCULPT_GEO_KINDS.includes(meshKind),
+      `${label}: mesh.userData.simulifyGeoKind ("${meshKind}") must be a registered sculpt kind`
+    );
+    assert.equal(geoKind, meshKind, `${label}: geometry.userData.simulifyGeoKind must match mesh tag`);
+    assert.ok(allowed.has(meshKind), `${label}: unexpected kind "${meshKind}", expected one of [${[...allowed]}]`);
+
+    const pos = obj.geometry.getAttribute('position');
+    assert.ok(pos && pos.count > 0, `${label}: geometry must contain vertices`);
+    for (let i = 0; i < pos.array.length; i += 1) {
+      assert.ok(Number.isFinite(pos.array[i]), `${label}: NaN/Infinity in position[${i}]`);
+    }
+    const norm = obj.geometry.getAttribute('normal');
+    assert.ok(norm && norm.count === pos.count, `${label}: geometry must contain matching vertex normals`);
+    for (let i = 0; i < norm.array.length; i += 1) {
+      assert.ok(Number.isFinite(norm.array[i]), `${label}: NaN/Infinity in normal[${i}]`);
+    }
+    const idx = obj.geometry.getIndex();
+    if (idx) {
+      for (let i = 0; i < idx.array.length; i += 1) {
+        const v = idx.array[i];
+        assert.ok(Number.isInteger(v) && v >= 0 && v < pos.count, `${label}: index ${v} out of range [0, ${pos.count})`);
+      }
+    }
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const m of mats) {
+      assert.ok(m && (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial), `${label}: mesh must use lit PBR material`);
+      assert.equal(Boolean(m.isMeshBasicMaterial), false, `${label}: mesh must never use unlit MeshBasicMaterial`);
+    }
+  });
+  assert.ok(meshCount > 0, `${label}: must produce at least one 3D mesh`);
+}
+
+// 15b. Family 1 — Turned / Lathed Precision Solids
+const lathed = createLathedSolid([[0.01, 0], [0.25, 0.05], [0.18, 0.4], [0.01, 0.5]], { smooth: true, closed: true });
+assertValidSculpt(lathed, 'lathe', 'createLathedSolid');
+
+for (const style of ['ampoule', 'flask', 'dome', 'lens']) {
+  const vessel = createGlassVessel({ style, fillLevel: style === 'lens' ? null : 0.45 });
+  assertValidSculpt(vessel, 'lathe', `createGlassVessel(${style})`);
+  if (vessel.setFillLevel && vessel.fluidMesh) {
+    vessel.setFillLevel(0.8);
+    assertValidSculpt(vessel, 'lathe', `createGlassVessel(${style}).setFillLevel`);
+  }
+}
+
+const probe = createSculptedProbe({ tone: 'teal', vane: true });
+assertValidSculpt(probe, ['lathe', 'extrude'], 'createSculptedProbe');
+probe.setAccentColor('amber');
+probe.setHeading(Math.PI / 3);
+probe.setEmissiveIntensity(0.75);
+assert.ok(Math.abs(probe.rotation.y - Math.PI / 3) < 1e-6);
+
+const beacon = createBeaconLighthouse({ fresnelRings: 4, color: 'gold' });
+assertValidSculpt(beacon, 'lathe', 'createBeaconLighthouse');
+beacon.setBeaconColor('teal');
+beacon.setBeaconIntensity(1.1);
+
+// 15c. Family 2 — Bevelled Extruded Profiles
+const profileMesh = createBevelledProfile([[-0.4, -0.2], [0.4, -0.2], [0.3, 0.3], [-0.3, 0.3]], { depth: 0.2 });
+assertValidSculpt(profileMesh, 'extrude', 'createBevelledProfile');
+
+const gear = createGearWheel({ teeth: 14, spokes: 4, hub: true });
+assertValidSculpt(gear, ['extrude', 'lathe'], 'createGearWheel');
+
+const yoke = createHorseshoeYoke({ poleTips: true });
+assertValidSculpt(yoke, 'extrude', 'createHorseshoeYoke');
+
+for (const archStyle of ['parabolic', 'circular', 'pointed']) {
+  assertValidSculpt(createArchSpan({ archStyle }), 'extrude', `createArchSpan(${archStyle})`);
+}
+assertValidSculpt(createAirfoilVane({ camber: 0.04, orient: 'xz' }), 'extrude', 'createAirfoilVane');
+
+// 15d. Family 3 — Zero-GC Deformable Heightfield, Fractured Chasm, Parametric Surface & Elastic Strip
+const hf = createHeightfieldSurface({
+  width: 4,
+  depth: 3,
+  segsX: 16,
+  segsZ: 12,
+  heightFn: (u, v) => Math.sin(u * Math.PI) * Math.sin(v * Math.PI) * 0.6,
+  colorFn: (u, v, y, out) => out.setRGB(0.2 + u * 0.5, 0.4 + y * 0.4, 0.6),
+  skirt: true,
+});
+assertValidSculpt(hf, 'heightfield', 'createHeightfieldSurface');
+const hfPosArr = hf.geometry.getAttribute('position').array;
+const hfNormArr = hf.geometry.getAttribute('normal').array;
+const hfColArr = hf.geometry.getAttribute('color').array;
+hf.updateHeights(
+  (u, v) => 0.4 + 0.5 * Math.cos((u - 0.5) * Math.PI) * Math.cos((v - 0.5) * Math.PI),
+  (u, v, y, out) => out.setRGB(0.8, 0.3, 0.2)
+);
+assert.equal(hf.geometry.getAttribute('position').array, hfPosArr, 'Heightfield updateHeights must mutate position buffer in-place (zero GC)');
+assert.equal(hf.geometry.getAttribute('normal').array, hfNormArr, 'Heightfield updateHeights must mutate normal buffer in-place (zero GC)');
+assert.equal(hf.geometry.getAttribute('color').array, hfColArr, 'Heightfield updateHeights must mutate color buffer in-place (zero GC)');
+assert.ok(Math.abs(hf.sampleHeight(0, 0) - 0.9) < 0.03, `Expected center sampleHeight ~0.9, got ${hf.sampleHeight(0, 0)}`);
+assertValidSculpt(hf, 'heightfield', 'createHeightfieldSurface.afterUpdate');
+
+const chasm = createFracturedChasm({ width: 4, depth: 1, segsX: 24, segsZ: 10, glowEmber: true });
+assertValidSculpt(chasm, 'chasm', 'createFracturedChasm');
+const chasmPosArr = chasm.chasmMesh.geometry.getAttribute('position').array;
+chasm.setCarveProgress(0);
+assert.equal(chasm.chasmMesh.geometry.getAttribute('position').array, chasmPosArr, 'Chasm setCarveProgress must mutate in-place (zero GC)');
+assert.equal(chasm.emberMesh.visible, false, 'Ember seam should hide when chasm is uncarved (u=0)');
+let maxAbsYAt0 = 0;
+for (let i = 1; i < chasmPosArr.length; i += 3) maxAbsYAt0 = Math.max(maxAbsYAt0, Math.abs(chasmPosArr[i]));
+assert.equal(maxAbsYAt0, 0, 'Uncarved chasm (u=0) must flatten Y to 0');
+chasm.setCarveProgress(0.85);
+assert.equal(chasm.chasmMesh.geometry.getAttribute('position').array, chasmPosArr, 'Chasm re-carve must remain zero-GC');
+assert.equal(chasm.emberMesh.visible, true);
+assertValidSculpt(chasm, 'chasm', 'createFracturedChasm.carved');
+
+const paramSurf = createParametricSurface(
+  12,
+  10,
+  (u, v, out) => out.set((u - 0.5) * 2, Math.sin(u * Math.PI) * 0.4, (v - 0.5) * 2),
+  { colorFn: (u, v, pos, out) => out.setRGB(u, v, 0.5) }
+);
+assertValidSculpt(paramSurf, 'parametric', 'createParametricSurface');
+const paramPosArr = paramSurf.geometry.getAttribute('position').array;
+paramSurf.updateSurface((u, v, out) => out.set((u - 0.5) * 2, Math.cos(v * Math.PI) * 0.3, (v - 0.5) * 2));
+assert.equal(paramSurf.geometry.getAttribute('position').array, paramPosArr, 'Parametric updateSurface must be zero-GC');
+assertValidSculpt(paramSurf, 'parametric', 'createParametricSurface.updated');
+
+const singleStrip = createDeformableStrip({ length: 2.0, width: 0.25, thickness: 0.05, curvature: 0 });
+assertValidSculpt(singleStrip, 'strip', 'createDeformableStrip(single)');
+const stripPosArr = singleStrip.geometry.getAttribute('position').array;
+const tipBent = singleStrip.setCurvature(0.5);
+assert.equal(singleStrip.geometry.getAttribute('position').array, stripPosArr, 'Strip setCurvature must mutate in-place (zero GC)');
+assert.ok(tipBent.tipPos.every(Number.isFinite) && tipBent.tipPos[1] > 0.3 && Math.abs(tipBent.tipAngle - 1.0) < 1e-5);
+assertValidSculpt(singleStrip, 'strip', 'createDeformableStrip(single).bent');
+
+const biStrip = createDeformableStrip({ length: 2.0, bimetallic: true, curvature: 0 });
+assertValidSculpt(biStrip, 'strip', 'createDeformableStrip(bimetallic)');
+const biTopArr = biStrip.topMesh.geometry.getAttribute('position').array;
+const biBotArr = biStrip.bottomMesh.geometry.getAttribute('position').array;
+const biTip = biStrip.setCurvature(-0.4);
+assert.equal(biStrip.topMesh.geometry.getAttribute('position').array, biTopArr, 'Bimetallic top layer must update in-place');
+assert.equal(biStrip.bottomMesh.geometry.getAttribute('position').array, biBotArr, 'Bimetallic bottom layer must update in-place');
+assert.ok(biTip.tipPos[1] < -0.2, 'Negative curvature must deflect tip downward');
+
+// 15e. Family 4 — True 3D Helical Coils, Variable-Radius Conduits & Pleated Bellows
+const coil = createHelicalCoil({ turns: 5, leads: 0.12 });
+assertValidSculpt(coil, 'helix', 'createHelicalCoil');
+coil.setGlow(0.85, 'ember');
+coil.setCompression(0.75);
+assert.ok(Math.abs(coil.scale.y - 0.75) < 1e-6);
+
+const conduit = createTaperedConduit(
+  [[0, 0, 0], [0.8, 0.5, 0.2], [1.6, 0.2, -0.3]],
+  (t) => 0.04 + 0.06 * Math.sin(t * Math.PI),
+  { colorFn: (t, out) => out.setRGB(0.1 + 0.7 * t, 0.6, 0.5) }
+);
+assertValidSculpt(conduit, 'conduit', 'createTaperedConduit');
+
+const bellows = createPleatedBellows({ pleats: 5, height: 0.7 });
+assertValidSculpt(bellows, 'bellows', 'createPleatedBellows');
+const bellowsPosArr = bellows.geometry.getAttribute('position').array;
+const extH = bellows.setExtension(1.4);
+assert.equal(bellows.geometry.getAttribute('position').array, bellowsPosArr, 'Bellows setExtension must mutate in-place (zero GC)');
+assert.ok(extH > 0.85, `Extended bellows height must grow cleanly, got ${extH}`);
+assertValidSculpt(bellows, 'bellows', 'createPleatedBellows.extended');
+
+console.log('[OK] Cross-domain non-cuboid 3D sculpting kit (kit/geo-sculpt.js: all 5 families, 10 PBR presets & zero-GC updates) verified');
+console.log('[OK] All Simulify v1 + v2.1 unit, typography, geo-sculpt, mathematical, muxer, syntax, and link-integrity tests PASSED');
