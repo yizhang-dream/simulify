@@ -1748,8 +1748,8 @@ html[data-export] *::after {
   animation-play-state: paused !important;
 }
 
-html[data-export] [data-export-role="chrome"],
-html[data-export] .export-popover,
+html[data-export] [data-export-role="chrome"]:not(.export-popover),
+html[data-export-cli="1"] .export-popover,
 html[data-export] .stage-tooltip {
   display: none !important;
 }
@@ -1906,7 +1906,9 @@ html[data-export="caption"] [data-export-role="hud"] {
   color: var(--ink);
 }
 
-.export-popover[hidden] {
+.export-popover[hidden],
+.export-progress-wrap[hidden],
+.export-cancel-btn[hidden] {
   display: none;
 }
 
