@@ -1,8 +1,8 @@
 {
   "name": "simulify",
   "displayName": "Simulify",
-  "version": "1.0.0",
-  "description": "Turn mechanisms, physical structures, protocols, math laws and algorithms into offline interactive 3D/4D explainers: cutaway views, scrubbable multi-act timelines, live equation substitution and what-if controls, built from a zero-build ESM kit.",
+  "version": "2.1.0",
+  "description": "Turn mechanisms, physical structures, protocols, math laws and algorithms into crisp offline interactive 3D/4D explainers: 1:1 HiDPI WebGPU + HTML-in-Canvas engine, offline four-tier typography & KaTeX live maths, cross-domain non-cuboid 3D sculpting kit, multi-beat interactive quality oracle, and deterministic MP4/WebM/GIF export.",
   "logo": "assets/logo.svg",
   "author": "yizhang-dream",
   "homepage": "https://simulify.xn--ltr42g543b.cn",
