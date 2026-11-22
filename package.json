@@ -1,7 +1,7 @@
 {
   "name": "simulify",
-  "version": "1.0.0",
-  "description": "Interactive 3D/4D mechanism, cutaway, and simulation explainer skill & zero-build ESM kit: teach structures, physical laws, protocols, algorithms, and multi-act chapters through 1:1 isomorphic 3D/2D stages, scrubbable timelines, live maths substitution, and counterfactual controls.",
+  "version": "2.1.0",
+  "description": "Turn mechanisms, physical structures, protocols, math laws and algorithms into crisp offline interactive 3D/4D explainers: 1:1 HiDPI WebGPU + HTML-in-Canvas engine, offline four-tier typography & KaTeX live maths, cross-domain non-cuboid 3D sculpting kit, multi-beat interactive quality oracle, and deterministic MP4/WebM/GIF export.",
   "type": "module",
   "license": "MIT",
   "scripts": {

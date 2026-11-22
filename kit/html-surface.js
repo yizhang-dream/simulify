@@ -622,6 +622,7 @@ export class HtmlSurfaceManager {
       opacity,
       visible: true,
       dirty: true,
+      awaitingPaint: true,
       needsAlloc: true,
       uploadedOnce: false,
       cssWidth: 0,
@@ -874,6 +875,9 @@ export class HtmlSurfaceManager {
       surf.height = height;
       surf.needsAlloc = true;
       surf.dirty = true;
+      if (this.nativeEnabled) {
+        surf.awaitingPaint = true;
+      }
       return true;
     }
     return false;
@@ -1033,8 +1037,48 @@ export class HtmlSurfaceManager {
     }
   }
 
+  _isElementCssHidden(el) {
+    if (!el) return true;
+    if (el.hidden === true || el.dataset?.hudHidden === 'true') return true;
+    if (typeof getComputedStyle === 'function') {
+      try {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) <= 0.005) {
+          return true;
+        }
+      } catch {
+        // Ignore in headless/mock environments
+      }
+    }
+    return false;
+  }
+
+  /** Return true if any currently visible mounted surface still needs a Blink paint or GPU upload. */
+  hasPendingVisible() {
+    if (this._disposed || this.surfaces.size === 0) return false;
+    if (!this.nativeEnabled) {
+      for (const surf of this.surfaces.values()) {
+        if (surf.visible && surf.mesh?.visible !== false && (surf.dirty || !surf.uploadedOnce)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    for (const surf of this.surfaces.values()) {
+      if (
+        surf.visible &&
+        surf.mesh?.visible !== false &&
+        !this._isElementCssHidden(surf.el) &&
+        (surf.dirty || surf.awaitingPaint || !surf.uploadedOnce || surf.needsAlloc)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   _uploadSurface(surf, ctxInfo) {
-    if (!surf.visible && surf.uploadedOnce) return false;
+    if (!surf.visible || this._isElementCssHidden(surf.el)) return false;
     this._measureElement(surf, this.stage?.camera || null);
     if (surf.width <= 0 || surf.height <= 0) return false;
     if (surf.needsAlloc || !surf.extTex) {
@@ -1064,22 +1108,24 @@ export class HtmlSurfaceManager {
         }
       }
       surf.dirty = false;
+      surf.awaitingPaint = false;
       surf.uploadedOnce = true;
       return true;
     } catch {
       // Element may not have a paint record on the very first tick; retry on next paint
       surf.dirty = true;
+      surf.awaitingPaint = true;
       return false;
     }
   }
 
-  _resolvePaintWaiters() {
+  _resolvePaintWaiters(receivedPaint = true) {
     if (this._paintWaiters.size === 0) return;
     const waiters = Array.from(this._paintWaiters);
     this._paintWaiters.clear();
     for (const resolve of waiters) {
       try {
-        resolve();
+        resolve(receivedPaint);
       } catch {
         // ignore
       }
@@ -1089,11 +1135,11 @@ export class HtmlSurfaceManager {
   _handlePaint(event) {
     this._paintPending = false;
     if (this._disposed) {
-      this._resolvePaintWaiters();
+      this._resolvePaintWaiters(false);
       return;
     }
-    this.syncPaint(event?.changedElements ?? null);
-    this._resolvePaintWaiters();
+    this.syncPaint(event?.changedElements ?? null, { fromPaint: true });
+    this._resolvePaintWaiters(true);
     if (!this.stage._manualMode && this.stage._rendererReady) {
       this.stage.requestRender();
     }
@@ -1102,7 +1148,7 @@ export class HtmlSurfaceManager {
   /**
    * Wait for any pending `<canvas content="drawable">` `onpaint` & GPU texture upload
    * (or synchronously flush dirty HiDPI fallback canvases on non-HIC browsers).
-   * Used by `compositor.js` and `stage.renderNowAsync()` for deterministic export capture.
+   * Used by `compositor.js`, `stage.renderNowAsync()`, and `__simulify.seek(t)` for deterministic capture.
    */
   async flushPaint({ timeoutMs = 180 } = {}) {
     if (this._disposed || this.surfaces.size === 0) return false;
@@ -1111,38 +1157,33 @@ export class HtmlSurfaceManager {
       return this.syncPaint(null);
     }
 
-    const hasPendingVisible = () => {
-      if (this._paintPending) return true;
-      for (const surf of this.surfaces.values()) {
-        if (surf.visible && surf.mesh?.visible !== false && (surf.dirty || !surf.uploadedOnce || surf.needsAlloc)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    if (!hasPendingVisible()) return false;
+    if (!this.hasPendingVisible()) return false;
 
     for (let pass = 0; pass < 2; pass += 1) {
-      if (!hasPendingVisible()) break;
+      if (!this.hasPendingVisible()) break;
 
+      let receivedPaint = false;
       await new Promise((resolve) => {
         let settled = false;
         let timer = null;
-        const done = () => {
+        const done = (fromOnPaint = false) => {
           if (settled) return;
           settled = true;
+          receivedPaint = Boolean(fromOnPaint);
           this._paintWaiters.delete(done);
           if (timer) clearTimeout(timer);
           resolve();
         };
         this._paintWaiters.add(done);
-        timer = setTimeout(done, Math.max(40, Number(timeoutMs) || 180));
+        timer = setTimeout(() => done(false), Math.max(40, Number(timeoutMs) || 180));
         this._paintPending = false;
         this.requestPaint();
       });
 
-      this.syncPaint(null);
+      if (!receivedPaint && this.hasPendingVisible()) {
+        // Timeout fallback: attempt upload only when element is visible and laid out
+        this.syncPaint(null, { fromPaint: true });
+      }
     }
 
     return true;
@@ -1150,9 +1191,11 @@ export class HtmlSurfaceManager {
 
   /**
    * Upload dirty or changed drawable elements into GPU textures (or redraw dirty fallback canvases).
-   * Called automatically from `canvas.onpaint`, and safely callable from deterministic render loops.
+   * In native HTML-in-Canvas mode, calls outside `canvas.onpaint` (`fromPaint: false`) never
+   * prematurely upload or clear `dirty` for surfaces still awaiting Blink paint after a DOM or
+   * `hidden -> visible` transition — `onpaint` / `flushPaint()` remains the authoritative upload exit.
    */
-  syncPaint(changedElements = null) {
+  syncPaint(changedElements = null, opts = {}) {
     if (this._disposed || this.surfaces.size === 0) return false;
 
     if (!this.nativeEnabled) {
@@ -1165,10 +1208,9 @@ export class HtmlSurfaceManager {
       return updatedAny;
     }
 
-    const ctxInfo = this._getBackendContext();
-    if (!ctxInfo) return false;
-
-    if (changedElements && changedElements.length > 0) {
+    const fromPaint = Boolean(opts && opts.fromPaint);
+    const hasChangedList = Boolean(changedElements && changedElements.length > 0);
+    if (hasChangedList) {
       for (const changedEl of changedElements) {
         const id = this._elToId.get(changedEl);
         if (id) {
@@ -1178,13 +1220,23 @@ export class HtmlSurfaceManager {
       }
     }
 
+    const ctxInfo = this._getBackendContext();
+    if (!ctxInfo) return false;
+
     let uploadedAny = false;
     let needsRetry = false;
     for (const surf of this.surfaces.values()) {
-      if (surf.dirty || !surf.uploadedOnce) {
+      if (!surf.visible || this._isElementCssHidden(surf.el)) continue;
+      if (surf.dirty || surf.awaitingPaint || !surf.uploadedOnce) {
+        if (!fromPaint && surf.awaitingPaint) {
+          // Defer upload until Blink fires canvas.onpaint with the freshly painted element record
+          surf.dirty = true;
+          needsRetry = true;
+          continue;
+        }
         const ok = this._uploadSurface(surf, ctxInfo);
         if (ok) uploadedAny = true;
-        else if (surf.dirty) needsRetry = true;
+        else if (surf.dirty || surf.awaitingPaint) needsRetry = true;
       }
     }
 
@@ -1209,6 +1261,7 @@ export class HtmlSurfaceManager {
     if (!surf) return;
     surf.dirty = true;
     if (this.nativeEnabled) {
+      surf.awaitingPaint = true;
       this.requestPaint();
     } else {
       this._syncFallbackSurface(surf);
@@ -1233,6 +1286,7 @@ export class HtmlSurfaceManager {
         }
       } else if (changed || !surf.uploadedOnce) {
         surf.dirty = true;
+        surf.awaitingPaint = true;
         this.requestPaint();
       }
     } else {
@@ -1371,7 +1425,7 @@ export class HtmlSurfaceManager {
 
   dispose() {
     this._disposed = true;
-    this._resolvePaintWaiters();
+    this._resolvePaintWaiters(false);
     for (const id of Array.from(this.surfaces.keys())) {
       this.unmount(id);
     }

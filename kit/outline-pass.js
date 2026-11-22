@@ -291,8 +291,14 @@ export class OutlinePass {
     camera.layers.enable(GROUND_LAYER);
     camera.layers.enable(SURFACE_LAYER);
 
+    // Force PassNodes to refresh on every explicit pipeline.render() (NodeUpdateType.RENDER),
+    // not once per browser rAF (NodeUpdateType.FRAME), so same-frame onpaint + renderNowAsync()
+    // and back-to-back deterministic export seeks never composite stale surfacePass/colorPass frames.
+    const renderUpdateType = THREE.NodeUpdateType?.RENDER ?? 'render';
+
     // 1. Lit 3D scene pass (SOLID_LAYER + GROUND_LAYER, keeps renderer MSAA)
     const colorPass = pass(scene, this._colorCamera);
+    colorPass.updateBeforeType = renderUpdateType;
 
     // 2. Non-MSAA nearest-filtered normal+depth pass (SOLID_LAYER only) — zero bilinear pre-blur!
     const solidPass = pass(scene, this._solidCamera, {
@@ -301,6 +307,7 @@ export class OutlinePass {
       magFilter: THREE.NearestFilter,
       generateMipmaps: false,
     });
+    solidPass.updateBeforeType = renderUpdateType;
     solidPass.setMRT(mrt({ output: vec4(normalView.mul(0.5).add(0.5), float(1.0)) }));
     if (solidPass.renderTarget?.texture) {
       solidPass.renderTarget.texture.minFilter = THREE.NearestFilter;
@@ -320,6 +327,7 @@ export class OutlinePass {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    surfacePass.updateBeforeType = renderUpdateType;
     if (surfacePass.renderTarget?.depthTexture) {
       surfacePass.renderTarget.depthTexture.minFilter = THREE.NearestFilter;
       surfacePass.renderTarget.depthTexture.magFilter = THREE.NearestFilter;
@@ -352,6 +360,9 @@ export class OutlinePass {
       this._bloomConfig.enabled && this._bloomAddon
         ? this._bloomAddon(colorNode, this._bloomConfig.strength, this._bloomConfig.radius, this._bloomConfig.threshold)
         : null;
+    if (bloomNode && 'updateBeforeType' in bloomNode) {
+      bloomNode.updateBeforeType = renderUpdateType;
+    }
 
     const composite = Fn(() => {
       const texel = vec2(1.0).div(viewportSize);

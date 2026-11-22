@@ -296,11 +296,11 @@ export function drawTileFace(ctx, state, width = 512, height = 512) {
   if (state.showValues || state.selected || state.isForkCell) {
     const centers = [
       [B / 2, 42],
-      [B - 46, B / 2],
+      [B - 53, B / 2],
       [B / 2, B - 40],
-      [46, B / 2],
+      [53, B / 2],
     ];
-    ctx.font = canvasFont('mono', 26, 700);
+    ctx.font = canvasFont('mono', 24, 700);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     q.forEach((val, idx) => {
@@ -317,7 +317,7 @@ export function drawTileFace(ctx, state, width = 512, height = 512) {
 
   // Center policy medallion: crisp arrow when converged/visited, honest subtle dot when unvisited
   ctx.beginPath();
-  ctx.arc(B / 2, B / 2, visited ? 34 : 22, 0, Math.PI * 2);
+  ctx.arc(B / 2, B / 2, visited ? 32 : 22, 0, Math.PI * 2);
   ctx.fillStyle = !visited
     ? 'rgba(246, 240, 229, 0.86)'
     : state.isForkCell
@@ -2388,7 +2388,6 @@ export class CodeTraceSurface {
     if (visible && !this._wasVisible) {
       this.surface.markDirty();
       this.stage.htmlSurfaces?.requestPaint?.();
-      this.stage.htmlSurfaces?.syncPaint?.(null);
       this.stage.requestRender?.();
     }
     this._wasVisible = visible;
