@@ -1024,71 +1024,116 @@ export class CliffInstrumentTray {
       this._arcNodeCoords = [];
 
       const span = nodes.length - 1;
-      const pts = nodes.map((cell, idx) => {
+      const tileTops = nodes.map((cell) => this.getTileWorldPos(cell[0], cell[1]));
+      const pts = tileTops.map((tp, idx) => {
         const u = idx / span;
-        const tp = this.getTileWorldPos(cell[0], cell[1]);
-        const archH = Math.sin(u * Math.PI) * (0.92 + Math.min(0.85, span * 0.16)) * rQuant;
-        return new THREE.Vector3(tp.x, tp.y + 0.06 + archH, tp.z);
+        const archH = Math.sin(u * Math.PI) * (1.16 + Math.min(0.88, span * 0.18)) * rQuant;
+        return new THREE.Vector3(tp.x, tp.y + 0.08 + archH, tp.z);
       });
 
       const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.4);
       this._arcCurve = curve;
 
-      // Frosted translucent glass tube on GROUND_LAYER (zero black outline artifacts)
+      // Richer translucent seafoam-teal frosted glass shell (stands out crisply on warm cream paper)
       const glassMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 48, 0.082, 16, false),
+        new THREE.TubeGeometry(curve, 52, 0.098, 18, false),
         new THREE.MeshPhysicalMaterial({
-          color: '#e8f5f3',
+          color: '#34d3c5',
+          emissive: '#0d9488',
+          emissiveIntensity: 0.24,
           transparent: true,
-          opacity: 0.46 * rQuant,
-          roughness: 0.15,
-          metalness: 0.04,
+          opacity: 0.36 * rQuant,
+          roughness: 0.14,
+          metalness: 0.06,
           depthWrite: false,
         })
       );
       glassMesh.layers.set(GROUND_LAYER);
       this.arcGroup.add(glassMesh);
 
+      // Bold saturated inner core beam inside the glass arc
       const coreMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 48, 0.022, 10, false),
-        new THREE.MeshBasicMaterial({ color: '#0f766e', transparent: true, opacity: 0.85 * rQuant, depthWrite: false })
+        new THREE.TubeGeometry(curve, 52, 0.036, 12, false),
+        new THREE.MeshBasicMaterial({ color: '#0f766e', transparent: true, opacity: 0.94 * rQuant, depthWrite: false })
       );
       coreMesh.layers.set(GROUND_LAYER);
       this.arcGroup.add(coreMesh);
 
+      const subDigits = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+      const dropMat = new THREE.MeshBasicMaterial({
+        color: '#149694',
+        transparent: true,
+        opacity: 0.32 * rQuant,
+        depthWrite: false,
+      });
+
       pts.forEach((p, idx) => {
         const isHorizon = idx === pts.length - 1;
+        const isStart = idx === 0;
         const bead = new THREE.Mesh(
-          new THREE.SphereGeometry(isHorizon ? 0.095 : 0.078, 16, 16),
+          new THREE.SphereGeometry(isHorizon ? 0.122 : isStart ? 0.105 : 0.092, 18, 18),
           new THREE.MeshStandardMaterial({
-            color: isHorizon ? '#e68a2e' : '#149694',
-            emissive: isHorizon ? '#b8631a' : '#0f766e',
-            emissiveIntensity: 0.55,
-            roughness: 0.22,
+            color: isHorizon ? '#f59e0b' : '#14b8a6',
+            emissive: isHorizon ? '#c26a1b' : '#0f766e',
+            emissiveIntensity: isHorizon ? 0.68 : 0.56,
+            roughness: 0.18,
           })
         );
         bead.position.copy(p);
         bead.layers.set(GROUND_LAYER);
         this.arcGroup.add(bead);
 
+        // Crisp glowing collar ring around each step bead
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(isHorizon ? 0.14 : 0.11, isHorizon ? 0.175 : 0.14, 24),
+          new THREE.MeshBasicMaterial({
+            color: isHorizon ? '#fbbf24' : '#5eead4',
+            transparent: true,
+            opacity: 0.72 * rQuant,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(p.x, p.y, p.z);
+        ring.layers.set(GROUND_LAYER);
+        this.arcGroup.add(ring);
+
+        // Subtle vertical drop-line connecting each elevated arc bead down to its tile center
+        const dropH = Math.max(0.02, p.y - (tileTops[idx].y + 0.04));
+        if (dropH > 0.12) {
+          const drop = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, dropH, 8), dropMat);
+          drop.position.set(p.x, tileTops[idx].y + 0.04 + dropH / 2, p.z);
+          drop.layers.set(GROUND_LAYER);
+          this.arcGroup.add(drop);
+        }
+
         this._arcNodeCoords.push({
           index: idx,
-          label: idx === 0 ? 's_t' : `s_{t+${idx}}`,
+          label: idx === 0 ? 'sₜ' : `sₜ₊${subDigits[idx] || idx}`,
           tone: isHorizon ? 'amber' : 'teal',
           worldPos: p.clone(),
         });
       });
 
-      // Backward credit pulse orbs gliding along the frosted arc from horizon -> s_t
+      // Bright amber-gold backward credit pulse orbs + outer halo gliding horizon -> sₜ
       this._arcPulses = [];
       for (let k = 0; k < 2; k += 1) {
-        const orb = new THREE.Mesh(
-          new THREE.SphereGeometry(0.068, 14, 14),
-          new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.92, depthWrite: false })
+        const pulseGroup = new THREE.Group();
+        pulseGroup.layers.set(GROUND_LAYER);
+        const core = new THREE.Mesh(
+          new THREE.SphereGeometry(0.082, 16, 16),
+          new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.96, depthWrite: false })
         );
-        orb.layers.set(GROUND_LAYER);
-        this.arcGroup.add(orb);
-        this._arcPulses.push(orb);
+        core.layers.set(GROUND_LAYER);
+        const halo = new THREE.Mesh(
+          new THREE.SphereGeometry(0.15, 16, 16),
+          new THREE.MeshBasicMaterial({ color: '#fbbf24', transparent: true, opacity: 0.36, depthWrite: false })
+        );
+        halo.layers.set(GROUND_LAYER);
+        pulseGroup.add(core, halo);
+        this.arcGroup.add(pulseGroup);
+        this._arcPulses.push(pulseGroup);
       }
     }
 
@@ -1223,9 +1268,11 @@ export class CliffInstrumentTray {
       const ch = group.children[i];
       if (preserveChild && ch === preserveChild) continue;
       group.remove(ch);
-      ch.geometry?.dispose?.();
-      if (Array.isArray(ch.material)) ch.material.forEach((m) => m?.dispose?.());
-      else ch.material?.dispose?.();
+      ch.traverse((node) => {
+        node.geometry?.dispose?.();
+        if (Array.isArray(node.material)) node.material.forEach((m) => m?.dispose?.());
+        else node.material?.dispose?.();
+      });
     }
   }
 

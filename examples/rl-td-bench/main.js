@@ -46,6 +46,10 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const lerp = (a, b, u) => a + (b - a) * clamp01(u);
+const SUB_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+const SUP_DIGITS = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+const toSub = (n) => String(n).split('').map((ch) => SUB_DIGITS[Number(ch)] ?? ch).join('');
+const toSup = (n) => String(n).split('').map((ch) => SUP_DIGITS[Number(ch)] ?? ch).join('');
 const urlState = parseUrlState(location.search);
 if (urlState.thumb) {
   document.documentElement.dataset.thumb = '1';
@@ -382,6 +386,12 @@ async function bootstrap() {
     .exit('td-wavefront', 15.05, 0.4, 'fade');
 
   choreographer.hudReveal('right-dock', 7.3, 0.55, { el: $('right-dock'), from: [18, 0, 0] });
+
+  // Progressive top-bar control disclosure (zero spoilers in Beat 1!)
+  choreographer.hudReveal('pill-alpha', 7.2, 0.4, { el: $('pill-alpha'), from: [0, -6, 0], countInSparsity: false });
+  choreographer.hudReveal('btn-paint-cliff', 15.4, 0.4, { el: $('btn-paint-cliff'), from: [0, -6, 0], countInSparsity: false });
+  choreographer.hudReveal('pill-eps', 15.4, 0.4, { el: $('pill-eps'), from: [0, -6, 0], countInSparsity: false });
+  choreographer.hudReveal('pill-n', 22.4, 0.4, { el: $('pill-n'), from: [0, -6, 0], countInSparsity: false });
 
   choreographer
     .register('cliff-chasm', tray.chasmSignGroup, { initiallyVisible: false })
@@ -768,6 +778,8 @@ async function bootstrap() {
       renderCellInspector(snap, lang);
     } else if (beatNum === 4) {
       const fNow = engine.sampleAtEpisode(epFloat);
+      const nSub = toSub(engine.nStep);
+      const nSup = toSup(engine.nStep);
       liveMaths.titleEl.textContent = lang === 'en' ? `n-step Return (n=${engine.nStep})` : `n 步截断回报 (n=${engine.nStep})`;
       liveMaths.update({
         badge: `G=${snap.nStepTarget.toFixed(1)}`,
@@ -776,9 +788,9 @@ async function bootstrap() {
           {
             label: lang === 'en' ? 'Truncated Horizon' : '多步回报目标',
             tokens: [
-              { text: `G_{t:t+${engine.nStep}}`, tone: 'amber', emph: true, linkId: 'td-target' },
-              { text: ' = Σγ^k R + ' },
-              { text: `γ^${engine.nStep} V(S_{t+${engine.nStep}})`, tone: 'teal', emph: true, linkId: 'td-vs-next' },
+              { text: `Gₜ:ₜ₊${nSub}`, tone: 'amber', emph: true, linkId: 'td-target' },
+              { text: ' = Σ γᵏ R + ' },
+              { text: `γ${nSup} V(Sₜ₊${nSub})`, tone: 'teal', emph: true, linkId: 'td-vs-next' },
             ],
           },
         ],
@@ -920,8 +932,8 @@ async function bootstrap() {
         badge: `S:${snap.sarsaOnlineReturn.toFixed(0)} Q:${snap.qOnlineReturn.toFixed(0)}`,
         xMin: 1,
         xMax: totalEps,
-        yMin: -105,
-        yMax: 8,
+        yMin: -108,
+        yMax: Math.max(24, snap.greedyRef + 22),
         xLabel: lang === 'en' ? 'Episodes (1–240)' : '训练回合 (1–240)',
         yLabel: lang === 'en' ? 'Return' : '回合回报',
         ghosts,
@@ -959,9 +971,10 @@ async function bootstrap() {
     if (arcNodes.length >= 2) {
       const first = arcNodes[0];
       const last = arcNodes[arcNodes.length - 1];
+      const spanSub = toSub(arcNodes.length - 1);
       items.push({
         id: 'arc-0',
-        label: 's_t',
+        label: 'sₜ',
         sublabel: lang === 'en' ? 'Update target' : '回写起点',
         tone: 'teal',
         dx: -46,
@@ -970,7 +983,7 @@ async function bootstrap() {
       });
       items.push({
         id: 'arc-end',
-        label: `s_{t+${arcNodes.length - 1}}`,
+        label: `sₜ₊${spanSub}`,
         sublabel: `n = ${engine.nStep}`,
         tone: 'amber',
         dx: 46,

@@ -242,6 +242,8 @@
 .ghost-diff-badge[hidden],
 .brush-banner[hidden],
 .brush-reset-btn[hidden],
+.brush-toggle[hidden],
+.param-pill[hidden],
 .beat-ep-tag[hidden],
 .mobile-code-slot[hidden] {
   display: none !important;
@@ -516,6 +518,12 @@
   background: var(--navy);
   border-color: var(--navy);
   color: #fffaf2;
+}
+
+.unified-tab sub {
+  font-size: 0.78em;
+  line-height: 0;
+  vertical-align: -0.22em;
 }
 
 .unified-note {
