@@ -1502,29 +1502,14 @@ export class CodeTraceSurface {
     this.id = id;
     this.worldWidth = worldWidth;
     this.worldHeight = worldHeight;
+    this._wasVisible = false;
     this.codeCard = new CodeTraceCard(null, { linkBus, surfaceMode: true });
     this.el = this.codeCard.getElement();
     this.el.dataset.hudHidden = 'true';
-    this.el.dataset.exportRole = 'panel';
-
-    // Custom PlaneGeometry with upright V-coordinate orientation for Chrome 157+ HTML-in-Canvas
-    // (gl.texElementSubImage2D + TSL 1-uv.y inverts V on WebGL2; CSS matrix3d fallback only reads geometry bbox)
-    const planeGeo = new THREE.PlaneGeometry(worldWidth, worldHeight);
-    if (stage.htmlSurfaces?.nativeEnabled && stage.backendKind !== 'webgpu') {
-      const uv = planeGeo.attributes.uv;
-      for (let i = 0; i < uv.count; i += 1) {
-        uv.setY(i, 1 - uv.getY(i));
-      }
-      uv.needsUpdate = true;
-    }
-    const mesh = new THREE.Mesh(
-      planeGeo,
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.FrontSide })
-    );
-    mesh.layers.set(GROUND_LAYER);
+    // Diegetic 3D stage object inside <canvas content="drawable">, NOT an outer HUD panel
+    this.el.dataset.exportRole = 'stage';
 
     this.surface = stage.htmlSurfaces.mount(id, this.el, {
-      mesh,
       worldWidth,
       worldHeight,
       mode: 'interactive',
@@ -1561,9 +1546,16 @@ export class CodeTraceSurface {
   }
 
   setChoreoState(state) {
-    this.el.dataset.hudHidden = state.visible ? 'false' : 'true';
-    this.surface.setVisible(state.visible);
+    const visible = Boolean(state.visible);
+    this.el.dataset.hudHidden = visible ? 'false' : 'true';
+    this.surface.setVisible(visible);
     this.surface.setOpacity(state.opacity);
+    if (visible && !this._wasVisible) {
+      this.surface.markDirty();
+      this.stage.htmlSurfaces?.requestPaint?.();
+      this.stage.htmlSurfaces?.syncPaint?.(null);
+    }
+    this._wasVisible = visible;
   }
 
   dispose() {
