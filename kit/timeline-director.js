@@ -1396,7 +1396,7 @@ export function exposeTestHooks(controller, extra = {}) {
 
   globalThis.__simulify = {
     ...extra,
-    version: extra.version ?? 2,
+    version: extra.version ?? ((isClock || choreographer) ? 2 : 1),
     director: isDirector ? controller : (extra.director ?? null),
     clock: isClock ? controller : (extra.clock ?? null),
     scrubber: isScrubber ? controller : (extra.scrubber ?? null),

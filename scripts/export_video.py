@@ -171,6 +171,7 @@ PAGE_BRIDGE_JS = r"""
     try { wb.setParams(JSON.parse(paramsJson)); } catch (e) { console.error('params error', e); }
   }
   document.documentElement.setAttribute('data-export', hud);
+  document.documentElement.setAttribute('data-export-cli', '1');
 
   let captionBar = null;
   const ensureCaptionBar = () => {
@@ -244,6 +245,103 @@ PAGE_BRIDGE_JS = r"""
     wb.director.pause?.();
   }
 
+  const prevHtmlSurfaceState = new Map();
+
+  const waitForHtmlPaint = (hs) => new Promise((resolve) => {
+    let settled = false;
+    let rafCount = 0;
+    let timer = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { hs.canvas?.removeEventListener?.('paint', onPaint); } catch {}
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    const onPaint = () => {
+      queueMicrotask(finish);
+    };
+    try { hs.canvas?.addEventListener?.('paint', onPaint, { once: true }); } catch {}
+    const tick = () => {
+      if (settled) return;
+      rafCount += 1;
+      if (!hs._paintPending && rafCount >= 1) {
+        finish();
+        return;
+      }
+      if (rafCount >= 3) {
+        finish();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    timer = setTimeout(finish, 150);
+  });
+
+  const surfaceSignature = (surf) =>
+    `${surf.el?.dataset?.hudHidden ?? ''}|${surf.el?.offsetWidth ?? 0}x${surf.el?.offsetHeight ?? 0}|${surf.el?.innerHTML ?? ''}`;
+
+  const flushHtmlSurfacesIfNeeded = async (stageObj) => {
+    const hs = stageObj?.htmlSurfaces;
+    if (!hs || !hs.nativeEnabled || !hs.surfaces || hs.surfaces.size === 0) {
+      return false;
+    }
+
+    const dirtyVisible = [];
+    let needsFlush = Boolean(hs._paintPending);
+    let anyVisible = false;
+
+    for (const [id, surf] of hs.surfaces.entries()) {
+      const isVis = Boolean(surf.visible && surf.mesh?.visible !== false);
+      const prev = prevHtmlSurfaceState.get(id);
+      const sig = isVis ? surfaceSignature(surf) : '';
+      if (isVis) {
+        anyVisible = true;
+        const becameVisible = !prev || !prev.visible;
+        const contentChanged = prev ? prev.sig !== sig : true;
+        if (becameVisible || contentChanged || surf.dirty || !surf.uploadedOnce || surf.needsAlloc) {
+          surf.dirty = true;
+          dirtyVisible.push(surf);
+          needsFlush = true;
+        }
+      }
+      prevHtmlSurfaceState.set(id, { visible: isVis, sig });
+    }
+
+    if (!anyVisible || !needsFlush) {
+      return false;
+    }
+
+    // Flush pending <canvas content="drawable"> onpaint lifecycle & re-render in manual mode
+    for (let pass = 0; pass < 2; pass += 1) {
+      for (const surf of dirtyVisible) {
+        if (pass === 0 || surf.dirty || !surf.uploadedOnce) {
+          surf.dirty = true;
+        }
+      }
+      const wasPending = Boolean(hs._paintPending);
+      hs.requestPaint?.();
+      if (wasPending && typeof hs.canvas?.requestPaint === 'function') {
+        try { hs.canvas.requestPaint(); } catch {}
+      }
+      await waitForHtmlPaint(hs);
+      hs.syncPaint?.(null);
+      if (typeof stageObj.renderNow === 'function') {
+        stageObj.renderNow();
+      }
+      const stillPending = Boolean(hs._paintPending) || dirtyVisible.some((s) => s.dirty || !s.uploadedOnce);
+      if (!stillPending) break;
+    }
+
+    // Re-snapshot post-layout signatures so static hold frames skip unnecessary paint waits
+    for (const [id, surf] of hs.surfaces.entries()) {
+      const isVis = Boolean(surf.visible && surf.mesh?.visible !== false);
+      prevHtmlSurfaceState.set(id, { visible: isVis, sig: isVis ? surfaceSignature(surf) : '' });
+    }
+    return true;
+  };
+
   window.__simulifyExportSeek = async (tSec) => {
     if (typeof wb.seek === 'function') {
       await wb.seek(tSec);
@@ -257,6 +355,7 @@ PAGE_BRIDGE_JS = r"""
       stageObj.renderNow();
     }
     updateCaptionBar();
+    await flushHtmlSurfacesIfNeeded(stageObj);
     await new Promise((r) => requestAnimationFrame(() => r()));
   };
   updateCaptionBar();

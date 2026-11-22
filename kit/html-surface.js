@@ -472,8 +472,14 @@ export class HtmlSurfaceManager {
         );
       } else {
         const gl = ctxInfo.gl;
+        const prevFlipY = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL);
         gl.bindTexture(gl.TEXTURE_2D, surf.rawGlTex);
-        gl.texElementSubImage2D(gl.TEXTURE_2D, 0, 0, 0, surf.el, size);
+        if (prevFlipY) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        try {
+          gl.texElementSubImage2D(gl.TEXTURE_2D, 0, 0, 0, surf.el, size);
+        } finally {
+          if (prevFlipY) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        }
       }
       surf.dirty = false;
       surf.uploadedOnce = true;
