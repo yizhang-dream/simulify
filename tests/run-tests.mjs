@@ -54,9 +54,6 @@ import { Mp4Muxer } from '../kit/export/mp4-muxer.js';
 import { WebmMuxer } from '../kit/export/webm-muxer.js';
 import { createI18n } from '../shell/i18n.js';
 import { createMemoryStorage, MasteryStore } from '../shell/storage-adapter.js';
-import { CacheBenchSimulation, HOTSPOT_SEQUENCE } from '../examples/cache-bench/lru-engine.js';
-import { ThermostatSimulation } from '../examples/hysteresis-bench/thermostat-engine.js';
-import { TdChapterEngine } from '../examples/rl-td-bench/td-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), '..');
@@ -292,7 +289,7 @@ const mdFiles = [
   path.join(ROOT, 'INSTALL.md'),
   path.join(ROOT, 'README.md'),
   path.join(ROOT, 'README.zh-CN.md'),
-  path.join(ROOT, 'examples', 'archive', 'README.md'),
+  path.join(ROOT, 'primitives', 'README.md'),
   ...fs
     .readdirSync(path.join(ROOT, 'references'))
     .filter((f) => f.endsWith('.md'))
@@ -310,20 +307,18 @@ for (const md of mdFiles) {
   }
 }
 
-const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'thumbs-manifest.json'), 'utf8'));
-assert.ok(Array.isArray(manifest) && manifest.length >= 3, 'thumbs-manifest.json must list active examples');
-assert.equal(
-  manifest.some((entry) => entry.id === 'prob-stat-ch5-bench'),
-  false,
-  'prob-stat-ch5-bench must be archived out of thumbs-manifest.json'
+assert.ok(
+  skillText.includes('Orthographic Three-View Blueprint') && skillText.includes('DIMENSIONS'),
+  'SKILL.md must enforce the Concept Draft + Orthographic Three-View Blueprint workflow'
 );
-const rlThumbEntry = manifest.find((entry) => entry.id === 'rl-td-bench');
-assert.ok(rlThumbEntry && typeof rlThumbEntry.t === 'number', 'rl-td-bench manifest entry must specify deterministic t');
+
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'thumbs-manifest.json'), 'utf8'));
+assert.ok(Array.isArray(manifest), 'thumbs-manifest.json must be a JSON array');
 for (const entry of manifest) {
   const relPath = String(entry.url).split('?')[0];
   assert.ok(fs.existsSync(path.join(ROOT, relPath)), `Missing manifest entry target: ${relPath}`);
 }
-console.log(`[OK] Checked ${mdFiles.length} markdown docs (${checkedLinks} links, 0 broken) + thumbs-manifest.json`);
+console.log(`[OK] Checked ${mdFiles.length} markdown docs (${checkedLinks} links, 0 broken) + thumbs-manifest.json (${manifest.length} entries)`);
 
 // ============================================================================
 // 3. Verify LinkBus deduplication + events
@@ -1089,40 +1084,9 @@ assert.deepEqual(store.getProgress(), { done: 2, total: 3, pct: 67 });
 console.log('[OK] Shell i18n (zh/en/ar) & MasteryStore verified');
 
 // ============================================================================
-// 11. Verify Benchmark Engines mathematically (Falsification logic + backward compat)
+// 11. Verify Stage 3D bounds audit & cardinal 3-view contract (kit/stage-3d.js)
+//     (executed in Section 13 once Three.js ESM import hook is active)
 // ============================================================================
-const cacheSim = new CacheBenchSimulation();
-cacheSim.loadAct('act-3');
-assert.equal(cacheSim.request('A').lru.hit, true);
-assert.equal(cacheSim.request('D').lru.evicted, 'B', 'LRU must evict B after A promotion');
-
-cacheSim.loadAct('act-4');
-for (const k of HOTSPOT_SEQUENCE) cacheSim.request(k);
-const snap = cacheSim.getSnapshot();
-assert.ok(snap.lruStats.hits > snap.fifoStats.hits, 'LRU must strictly beat FIFO on HOTSPOT_SEQUENCE');
-
-const thSim = new ThermostatSimulation();
-thSim.setBand(4);
-thSim.setTemperature(18);
-assert.equal(thSim.heating, true);
-thSim.setTemperature(20);
-assert.equal(thSim.heating, true, '4° band holds ON at 20° coming from 18°');
-thSim.setBand(0);
-let chatterCount = 0;
-for (const t of [19.5, 20.5, 19.5, 20.5, 19.5, 20.5]) {
-  if (thSim.setTemperature(t).flipped) chatterCount += 1;
-}
-assert.equal(chatterCount, 6, '0° band must flip on all 6 crossings around 20°');
-
-const rlEngine = new TdChapterEngine();
-const rlFalsify = rlEngine.runFalsificationSuite();
-assert.equal(rlFalsify.passed, true, `RL Ch.7 falsification suite failed: ${JSON.stringify(rlFalsify)}`);
-assert.ok(rlFalsify.assertions.length >= 3);
-
-const cp0 = rlEngine.setParams({ checkpointIdx: 0, curveFraction: 0.25 }).vGrid[2][0];
-const cp4 = rlEngine.setParams({ checkpointIdx: 4, curveFraction: 1.0 }).vGrid[2][0];
-assert.notEqual(cp0, cp4, 'Early vs final TD(0) checkpoint must differ for wave animation');
-console.log('[OK] Mathematical falsification suites (Cache, Hysteresis, RL Ch.7) verified');
 
 // ============================================================================
 // 12. Verify Pure-JS Export Muxers & Encoders (`kit/export/*.js`)
@@ -1484,7 +1448,50 @@ assert.equal(caps.apng, true);
 assert.equal(caps.png, true);
 assert.equal(caps.htmlInCanvas, false);
 
-console.log('[OK] Node smoke checks passed for html-surface, manipulator, GridBrush, stage-exporter, and compositor');
+// IsometricStage volumetric bounds audit, setCardinalView() (Front/Side/Top/Iso) & WebGPU timeout auto-fallback
+const { IsometricStage } = await import('../kit/stage-3d.js');
+const mockStageCanvas = {
+  style: {},
+  dataset: {},
+  addEventListener() {},
+  removeEventListener() {},
+  dispatchEvent() {},
+  setPointerCapture() {},
+  releasePointerCapture() {},
+  getBoundingClientRect: () => ({ left: 0, top: 0, width: 1280, height: 800 }),
+};
+const stage = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false });
+const volMesh = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.01, 0), new THREE.Vector2(1.2, 0.8), new THREE.Vector2(0.4, 2.0)]), new THREE.MeshStandardMaterial());
+volMesh.userData.simulifyGeoKind = 'lathe';
+stage.scene.add(volMesh);
+
+const geoAudit = stage.getGeometryAudit();
+assert.equal(geoAudit.sculptedMeshes, 1);
+assert.ok(geoAudit.bounds && geoAudit.bounds.width > 2.0 && geoAudit.bounds.height >= 1.9 && geoAudit.bounds.depth > 2.0);
+assert.ok(geoAudit.bounds.flatnessRatio >= 0.7, `Expected volumetric flatnessRatio >= 0.7, got ${geoAudit.bounds.flatnessRatio}`);
+
+const vFront = stage.setCardinalView('front', { unlock: true });
+assert.equal(vFront.view, 'front');
+assert.equal(vFront.azimuthDeg, 0);
+assert.equal(vFront.elevationDeg, 0);
+const vSide = stage.setCardinalView('side', { unlock: true });
+assert.equal(vSide.azimuthDeg, 90);
+assert.equal(vSide.elevationDeg, 0);
+const vTop = stage.setCardinalView('top', { unlock: true });
+assert.equal(vTop.elevationDeg, 88.5);
+const vIso = stage.setCardinalView('iso', { unlock: true });
+assert.equal(vIso.view, 'iso');
+
+const tvClock = new SpacetimeClock({ duration: 10, manualMode: true });
+const tvHooks = exposeTestHooks(tvClock, { stage });
+assert.equal(typeof tvHooks.setCardinalView, 'function', 'exposeTestHooks must expose setCardinalView()');
+assert.equal(tvHooks.setCardinalView('side').azimuthDeg, 90);
+tvClock.destroy();
+delete globalThis.__simulify;
+delete globalThis.__ready;
+stage.dispose();
+
+console.log('[OK] Node smoke checks passed for stage-3d (bounds + 3-views), html-surface, manipulator, GridBrush, stage-exporter, and compositor');
 
 // ============================================================================
 // 14. Verify Offline Four-Tier Typography & Crisp CanvasTexture (`kit/fonts.js`)

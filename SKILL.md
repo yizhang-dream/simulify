@@ -2,10 +2,11 @@
 name: simulify
 description: >-
   Turn a mechanism, physical structure, hardware/protocol flow, mathematical law, or algorithm into a
-  standalone offline interactive 3D/4D HTML explainer: progressive temporal revelation over continuous
-  reversible 4D timelines, 1:1 HiDPI WebGPU + HTML-in-Canvas progressive enhancement, offline four-tier
-  typography & KaTeX live equation substitution, cross-domain non-cuboid 3D sculpting & cutaways,
-  counterfactual ghosts, and offline MP4/WebM/GIF export.
+  standalone offline interactive 3D/4D HTML explainer: structured concept drafts + mandatory
+  orthographic three-view blueprints (Front/Side/Top LxWxH proportion lock), true volumetric 3D
+  sculpting & cutaways, progressive temporal revelation over continuous reversible 4D timelines,
+  1:1 HiDPI WebGPU + HTML-in-Canvas progressive enhancement, offline four-tier typography & KaTeX
+  live equation substitution, counterfactual ghosts, and offline MP4/WebM/GIF export.
   Use whenever a flat page (answer-me-with-html), 2D diagram (archify), or static textbook
   (atlas-textbook) cannot show 3D spatial occlusion, progressive causal time evolution, or hands-on
   "what-if" dynamics — or when the user asks for 用 3D 讲 / 做个 3D 或 4D 交互演示 / 拆解内部结构 /
@@ -47,8 +48,9 @@ Every Simulify workbench — whether physics, mechanics, electronics, optics, bi
   uv run --with fonttools --with brotli python scripts/setup_vendor.py <target_dir> --fonts-only --subset-cjk <project_dir>
   ```
 
-### Iron Law 3 · Anti-Cuboid Sculpting Law (`kit/geo-sculpt.js`)
-- **BAN Lego-box scenes**: **Explicitly FORBIDDEN** to build whole 3D workbenches out of stacked `RoundedBoxGeometry` / `BoxGeometry` / `PlaneGeometry` + unlit `MeshBasicMaterial`! Every v2 3D bench is audited via `stage.getGeometryAudit()` (`cuboidRatio <= 0.70` and `sculptedMeshes > 0`).
+### Iron Law 3 · Anti-Cuboid Volumetric Sculpting & Three-View Proportion Law (`kit/geo-sculpt.js`)
+- **BAN single-view 2D guesswork & flat extruded posters**: **NEVER** model 3D scenes by eyeballing a single perspective/isometric 2D illustration (which distorts `L × W × H` ratios and collapses mechanisms into flat tabletop plaques). Every 3D bench MUST derive its geometry from a locked **Orthographic Three-View Blueprint (Front / Side / Top)** and a single shared `DIMENSIONS` constant table (`L`, `W`, `H`, thicknesses, clearances, motion envelopes in world units), holding true volumetric depth across all angles (`bounds.flatnessRatio >= 0.08` on `stage.getGeometryAudit()`).
+- **BAN Lego-box scenes**: **Explicitly FORBIDDEN** to build whole 3D workbenches out of stacked `RoundedBoxGeometry` / `BoxGeometry` / `PlaneGeometry` + unlit `MeshBasicMaterial`! Every v2 3D bench is audited via `stage.getGeometryAudit()` (`cuboidRatio <= 0.70`, `sculptedMeshes > 0`, and non-flat volumetric `bounds`).
 - **Compose from [`kit/geo-sculpt.js`](kit/geo-sculpt.js)'s 5 universal sculpting families** (all meshes auto-tagged with `userData.simulifyGeoKind`, casting/receiving shadows, using physically lit PBR `MeshStandardMaterial` / `MeshPhysicalMaterial`, zero `MeshBasicMaterial`):
   1. **Turned / Lathed Solids (`'lathe'`)**: `createLathedSolid`, `createGlassVessel` (`ampoule`/`flask`/`dome`/`lens` + `setFillLevel`), `createSculptedProbe` (`setAccentColor`/`setHeading`/`setEmissiveIntensity`), `createBeaconLighthouse` (`setBeaconColor`/`setBeaconIntensity`).
   2. **Bevelled Extruded Profiles (`'extrude'`)**: `createBevelledProfile`, `createGearWheel`, `createHorseshoeYoke`, `createArchSpan`, `createAirfoilVane`.
@@ -71,18 +73,22 @@ Every Simulify workbench — whether physics, mechanics, electronics, optics, bi
 
 ---
 
-## Step 1 · Native Truth Audit, Cast & Reveal Ledger & 3 Visual Concepts (Only Human Checkpoint)
+## Step 1 · Concept Draft, Cast & Reveal Ledger & Mandatory Orthographic Three-View Blueprint (Human Lock)
 
 Before writing HTML or scene code:
-1. Lock the orthogonal coordinate choices:
-   - **Native Truth Axis (`①–④`)** in [fidelity-isomorphism.md](references/fidelity-isomorphism.md):
-     **① Physical/Spatial** (3D cutaway/X-Ray, clipping planes) · **② Logic/Code/Protocol** (2D/2.5D spacetime ladder or hardware ↔ synchronized code/dissector) · **③ Math/Optimization/RL** (formal workspace + `LiveMathsPanel` with bidirectional `LinkBus` tokens) · **④ Physical × Math Dual** (3D bench coupled live to phase-time helix/plot + collapsible formulas from one `solve()`).
-   - **Time Regime (`T1–T4`) & Progressive-Reveal Law** in [time-dimension.md](references/time-dimension.md):
-     - **BAN `t = 0` spatial dumping & `showEnd()` on load.** Never drop the whole chapter's objects, comparison tracks, and 4-corner HUD panels onto frame 0.
-     - **Draft a Beat-by-Beat Cast & Reveal Ledger**: open sparse at `t = 0` (`<= 2` active actors on stage, minimal chrome), unfold over an unhurried **25–60 s continuous global timeline**, and state the exact **causal trigger** for every subsequent actor, subsystem, chart, formula, and HUD reveal (`enter`, `focus`, `cameraBeat`, `hudReveal`).
-   - **Topic Track & Agency** in [topic-fit.md](references/topic-fit.md): design direct on-stage manipulation (`kit/manipulator.js` — drag handles, paintable tiles, clickable in-flight packets, clock-bound auto-exit on act switch) instead of slider-only sidebars.
-2. Generate **3 genuinely distinct architectural & visual concept renders** matching the truth axis, sculpted forms, and theme (`paper-ink`, `dark-studio`, `bio-cutaway`) and present them side-by-side to the user.
-3. **Stop for user selection.** Do NOT skip directly to code unless the user explicitly opted out of concept selection for the current turn.
+1. **Present structured Concept Drafts (概念稿) — NOT single-view 2D perspective art**:
+   - Lock the orthogonal coordinate choices:
+     - **Native Truth Axis (`①–④`)** in [fidelity-isomorphism.md](references/fidelity-isomorphism.md):
+       **① Physical/Spatial** (3D cutaway/X-Ray, clipping planes) · **② Logic/Code/Protocol** (2D/2.5D spacetime ladder or hardware ↔ synchronized code/dissector) · **③ Math/Optimization/RL** (formal workspace + `LiveMathsPanel` with bidirectional `LinkBus` tokens) · **④ Physical × Math Dual** (3D bench coupled live to phase-time helix/plot + collapsible formulas from one `solve()`).
+     - **Time Regime (`T1–T4`) & Progressive-Reveal Law** in [time-dimension.md](references/time-dimension.md):
+       - **BAN `t = 0` spatial dumping & `showEnd()` on load.** Never drop the whole chapter's objects, comparison tracks, and 4-corner HUD panels onto frame 0.
+       - **Draft a Beat-by-Beat Cast & Reveal Ledger**: open sparse at `t = 0` (`<= 2` active actors on stage, minimal chrome), unfold over an unhurried **25–60 s continuous global timeline**, and state the exact **causal trigger** for every subsequent actor, subsystem, chart, formula, and HUD reveal (`enter`, `focus`, `cameraBeat`, `hudReveal`).
+     - **Topic Track & Agency** in [topic-fit.md](references/topic-fit.md): design direct on-stage manipulation (`kit/manipulator.js` — drag handles, paintable tiles, clickable in-flight packets, clock-bound auto-exit on act switch) instead of slider-only sidebars.
+   - Propose **2–3 distinct architectural & explanatory Concept Drafts** in crisp structured prose/tables (truth axis, volumetric 3D structure & cutaway hierarchy, `T1–T4` beat progression, direct manipulation, falsification assertions, theme `paper-ink` / `dark-studio` / `bio-cutaway`). Do **NOT** generate misleading single-view 2D concept renders that encourage flat-poster extrusion.
+2. **Generate the Mandatory Orthographic Three-View Blueprint (工程三视图: 正视 Front / 侧视 Side / 俯视 Top) + `DIMENSIONS` Table**:
+   - Once the concept draft direction is chosen (or directly when the user's architecture is already specific), generate an **aligned orthographic Three-View Blueprint image** showing **Front (正视图) + Side (侧视图) + Top (俯视图)** projections (optionally with a small 3/4 assembly inset) drawn to true uniform scale, accompanied by an explicit **`DIMENSIONS` table (`L × W × H` in world units, elevation datums, part thicknesses, clearances, and 4D motion envelopes)**.
+   - Verify in Front and Side elevations that the mechanism has genuine 3D volumetric layering/cutaway depth and zero distorted/squashed proportions before touching Three.js.
+3. **Stop for user lock on the Concept Draft & Three-View Blueprint.** Do NOT skip directly to scene code unless the user explicitly opted out for the current turn.
 
 ---
 
@@ -117,9 +123,9 @@ Once the user selects a concept:
    - **`stage-frame` & `visual-integrity`**: Active non-blank canvas (`>= 45%` desktop area), zero horizontal code/guide/maths/caption truncation (`scrollWidth <= clientWidth + 2`) at every sampled act, zero GPU/console errors.
    - **`chart-legibility` & `hud-overlap`**: Readable visible plots (`>= 200 × 85` px) across all acts, zero HUD dock collisions (`<= 6px`, including `.beat-caption-pill`), and zero 3D `HtmlSurface` vs HUD dock occlusion `> 15%`.
    - **`typography-crispness`** *(v2)*: Offline fonts loaded (`getFontAudit().loadedCount >= 2, failedCount === 0`), 1:1 physical canvas backing (`canvas.width >= rect.width * dpr - 2`), zero visible HUD/SVG text `< 10.5px`, and active 3D `HtmlSurface` texture pixel density `>= HiDPI floor` (blocks 0.5× blur regressions).
-   - **`geometry-diversity`** *(v2 3D)*: `getGeometryAudit()` on populated acts satisfies `cuboidRatio <= 0.70` and `sculptedMeshes > 0` (v1 classic benches remain exempt).
+   - **`geometry-diversity` & `three-views`** *(v2 3D)*: `getGeometryAudit()` on populated acts satisfies `cuboidRatio <= 0.70`, `sculptedMeshes > 0`, and volumetric non-flat bounds (`flatnessRatio >= 0.08`); `verify_stage.py` automatically drives `setCardinalView()` to capture **Front / Side / Top / Iso** screenshots and verifies distinct multi-angle 3D structure.
    - **`camera-ownership`** *(desktop 3D)*: Real Playwright mouse drag across canvas rotates the camera AND holds ownership for `>= 400ms` without script snap-back.
    - **`initial-sparsity`**: Bench boots near `t = 0` (NOT `showEnd()`) and strictly grows over time (`getActiveActorCount(0) < getActiveActorCount(T)`).
    - **`temporal-scrub-determinism`**: Driving `seek(0.1T) → seek(0.5T) → seek(0.9T) → seek(0.5T)` yields real visual evolution across timepoints AND repeatable state/pixels on rewind.
    - **`mandatory-falsify`**: `window.__simulify.falsify()` MUST exist and return `{ passed: true }` across `>= 2` counterfactual assertions.
-3. Visually inspect rendered screenshots side-by-side against the concept chosen in Step 1. For galleries, bake crisp 2× thumbnails with [`scripts/bake_thumbs.py`](scripts/bake_thumbs.py); for studio MP4/WebM/GIF reels, run [`scripts/export_video.py`](scripts/export_video.py) (Tier 2 Playwright CLI) or the in-browser [`kit/stage-exporter.js`](kit/stage-exporter.js) popover (Tier 1).
+3. Visually inspect the rendered **Front / Side / Top / Iso** four-view screenshots directly against the **Step 1 Orthographic Three-View Blueprint** and `DIMENSIONS` table to confirm zero `L × W × H` distortion across every axis. For galleries, bake crisp 2× thumbnails with [`scripts/bake_thumbs.py`](scripts/bake_thumbs.py); for studio MP4/WebM/GIF reels, run [`scripts/export_video.py`](scripts/export_video.py) (Tier 2 Playwright CLI) or the in-browser [`kit/stage-exporter.js`](kit/stage-exporter.js) popover (Tier 1).

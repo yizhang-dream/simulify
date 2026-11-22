@@ -20,9 +20,9 @@
 | :--- | :--- | :--- | :--- |
 | 纯文字回复 | 段落列表 | 快速结论 | 遇到空间遮挡、时间差、正负反馈与多因子耦合时难以直观展开 |
 | `answer-me-with-html` | 2D 图文 + 表格 | 极低 token 把多段道理做成一页纸 | 页面偏静态，学习者无法拧动参数亲手打破平衡观察动态后果 |
-| `archify` | 校验级 2D SVG 图谱 | 系统架构、时序流、ERD、状态生命周期图 | 专精二维结构连接（可对照它的 `cache-miss` 时序图与 `examples/cache-bench/`） |
+| `archify` | 校验级 2D SVG 图谱 | 系统架构、时序流、ERD、状态生命周期图 | 专精二维结构连接 |
 | `atlas-textbook` | 在线问题链交互书 | `carries`/`hook`/`relates` 章节编织与干净直觉句 | 继承其问题链承上启下与直白文风，落到可实时证伪的 4D 实验台 |
-| **`simulify` v2.1** | **True 4D 时空 + 非盒体 3D 雕塑 + KaTeX 双联** | **1:1 物理锐度、离线四层字体、单一 `solve()` 驱动与离线视频导出** | 稀疏开场渐进揭幕、反长方体 PBR 建模、WebGPU + 2× HTML-in-Canvas、3D 直接涂画与全节拍真实交互门禁 |
+| **`simulify` v2.1** | **True 4D 时空 + 三视图立体 3D 雕塑 + KaTeX 双联** | **概念稿 + 正/侧/俯三视图锁比例、1:1 物理锐度、离线四层字体与离线视频导出** | 杜绝单视角 2D 盲猜，稀疏开场渐进揭幕、反长方体 PBR 建模、WebGPU + 2× HTML-in-Canvas 与全节拍 + 四视图门禁 |
 
 ---
 
@@ -47,15 +47,13 @@
 
 ---
 
-## 现役旗舰与示范实验台
+## 真 4D 新基线（概念稿 → 工程三视图锁比例 → 立体真 4D）
 
-在 `simulify/` 根目录起本地静态服务即可浏览画廊 [`examples/index.html`](examples/index.html)（或 [`index.html`](index.html)）：
+所有依赖旧单视角 2D 概念图推导出的示范实验台已清空，画廊以全新基线重新出发：
 
-- **`examples/rl-td-bench/`**（⭐ Simulify v2 旗舰 · RL 第 7 章 True 4D 连续 6 节拍实验台）：以 44 秒 `SpacetimeClock` + `ActorChoreographer` 重构 `TD(0) → Sarsa → 四向 Q 下沉悬崖 → 3D 玻璃 n-step 视野弧 → 策略分叉 → 3D 活代码追踪`，支持直接在 3D 棋盘涂画悬崖（`GridBrush`）、同屏对比 Sarsa 安全路径与 Q-Learning 贴崖虚影、WebGPU + HTML-in-Canvas 渐进增强，以及一键导出 MP4 / WebM / GIF / APNG。
-- **`examples/cache-bench/`**（现役对标样例 · 双槽缓存 LRU vs FIFO 4 幕工作台）：对照 1 ns SRAM 命中与 100 ns 主存回源，同序列暴露 FIFO 误杀热点，联动 [`LinkBus`](kit/link-bus.js) 3D↔表格高亮、`ChartCard.updateXY` 命中率 vs `ghost` 基准线与可折叠 AMAT 活代入算式*（v1 兼容对标样板）*。
-- **`examples/hysteresis-bench/`**（现役对标样例 · 双金属恒温器物理 × 数学双真源工作台）：在噪声环境下复现单阈值高频继电器抖动，分 3 幕拉宽 $\Delta T$ 回差带，同一 `solve()` 同步驱动双金属片弯曲、加热灯丝、滞回相图与 $T_{\text{on}}/T_{\text{off}}$ 切换不等式表*（v1 兼容对标样板）*。
-
-> **v1 归档样例**：早期 v1 实验台（包含概率统计第 5 章 `prob-stat-ch5-bench`）已完整保留 git 历史与独立可运行文件，归档于 [`examples/archive/`](examples/archive/README.md)。
+1. **架构概念稿（Step 1a）**：用清晰结构化文本与表格敲定原生真源（`①–④`）、三维立体结构与剖切层次、`T1–T4` 分拍揭示台账、直操交互与反例断言，不再出误导纵深的单视角 2D 概念图。
+2. **正/侧/俯工程三视图（Step 1b）**：动代码前先出对齐的**正视图（Front）/ 侧视图（Side）/ 俯视图（Top）**三视图，并锁死 `DIMENSIONS` 三轴世界尺寸常量表（`L × W × H`、壁厚间隙与 4D 运动包络）。
+3. **真 4D 构建与四视图回校（Steps 2–3）**：基于 `kit/` 离线引擎按尺寸表构建全视角自洽的立体真 4D 装置，并用 `verify_stage.py` 自动跑通全节拍交互与 **正视 / 侧视 / 俯视 / 等轴** 四视图比例验机。
 
 ---
 
@@ -69,20 +67,20 @@ python3 scripts/setup_vendor.py examples/shared
 # 可选：为独立发布项目按实际汉字做超轻子集化瘦身
 uv run --with fonttools --with brotli python3 scripts/setup_vendor.py dist/my-bench --fonts-only --subset-cjk dist/my-bench
 
-# 2. 运行全部语法检查、清单同步、链接完整性校验与 v1/v2.1 单元测试
+# 2. 运行全部语法检查、清单同步、链接完整性校验与 v2.1 单元测试
 npm test
 
-# 3. 执行三视口 + 全节拍 + v2.1 字体/雕塑/相机所有权质量裁判
-uv run scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html
+# 3. 执行三视口 + 全节拍 + 正/侧/俯/等轴四视图 + 字体/雕塑/相机所有权质量裁判
+uv run scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html
 # 同时检验 Firefox/Safari 无 HTML-in-Canvas 环境的回退清晰度
-uv run scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html --no-hic
+uv run scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html --no-hic
 
 # 4. 离线烘焙 2× 高清缩略图（支持 manifest 中指定 t 与 exportMode）
 uv run scripts/bake_thumbs.py --root . --manifest examples/thumbs-manifest.json
 
 # 5. 通过 Tier 2 命令行导出高清 4D 视频与 GIF
-uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html \
-  --out dist/rl-td.mp4 --preset 1080p60 --hud caption --formats mp4,gif
+uv run scripts/export_video.py --root . --entry examples/<your-bench>/index.html \
+  --out dist/demo.mp4 --preset 1080p60 --hud caption --formats mp4,gif
 ```
 
 ---
@@ -91,19 +89,18 @@ uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html 
 
 ```text
 simulify/
-├── SKILL.md                  # Agent Skill 工作流、四条插件级铁律与 v2.1 全节拍门禁
+├── SKILL.md                  # Agent Skill 工作流（概念稿 + 三视图锁版）、四条铁律与全节拍门禁
 ├── plugin.json               # 插件清单（v2.1.0，与 .claude-plugin/marketplace.json 同步）
 ├── LICENSE                   # MIT 开源协议
-├── kit/                      # Layer 1：1:1 物理锐度 WebGPU/TSL 舞台、锐利 OutlinePass、2× HtmlSurface、
-│   │                         #          非盒体 geo-sculpt 雕塑库、4D 时钟与编排、操控器、持久 ChartCard、
-│   │                         #          KaTeX LiveMathsPanel 与 ClearType 样式令牌
+├── kit/                      # Layer 1：1:1 物理锐度 WebGPU/TSL 舞台（含超时降级 WebGL2 与三视图机位）、
+│   │                         #          锐利 OutlinePass、2× HtmlSurface、非盒体 geo-sculpt 雕塑库、
+│   │                         #          4D 时钟与编排、操控器、持久 ChartCard、KaTeX LiveMathsPanel 与样式令牌
 │   ├── fonts/                # 离线四层 WOFF2 字库（Newsreader、Inter、KaTeX、JetBrains Mono + CJK）
 │   └── export/               # 按需懒加载纯 JS MP4/WebM/GIF/APNG 封装器与双路径合成器
-├── primitives/               # 高精领域 3D 图元工厂（如 rl-primitives.js）
+├── primitives/               # 按三视图 DIMENSIONS 尺寸表封装的领域 3D 图元工厂
 ├── shell/                    # Layer 2：可选多语言 i18n、Ctrl+K 命令面板、存储适配器与进度条
-├── scripts/                  # setup_vendor.py (--subset-cjk)、verify_stage.py (--no-hic)、bake_thumbs.py、export_video.py
+├── scripts/                  # setup_vendor.py (--subset-cjk)、verify_stage.py (--no-hic + three-views)、bake_thumbs.py、export_video.py
 ├── references/               # 原生真源与雕塑法则、T1–T4 时间维度、题材适配、视觉与字体规范、架构手册
-├── examples/                 # 现役示范画廊（rl-td-bench v2 旗舰 + cache-bench + hysteresis-bench）
-│   └── archive/              # 归档 v1 实验台（保留完整历史与可运行代码，如 prob-stat-ch5-bench）
+├── examples/                 # 清空待入驻的真 4D 画廊与共享离线 Three.js 运行时
 └── tests/                    # 全量 Node ESM 单元测试、雕塑/字体/封装器校验、语法与链接完整性套件
 ```

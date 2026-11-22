@@ -18,10 +18,11 @@
 
 ---
 
-## 2. 反长方体雕塑法则（铁律 3 · [`kit/geo-sculpt.js`](../kit/geo-sculpt.js)）
+## 2. 反长方体雕塑与三视图比例法则（铁律 3 · [`kit/geo-sculpt.js`](../kit/geo-sculpt.js)）
 
-**严禁把整座 3D 实验台退化成 `RoundedBoxGeometry` / `BoxGeometry` / `PlaneGeometry` + 无光 `MeshBasicMaterial` 堆出来的积木块！**  
-[`kit/geo-sculpt.js`](../kit/geo-sculpt.js) 零外部依赖，兼容 WebGPU 与 WebGL2，所有实体自动开启投影/接影、使用受光 PBR 材质，并自动写入 `userData.simulifyGeoKind` 供 `stage.getGeometryAudit()` 与 `verify_stage.py` `geometry-diversity` 门禁验收：
+**严禁凭单张 2D 透视/等轴概念图盲猜纵深与厚薄，更严禁把整座 3D 实验台退化成薄板托盘或 `RoundedBoxGeometry` / `BoxGeometry` / `PlaneGeometry` 堆出来的积木块！**  
+- **建模前必先锁三视图与 `DIMENSIONS` 常量表**：所有 3D 场景必须先基于**正视图（Front）/ 侧视图（Side）/ 俯视图（Top）标准工程三视图**确定各主构件的长宽高 `L × W × H`、垂向标高、壁厚间隙与 4D 运动包络，再把尺寸统一写进常量表驱动代码建模，保证在正/侧/俯/自由环绕任意视角下均体量自洽（`stage.getGeometryAudit().bounds.flatnessRatio >= 0.08`）。
+- [`kit/geo-sculpt.js`](../kit/geo-sculpt.js) 零外部依赖，兼容 WebGPU 与 WebGL2，所有实体自动开启投影/接影、使用受光 PBR 材质，并自动写入 `userData.simulifyGeoKind` 供 `stage.getGeometryAudit()` 与 `verify_stage.py` `geometry-diversity` / `three-views` 门禁验收：
 
 ### 五大跨学科泛用构造族
 1. **车削精密器物族（`'lathe'`）**：`createLathedSolid`、`createGlassVessel`（`ampoule` 安瓿 / `flask` 烧瓶 / `dome` 光学钟罩 / `lens` 透镜 + 黄铜领圈与 `setFillLevel()`）、`createSculptedProbe`（车削黄铜底座 + 陶瓷机身 + 发光光学冠 + 翼片方向指针）、`createBeaconLighthouse`（阶梯底座 + 菲涅尔棱镜环 + 光学灯室）。
@@ -48,19 +49,19 @@
 
 ## 3. 四类「原生真源」与模块按需装配表
 
-| 原生真源类型 | 代表题材 | 视觉载体选择 | 辅助层装配方案 | 门禁 2 概念稿画什么 |
+| 原生真源类型 | 代表题材 | 视觉载体选择 | 辅助层装配方案 | 门禁 1 概念稿 + 三视图画什么 |
 |---|---|---|---|---|
-| **① 物理与空间真源** | 机械齿轮、发动机、面包板、器官剖面、户外搭建工序 | **轨道 A · 3D 雕塑实物模拟**（结构、剖面、X-Ray、装配错位反例） | **默认不挂 `LiveMathsPanel`**；靠精确雕塑部件、512px+ 丝印铭牌、热点推近与后果表现讲清 | 干净高质感的 **3D 实体/剖面结构定妆图**（或关键演进幕对比） |
-| **② 逻辑、代码与协议真源** | 网络协议、微控制器、指令流、LRU/FIFO 缓存、逻辑门 | 协议走 **轨道 B**；软硬或空间规则结合走 **轨道 C**（3D 板卡/卡槽 ↔ 3D `HtmlSurface` 代码/真值表） | 装配**逐字段展开 / 代码行高亮 / 状态对照表**，用 [`LinkBus`](../kit/link-bus.js) 互锁 | 体现「硬件/节点 ↔ 字段、代码行或队列对照」的**工作台构图** |
-| **③ 数学、优化与算法真源** | 强化学习、概率分布、梯度优化、数值分析、线性代数 | **轨道 B/C · 精密数学工作台 ↔ 高度场/参数曲面** | **按因果揭示 `LiveMathsPanel`（KaTeX 真排版）** + `ChartCard`（含 `ghost` 与移动平均）+ 单步冻结解剖 | 体现**势能曲面/坐标系、分解树、分布直方图与活公式区划**的界面蓝图 |
-| **④ 物理 × 数学双真源** | 施密特触发器、恒温滞回、RC 充放电、PID 控制、运动学 | **轨道 C · 沿抽象阶梯双联**：雕塑 3D 物理实验台 ↔ 原理图 / 相图曲线 | **`LiveMathsPanel` 折叠按需展开**，与 3D 变形器物共用同一 `solve()` | 实物主视角 + 侧边原理图/相图同步对应的**双联工作台构图** |
+| **① 物理与空间真源** | 机械齿轮、发动机、面包板、器官剖面、户外搭建工序 | **轨道 A · 3D 雕塑实物模拟**（结构、剖面、X-Ray、装配错位反例） | **默认不挂 `LiveMathsPanel`**；靠精确雕塑部件、512px+ 丝印铭牌、热点推近与后果表现讲清 | **结构概念稿 + 正/侧/俯标准工程三视图**（含剖切面位置与 `L:W:H` 尺寸标尺） |
+| **② 逻辑、代码与协议真源** | 网络协议、微控制器、指令流、缓存体系、逻辑门 | 协议走 **轨道 B**；软硬或空间规则结合走 **轨道 C**（真三维硬件/节点 ↔ 3D `HtmlSurface` 代码/真值表） | 装配**逐字段展开 / 代码行高亮 / 状态对照表**，用 [`LinkBus`](../kit/link-bus.js) 互锁 | **架构概念稿 + 硬件结构正/侧/俯三视图**与代码/协议通道对齐表 |
+| **③ 数学、优化与算法真源** | 强化学习、概率分布、梯度优化、数值分析、线性代数 | **轨道 B/C · 精密数学工作台 ↔ 高度场/参数曲面** | **按因果揭示 `LiveMathsPanel`（KaTeX 真排版）** + `ChartCard`（含 `ghost` 与移动平均）+ 单步冻结解剖 | **数学真源概念稿 + 势能曲面/三维空间坐标的正/侧/俯三视图**（锁死高程尺度与动态包络） |
+| **④ 物理 × 数学双真源** | 施密特触发器、恒温滞回、RC 充放电、PID 控制、运动学 | **轨道 C · 沿抽象阶梯双联**：雕塑 3D 物理实验台 ↔ 原理图 / 相图曲线 | **`LiveMathsPanel` 折叠按需展开**，与 3D 变形器物共用同一 `solve()` | **双联概念稿 + 物理装置正/侧/俯三视图**（标明形变位移行程与相图映射） |
 
 ---
 
 ## 4. 同一物体对应同一显示：领域图元复用规范（[`primitives/`](../primitives/)）
 
 当制作跨越多个章节的课程或公开学习平台时，禁止每一课都重新随手捏一套长得不一样的部件：
-- 在系列项目内建立 [`primitives/`](../primitives/)，内部基于 `kit/geo-sculpt.js` 封装领域部件（如 `rl-primitives.js`、电路 `Resistor`/`Probe`、机械 `Valve`/`Piston`）；
+- 在系列项目内建立 [`primitives/`](../primitives/)，内部基于 `kit/geo-sculpt.js` 与三视图锁定的 `DIMENSIONS` 常量表封装领域部件（如电路 `Resistor`/`Probe`、机械 `Valve`/`Piston`）；
 - **核心约束**：同一个物理件或数学符号从第 1 课出现到最后一课，必须从同一个图元工厂实例化，保持**一致的几何比例、PBR 材质语义、可交互光环与标注规范**。
 
 ---

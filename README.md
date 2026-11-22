@@ -20,9 +20,9 @@
 | :--- | :--- | :--- | :--- |
 | Plain Text Wall | Paragraphs | Fast to print | Fails on 3D geometry, timing, feedback loops, and coupled rules |
 | `answer-me-with-html` | 2D HTML + Tables + Flow | Low-token readable one-page explanations | Static once built; learners cannot perturb parameters and observe 3D dynamics |
-| `archify` | Validated 2D SVG Diagrams | Exact architecture, sequence, ERD & lifecycle maps | Best for 2D structural topology (compare its `cache-miss` sequence with `examples/cache-bench/`) |
+| `archify` | Validated 2D SVG Diagrams | Exact architecture, sequence, ERD & lifecycle maps | Best for 2D structural topology |
 | `atlas-textbook` | Interactive HTML Book | Question-chained `carries`/`hook`/`relates` chapters & clean prose | Inspires Simulify's multi-act chapter chaining & direct intuition prose inside explorable workbenches |
-| **`simulify` v2.1** | **True 4D Spacetime + Sculpted 3D Cutaway + KaTeX Dual Views** | **1:1 HiDPI counterfactual benches, offline four-tier typography & deterministic video export** | Progressive temporal reveal, non-cuboid 3D sculpting, WebGPU + 2× HTML-in-Canvas, direct 3D editing, and multi-beat interactive quality gates |
+| **`simulify` v2.1** | **True 4D Spacetime + Three-View Volumetric 3D + KaTeX Dual Views** | **1:1 HiDPI counterfactual benches, orthographic three-view proportion lock, offline four-tier typography & deterministic video export** | Structured concept drafts + Front/Side/Top blueprints, progressive temporal reveal, non-cuboid 3D sculpting, WebGPU + 2× HTML-in-Canvas, direct 3D editing, and multi-beat + four-view quality gates |
 
 ---
 
@@ -47,15 +47,13 @@
 
 ---
 
-## Active Flagship & Benchmark Examples
+## Clean-Slate True 4D Workflow (Concept Draft → Orthographic Three-View Blueprint → True 4D)
 
-Start a local static HTTP server at the repository root and open [`examples/index.html`](examples/index.html) (or [`index.html`](index.html)):
+Legacy single-view-2D-derived sample benches have been cleared so the showcase starts clean under the **Three-View Volumetric 4D** standard:
 
-- **`examples/rl-td-bench/`** *(v2 Flagship · True 4D Continuous 6-Beat Workbench)*: Rebuilds RL Chapter 7 (`TD(0) → Sarsa → 4-Q Cliff → n-step Glass Arc → Policy Fork → Diegetic Code Trace`) on a continuous 44-second `SpacetimeClock` + `ActorChoreographer`, featuring direct 3D `GridBrush` cliff painting, live Sarsa vs counterfactual Ghost Q-Learning trajectories, WebGPU + TSL + HTML-in-Canvas progressive enhancement, and one-click MP4/WebM/GIF/APNG export.
-- **`examples/cache-bench/`** *(Active Benchmark · LRU vs FIFO 4-Act Workbench)*: Contrasts `1 ns` SRAM hits against `100 ns` DRAM misses on identical traces across 4 acts with `LinkBus` part-to-table highlighting, live `ChartCard.updateXY` hit-rate vs `ghost` baseline curves, and collapsible live AMAT substitution *(v1 compatibility benchmark)*.
-- **`examples/hysteresis-bench/`** *(Active Benchmark · Physical × Math Dual Workbench)*: Shows how a single switching threshold triggers high-frequency relay chatter under sensor noise, then widens the $\Delta T$ hysteresis band across 3 acts while synchronizing the bimetallic strip, heater glow, phase-space loop, and switching inequality table *(v1 compatibility benchmark)*.
-
-> **Archived v1 workbenches**: Earlier v1 examples (including `prob-stat-ch5-bench`) are preserved cleanly with full git history and standalone runnable files under [`examples/archive/`](examples/archive/README.md).
+1. **Structured Concept Draft (Step 1a)**: Choose Truth Axis (`①–④`), volumetric 3D structure & cutaway hierarchy, `T1–T4` beat-by-beat reveal ledger, direct manipulation, and falsification plan — no misleading single-view 2D perspective art.
+2. **Orthographic Three-View Blueprint (Step 1b)**: Lock aligned **Front / Side / Top** orthographic views plus an explicit `DIMENSIONS` constant table (`L × W × H`, thicknesses, clearances, 4D motion envelopes) before writing Three.js code.
+3. **True 4D Assembly & Multi-View Verification (Steps 2–3)**: Build volumetric sculpted 3D mechanisms over continuous reversible time and verify with `verify_stage.py` (multi-beat layout, crispness, geometry diversity, camera ownership, and automated **Front / Side / Top / Iso** four-view capture).
 
 ---
 
@@ -69,20 +67,20 @@ python3 scripts/setup_vendor.py examples/shared
 # Optional: shrink CJK WOFF2 fonts to exact glyphs used by a standalone project
 uv run --with fonttools --with brotli python3 scripts/setup_vendor.py dist/my-bench --fonts-only --subset-cjk dist/my-bench
 
-# 2. Run full Node syntax, manifest sync, link-integrity & v1/v2.1 unit test suite
+# 2. Run full Node syntax, manifest sync, link-integrity & v2.1 unit test suite
 npm test
 
-# 3. Verify 3 viewports + multi-beat + v2.1 crispness/geometry/camera gates
-uv run scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html
+# 3. Verify 3 viewports + multi-beat + Front/Side/Top/Iso three-view & crispness/geometry/camera gates
+uv run scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html
 # Also verify Firefox/Safari non-HTML-in-Canvas fallback parity
-uv run scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html --no-hic
+uv run scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html --no-hic
 
 # 4. Bake deterministic 2x thumbnails from live scenes (supports manifest `t` + `exportMode`)
 uv run scripts/bake_thumbs.py --root . --manifest examples/thumbs-manifest.json
 
 # 5. Export deterministic 4D video / GIF from CLI (Tier 2 studio exporter)
-uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html \
-  --out dist/rl-td.mp4 --preset 1080p60 --hud caption --formats mp4,gif
+uv run scripts/export_video.py --root . --entry examples/<your-bench>/index.html \
+  --out dist/demo.mp4 --preset 1080p60 --hud caption --formats mp4,gif
 ```
 
 ---
@@ -91,19 +89,19 @@ uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html 
 
 ```text
 simulify/
-├── SKILL.md                  # Agent Skill spec, Four Iron Laws & v2.1 multi-beat gates
+├── SKILL.md                  # Agent Skill spec, Concept Draft + Three-View workflow & Four Iron Laws
 ├── plugin.json               # Plugin manifest (v2.1.0, synced with .claude-plugin/marketplace.json)
 ├── LICENSE                   # MIT License
-├── kit/                      # Layer 1: 1:1 HiDPI WebGPU/TSL 3D stage, sharp OutlinePass, 2x HtmlSurface,
+├── kit/                      # Layer 1: 1:1 HiDPI WebGPU/TSL 3D stage (with timeout WebGL2 fallback &
+│   │                         #          setCardinalView), sharp OutlinePass, 2x HtmlSurface,
 │   │                         #          non-cuboid geo-sculpt, 4D spacetime/choreography, manipulators,
 │   │                         #          persistent ChartCard, KaTeX LiveMathsPanel, ClearType tokens
 │   ├── fonts/                # Offline four-tier WOFF2 font kit (Newsreader, Inter, KaTeX, JetBrains Mono + CJK)
 │   └── export/               # Lazy pure-JS MP4/WebM/GIF/APNG muxers & dual-path compositor
-├── primitives/               # Canonical domain 3D primitives (e.g. rl-primitives.js)
+├── primitives/               # Canonical domain 3D primitive factories built from locked Three-View DIMENSIONS
 ├── shell/                    # Layer 2: Opt-in i18n, Ctrl+K command palette, storage adapters, mastery bar
-├── scripts/                  # setup_vendor.py (--subset-cjk), verify_stage.py (--no-hic), bake_thumbs.py, export_video.py
+├── scripts/                  # setup_vendor.py (--subset-cjk), verify_stage.py (--no-hic + three-views), bake_thumbs.py, export_video.py
 ├── references/               # Fidelity & Geo-Sculpt, Time Dimension (T1–T4), Topic Fit, Design System, Architecture
-├── examples/                 # Active showcase (rl-td-bench v2 flagship, cache-bench, hysteresis-bench)
-│   └── archive/              # Archived v1 workbenches preserved with history (prob-stat-ch5-bench)
+├── examples/                 # Clean showcase gallery + shared offline Three.js vendor runtime
 └── tests/                    # Full Node ESM unit, geo-sculpt, typography, muxer, syntax & link-integrity suite
 ```

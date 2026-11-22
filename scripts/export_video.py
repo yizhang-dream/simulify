@@ -14,14 +14,14 @@ act/beat time slicing, and multi-format FFmpeg encoding (MP4, WebM, 2-pass palet
 animated WebP, APNG).
 
 Examples:
-  uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html \
-    --out dist/rl-td.mp4 --preset 1080p60 --hud caption
+  uv run scripts/export_video.py --root . --entry examples/<your-bench>/index.html \
+    --out dist/demo.mp4 --preset 1080p60 --hud caption
 
-  uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html \
-    --out dist/rl-td-act2.gif --preset gif --stage act-2 --hud caption
+  uv run scripts/export_video.py --root . --entry examples/<your-bench>/index.html \
+    --out dist/demo-act2.gif --preset gif --stage act-2 --hud caption
 
-  uv run scripts/export_video.py --root . --entry examples/rl-td-bench/index.html \
-    --out dist/rl-td-final.mp4 --preset 4k60 --shutter 180 --formats mp4,gif,webm --gpu
+  uv run scripts/export_video.py --root . --entry examples/<your-bench>/index.html \
+    --out dist/demo-final.mp4 --preset 4k60 --shutter 180 --formats mp4,gif,webm --gpu
 """
 
 import argparse

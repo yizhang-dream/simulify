@@ -1518,6 +1518,14 @@ export function exposeTestHooks(controller, extra = {}) {
     return stage?.getGeometryAudit?.() ?? null;
   };
 
+  const setCardinalView = (viewName = 'iso', opts = {}) => {
+    if (typeof extra.setCardinalView === 'function') {
+      return extra.setCardinalView(viewName, opts);
+    }
+    const stage = resolveStage();
+    return stage?.setCardinalView?.(viewName, opts) ?? null;
+  };
+
   const getFontAudit = () => {
     if (typeof extra.getFontAudit === 'function') {
       return extra.getFontAudit();
@@ -1606,6 +1614,7 @@ export function exposeTestHooks(controller, extra = {}) {
     getActiveActorCount,
     getMotionMagnitude,
     getGeometryAudit,
+    setCardinalView,
     getFontAudit,
     ...(setParams ? { setParams } : {}),
     ...(setLang ? { setLang } : {}),

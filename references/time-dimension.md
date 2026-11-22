@@ -50,12 +50,12 @@
   - `getTimelineInfo()` 返回全局时长与分幕/分拍起止区间；
   - `enterExportMode({ hud, width, height, dpr, muteAudio })` / `exitExportMode()` 暂停内部 `rAF`、解锁相机、切换 `html[data-export]` 并锁定渲染尺寸；
   - `seek(globalTimeSec)` 严格触发 **1× `syncAll` + 1× `choreographer.evaluate` + 1× `stage.renderNow`**，幂等可逆、零双触开销；
-  - `getCaptureTargets()`、`getCaptionState()`、`getActiveActorCount(t)`、`getGeometryAudit()`、`getFontAudit()` 分别服务于帧合成、字幕条、初始稀疏度、反长方体审计与离线字体审计。
+  - `getCaptureTargets()`、`getCaptionState()`、`getActiveActorCount(t)`、`getGeometryAudit()`（含三轴世界包围盒与扁平度比例 `bounds`）、`setCardinalView('front' | 'side' | 'top' | 'iso')`、`getFontAudit()` 分别服务于帧合成、字幕条、初始稀疏度、反长方体与三视图比例验收、离线字体审计。
 - **URL 深链**：`applyUrlState()` 统一响应 `?stage=&step=&t=&paused&end&thumb=1&export=stage|caption|hud&backend=webgpu|webgl2&lang=` 并置 `window.__ready = true`。
 - **v2.1 全节拍真实交互门禁（[`scripts/verify_stage.py`](../scripts/verify_stage.py)）**：
   1. **全节拍采样（消灭 `t ≈ 0.35s` 假绿）**：自动从 `getTimelineInfo()` 采样首幕、中间各幕与末幕中点，在每一拍复测 `hud-overlap`（含 `.beat-caption-pill` 与 3D `HtmlSurface` 投影框 vs HUD 停靠栏遮挡 `> 15%` 即判败）、`guideOverflow`、`horizontalTruncations`、`chart-legibility` 与 `prose-lint`；
   2. **`typography-crispness`** *(v2)*：校验 `getFontAudit()`（`loadedCount >= 2, failedCount === 0`）、物理画布对齐（`canvas.width >= rect.width * dpr - 2`）、全节拍可见 HUD/SVG 文本无 `< 10.5px` 碎字，且活跃 3D `HtmlSurface` 纹理物理像素密度达到 HiDPI 底线（堵死 0.5× 糊字回归）；
-  3. **`geometry-diversity`** *(v2 3D)*：校验满载节拍的 `getGeometryAudit()`，满足 `cuboidRatio <= 0.70` 且 `sculptedMeshes > 0`（对 v1 经典实验台保留兼容免误杀）；
+  3. **`geometry-diversity` & `three-views`** *(v2 3D)*：校验满载节拍的 `getGeometryAudit()`（`cuboidRatio <= 0.70`、`sculptedMeshes > 0`、`bounds.flatnessRatio >= 0.08`），并自动驱动 `setCardinalView()` 捕获 **正视 / 侧视 / 俯视 / 等轴** 四视图对照 Step 1 工程三视图核验真三维体量与比例；
   4. **`camera-ownership`** *(桌面端 3D)*：真实 Playwright 鼠标拖拽 canvas 旋转镜头，验证相机真实偏转且在播放状态下等待 `>= 400ms` 后未被脚本强行弹回；
   5. **`initial-sparsity` / `temporal-scrub-determinism` / `mandatory-falsify` / `visual-integrity`**：保持全部 4D 核心硬门禁，并支持 `--no-hic` 参数专门核验无 `CanvasDrawElement`（Firefox/Safari）回退清晰度与零报错。
 

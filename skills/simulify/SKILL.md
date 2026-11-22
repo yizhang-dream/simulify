@@ -2,10 +2,11 @@
 name: simulify
 description: >-
   Turn a mechanism, physical structure, hardware/protocol flow, mathematical law, or algorithm into a
-  standalone offline interactive 3D/4D HTML explainer: progressive temporal revelation over continuous
-  reversible 4D timelines, 1:1 HiDPI WebGPU + HTML-in-Canvas progressive enhancement, offline four-tier
-  typography & KaTeX live equation substitution, cross-domain non-cuboid 3D sculpting & cutaways,
-  counterfactual ghosts, and offline MP4/WebM/GIF export.
+  standalone offline interactive 3D/4D HTML explainer: structured concept drafts + mandatory
+  orthographic three-view blueprints (Front/Side/Top LxWxH proportion lock), true volumetric 3D
+  sculpting & cutaways, progressive temporal revelation over continuous reversible 4D timelines,
+  1:1 HiDPI WebGPU + HTML-in-Canvas progressive enhancement, offline four-tier typography & KaTeX
+  live equation substitution, counterfactual ghosts, and offline MP4/WebM/GIF export.
   Use whenever a flat page (answer-me-with-html), 2D diagram (archify), or static textbook
   (atlas-textbook) cannot show 3D spatial occlusion, progressive causal time evolution, or hands-on
   "what-if" dynamics — or when the user asks for 用 3D 讲 / 做个 3D 或 4D 交互演示 / 拆解内部结构 /

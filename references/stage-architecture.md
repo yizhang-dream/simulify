@@ -8,7 +8,7 @@
 
 | 模块 | 职责 | 核心导出 |
 |---|---|---|
-| [`kit/stage-3d.js`](../kit/stage-3d.js) | 1:1 物理像素（`device-pixel-content-box`）WebGPU→WebGL2 舞台、`NeutralToneMapping`、`configureSharpTexture`、用户相机锁（`setCameraFromScript` / `isUserCameraLocked` / `unlockUserCamera`）、按需脏标记渲染 `requestRender()`、造型审计 `getGeometryAudit()`、轮廓预设与光标礼让 | `IsometricStage`, `SOLID_LAYER`, `GROUND_LAYER`, `SURFACE_LAYER` |
+| [`kit/stage-3d.js`](../kit/stage-3d.js) | 1:1 物理像素（`device-pixel-content-box`）WebGPU（带超时熔断自动降级 WebGL2）舞台、`NeutralToneMapping`、`configureSharpTexture`、用户相机锁（`setCameraFromScript` / `isUserCameraLocked` / `unlockUserCamera`）、按需脏标记渲染 `requestRender()`、造型与包围盒比例审计 `getGeometryAudit()`、三视图正交核验机位 `setCardinalView('front'\|'side'\|'top'\|'iso')`、轮廓预设与光标礼让 | `IsometricStage`, `SOLID_LAYER`, `GROUND_LAYER`, `SURFACE_LAYER` |
 | [`kit/outline-pass.js`](../kit/outline-pass.js) | TSL/GLSL 1-ring 物理像素锐利工程墨线（零外环灰雾）、独立无色调映射 `surfacePass`（`SURFACE_LAYER = 2`）、`crisp`/`subtle`/`none` 预设 | `OutlinePass`, `OUTLINE_PRESETS`, `SOLID_LAYER`, `GROUND_LAYER`, `SURFACE_LAYER` |
 | [`kit/html-surface.js`](../kit/html-surface.js) | 现代原生 `<canvas content="drawable">` 3D 活 HTML 表面（`border-box` × `>= 2×` HiDPI / 投影缩放分配 + WGSL 预乘线性 mipmap + 16× 各向异性 + `flushPaint()`）+ 非 HIC 浏览器无污染纯 Canvas2D 3D `CanvasTexture` 回退 | `HtmlSurfaceManager`, `supportsHtmlInCanvas`, `computeCanvasMatrix4`, `computeCanvasTransform` |
 | [`kit/geo-sculpt.js`](../kit/geo-sculpt.js) | 跨学科非盒体 3D 雕塑库（5 大构造族 + 10 套主题自适应受光 PBR 材质，自动写 `simulifyGeoKind`、默认阴影、零 GC 原位变形） | `SCULPT_GEO_KINDS`, `SCULPT_MATERIAL_PRESETS`, `createSculptMaterial`, `createLathedSolid`, `createGlassVessel`, `createSculptedProbe`, `createBeaconLighthouse`, `createBevelledProfile`, `createGearWheel`, `createHorseshoeYoke`, `createArchSpan`, `createAirfoilVane`, `createHeightfieldSurface`, `createFracturedChasm`, `createParametricSurface`, `createDeformableStrip`, `createHelicalCoil`, `createTaperedConduit`, `createPleatedBellows` |
@@ -38,7 +38,7 @@
 ## 3. CLI 工具链（[`scripts/`](../scripts/)）
 
 - `python scripts/setup_vendor.py <lesson_dir>`：提取离线纯净 `three` WebGPU + TSL + `RoomEnvironment` + `RoundedBoxGeometry` + `BufferGeometryUtils` 到本地 `vendor/three/` 并同步 `kit/fonts/`（支持 `--no-fonts`、`--fonts-only` 与 `--subset-cjk <project_dir>` 汉字子集瘦身）。
-- `uv run scripts/verify_stage.py --root <dir> --entry <index.html> [--no-hic] [--dpr 2] [--strict-4d] [--probe "?stage=..."]`：自动启临时服务，在 `1280×800`、`1440×900`、`390×844` 上执行**全节拍多幕巡检**、HUD/3D `HtmlSurface` 遮挡检测（`> 15%` 判败）、`typography-crispness`（字体/物理画布/碎字/3D 贴图密度）、`geometry-diversity`（反长方体）、`camera-ownership`（实测鼠标拖拽 + 400ms 不弹回）及全部 4D 确定性校验，产出 JSON 验机回执与截图。
+- `uv run scripts/verify_stage.py --root <dir> --entry <index.html> [--no-hic] [--dpr 2] [--strict-4d] [--probe "?stage=..."]`：自动启临时服务，在 `1280×800`、`1440×900`、`390×844` 上执行**全节拍多幕巡检**、HUD/3D `HtmlSurface` 遮挡检测（`> 15%` 判败）、`typography-crispness`（字体/物理画布/碎字/3D 贴图密度）、`geometry-diversity`（反长方体）、`three-views`（正/侧/俯/等轴四视图自动抓拍与非扁平体量比例校验）、`camera-ownership`（实测鼠标拖拽 + 400ms 不弹回）及全部 4D 确定性校验，产出 JSON 验机回执与截图。
 - `uv run scripts/bake_thumbs.py --root <dir> --manifest <thumbs.json>`：利用 `?thumb=1` 与确定性 `t` 从真实渲染画面自动烘焙高清 2× 缩略图。
 - `uv run scripts/export_video.py --root <dir> --entry <index.html> --out <file> --preset 1080p60`：Tier 2 命令行影棚级多进程导片（支持 `caption`/`stage`/`hud` 模式与 `--shutter 180` 线性光运动模糊）。
 

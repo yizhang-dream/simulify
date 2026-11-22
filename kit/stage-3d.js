@@ -116,6 +116,23 @@ function resolveOutlinePreset(opt) {
   return 'crisp';
 }
 
+function withTimeout(promise, ms, label) {
+  let timer = 0;
+  return new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 /**
  * Simulify v2 3D/4D Stage supporting:
  * - Automatic 3-tier backend: Hardware WebGPU -> WebGL2 (TSL) -> Graceful Fallback
@@ -293,6 +310,15 @@ export class IsometricStage {
   }
 
   async _initWebGPURenderer(options, requestedBackend) {
+    const timeoutMs = Math.max(500, Number(options.webgpuTimeoutMs) || 4000);
+    const buildRenderer = (forceWebGL) =>
+      new THREE.WebGPURenderer({
+        canvas: this.canvas,
+        antialias: options.antialias !== false,
+        alpha: options.alpha !== false,
+        forceWebGL,
+      });
+
     try {
       let forceWebGL = requestedBackend === 'webgl2';
 
@@ -300,7 +326,11 @@ export class IsometricStage {
         let adapter = null;
         if (typeof navigator !== 'undefined' && navigator.gpu) {
           try {
-            adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+            adapter = await withTimeout(
+              navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }),
+              Math.min(2500, timeoutMs),
+              'WebGPU requestAdapter'
+            );
           } catch {
             adapter = null;
           }
@@ -308,7 +338,7 @@ export class IsometricStage {
         const isSoftwareFallback = Boolean(
           adapter && (adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter)
         );
-        // Only engage WebGPU automatically on real hardware adapters (avoids Linux headless
+        // Only engage WebGPU automatically on real hardware adapters (avoids headless
         // Dawn SwiftShader silent-blank regression unless explicitly forced via ?backend=webgpu)
         if (!adapter || (isSoftwareFallback && requestedBackend !== 'webgpu')) {
           forceWebGL = true;
@@ -317,13 +347,23 @@ export class IsometricStage {
 
       if (this._disposed) return this;
 
-      const renderer = new THREE.WebGPURenderer({
-        canvas: this.canvas,
-        antialias: options.antialias !== false,
-        alpha: options.alpha !== false,
-        forceWebGL,
-      });
-      await renderer.init();
+      let renderer = buildRenderer(forceWebGL);
+      try {
+        await (forceWebGL
+          ? renderer.init()
+          : withTimeout(renderer.init(), timeoutMs, 'WebGPURenderer.init'));
+      } catch (initErr) {
+        try {
+          renderer.dispose?.();
+        } catch {}
+        if (forceWebGL || requestedBackend === 'webgpu') {
+          throw initErr;
+        }
+        // Auto-recover from stalled/broken WebGPU init in embedded WebViews by falling back to WebGL2
+        forceWebGL = true;
+        renderer = buildRenderer(true);
+        await renderer.init();
+      }
 
       if (this._disposed) {
         renderer.dispose();
@@ -498,6 +538,11 @@ export class IsometricStage {
     let surfaceMeshes = 0;
     const kinds = Object.create(null);
 
+    const box = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    let hasBounds = false;
+    this.scene.updateMatrixWorld(true);
+
     this.scene.traverseVisible((obj) => {
       if (!obj || !obj.isMesh) return;
       if (obj.userData?.simulifyInternal === true) return;
@@ -513,6 +558,24 @@ export class IsometricStage {
       if (kindLower === 'html-surface' || kindLower === 'htmlsurface') {
         surfaceMeshes += 1;
         return;
+      }
+
+      if (obj.geometry) {
+        if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+        if (obj.geometry.boundingBox && !obj.geometry.boundingBox.isEmpty()) {
+          meshBox.copy(obj.geometry.boundingBox).applyMatrix4(obj.matrixWorld);
+          if (
+            Number.isFinite(meshBox.min.x) &&
+            Number.isFinite(meshBox.max.x) &&
+            Number.isFinite(meshBox.min.y) &&
+            Number.isFinite(meshBox.max.y) &&
+            Number.isFinite(meshBox.min.z) &&
+            Number.isFinite(meshBox.max.z)
+          ) {
+            box.union(meshBox);
+            hasBounds = true;
+          }
+        }
       }
 
       if (explicitKind) {
@@ -541,6 +604,26 @@ export class IsometricStage {
     const cuboidRatio = totalMeshes > 0 ? +(cuboidMeshes / totalMeshes).toFixed(4) : 0;
     const sculptedRatio = totalMeshes > 0 ? +(sculptedMeshes / totalMeshes).toFixed(4) : 0;
 
+    let bounds = null;
+    if (hasBounds) {
+      const sz = new THREE.Vector3();
+      const ctr = new THREE.Vector3();
+      box.getSize(sz);
+      box.getCenter(ctr);
+      const maxDim = Math.max(sz.x, sz.y, sz.z, 1e-6);
+      const minDim = Math.min(sz.x, sz.y, sz.z);
+      bounds = {
+        width: +sz.x.toFixed(4),
+        height: +sz.y.toFixed(4),
+        depth: +sz.z.toFixed(4),
+        min: [+box.min.x.toFixed(4), +box.min.y.toFixed(4), +box.min.z.toFixed(4)],
+        max: [+box.max.x.toFixed(4), +box.max.y.toFixed(4), +box.max.z.toFixed(4)],
+        center: [+ctr.x.toFixed(4), +ctr.y.toFixed(4), +ctr.z.toFixed(4)],
+        normalizedRatio: [+(sz.x / maxDim).toFixed(3), +(sz.y / maxDim).toFixed(3), +(sz.z / maxDim).toFixed(3)],
+        flatnessRatio: +(minDim / maxDim).toFixed(4),
+      };
+    }
+
     return {
       totalMeshes,
       cuboidMeshes,
@@ -549,6 +632,7 @@ export class IsometricStage {
       surfaceMeshes,
       cuboidRatio,
       sculptedRatio,
+      bounds,
       kinds: { ...kinds },
     };
   }
@@ -798,7 +882,7 @@ export class IsometricStage {
 
         if (this._drag.mode === 'orbit') {
           this.view.azimuth -= dx * 0.0072;
-          this.view.elevation = clamp(this.view.elevation + dy * 0.0068, 12 * DEG, 86 * DEG);
+          this.view.elevation = clamp(this.view.elevation + dy * 0.0068, 2 * DEG, 88 * DEG);
           this._topView = false;
         } else {
           const span =
@@ -1125,9 +1209,9 @@ export class IsometricStage {
     if (pose.azimuth !== undefined) this.view.azimuth = Number(pose.azimuth);
     else if (pose.azimuthDeg !== undefined) this.view.azimuth = Number(pose.azimuthDeg) * DEG;
 
-    if (pose.elevation !== undefined) this.view.elevation = clamp(Number(pose.elevation), 10 * DEG, 86 * DEG);
+    if (pose.elevation !== undefined) this.view.elevation = clamp(Number(pose.elevation), 0, 89 * DEG);
     else if (pose.elevationDeg !== undefined) {
-      this.view.elevation = clamp(Number(pose.elevationDeg) * DEG, 10 * DEG, 86 * DEG);
+      this.view.elevation = clamp(Number(pose.elevationDeg) * DEG, 0, 89 * DEG);
     }
 
     if (pose.distance !== undefined) this.view.distance = Math.max(1, Number(pose.distance));
@@ -1148,6 +1232,45 @@ export class IsometricStage {
     this._updateCamera();
     this._notifyViewChange();
     this.requestRender();
+  }
+
+  /**
+   * Snap camera immediately to a standard engineering view for 3-view (Front / Side / Top)
+   * proportion verification against Step 1 orthographic blueprints.
+   * @param {'front'|'side'|'right'|'left'|'back'|'top'|'iso'} [viewName='iso']
+   * @param {{ centerOnBounds?: boolean, zoom?: number, unlock?: boolean }} [opts]
+   */
+  setCardinalView(viewName = 'iso', opts = {}) {
+    const key = String(viewName || 'iso').toLowerCase();
+    const auditBounds = opts.centerOnBounds !== false ? this.getGeometryAudit()?.bounds : null;
+    const target = auditBounds
+      ? auditBounds.center
+      : [this.defaultView.target.x, this.defaultView.target.y, this.defaultView.target.z];
+    const zoom = opts.zoom ?? this.defaultView.zoom;
+    const poses = {
+      front: { azimuthDeg: 0, elevationDeg: 0, zoom, target },
+      back: { azimuthDeg: 180, elevationDeg: 0, zoom, target },
+      side: { azimuthDeg: 90, elevationDeg: 0, zoom, target },
+      right: { azimuthDeg: 90, elevationDeg: 0, zoom, target },
+      left: { azimuthDeg: -90, elevationDeg: 0, zoom, target },
+      top: { azimuthDeg: 0, elevationDeg: 88.5, zoom, target },
+      iso: {
+        azimuth: this.defaultView.azimuth,
+        elevation: this.defaultView.elevation,
+        zoom: this.defaultView.zoom,
+        distance: this.defaultView.distance,
+        target: this.defaultView.target,
+      },
+    };
+    const pose = poses[key] || poses.iso;
+    this.setCameraImmediate(pose, { unlock: opts.unlock === true });
+    this.renderNow();
+    return {
+      view: poses[key] ? key : 'iso',
+      azimuthDeg: +(this.view.azimuth / DEG).toFixed(2),
+      elevationDeg: +(this.view.elevation / DEG).toFixed(2),
+      bounds: auditBounds,
+    };
   }
 
   flyTo(goal = {}, durationMs = 420, opts = {}) {

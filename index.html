@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Simulify v2 · True 4D 交互原理与实验台画廊</title>
+  <title>Simulify · True 4D 实验台画廊</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2318213d'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='800' font-size='14' fill='%23f6eddd'%3E4D%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="./kit/primer-tokens.css">
   <style>
     body {
-      padding: 18px clamp(16px, 4vw, 44px) 24px;
+      padding: 24px clamp(16px, 4vw, 44px) 32px;
       background-color: var(--bg);
       background-image: radial-gradient(var(--line) 1px, transparent 1px);
       background-size: 22px 22px;
     }
     .gallery-shell {
-      max-width: 1120px;
+      max-width: 960px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 18px;
     }
     .gallery-head {
       display: flex;
@@ -26,15 +26,15 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 14px 20px;
+      padding: 16px 22px;
       border: 1px solid var(--line);
       border-bottom: 1.5px solid var(--navy);
       border-radius: var(--radius-lg);
       background: var(--card-solid);
       box-shadow: var(--shadow-md);
     }
-    .gallery-head .brand-title {
-      margin: 0 0 3px;
+    .brand-title {
+      margin: 0 0 4px;
       font-family: var(--font-display);
       font-size: clamp(20px, 2.2vw, 26px);
       font-weight: 700;
@@ -42,157 +42,47 @@
       color: var(--navy);
       line-height: 1.2;
     }
-    .gallery-head .brand-sub {
+    .brand-sub {
       margin: 0;
       font-family: var(--font-sans);
-      font-size: 13px;
+      font-size: 13.5px;
       color: var(--muted);
     }
-    .gallery-tools {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-    }
-    /* Balanced 2-column grid so flagship spans full width and 2 secondary benches fill 50/50 with ZERO void */
-    .gallery-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-      align-items: stretch;
-    }
-    @media (max-width: 740px) {
-      .gallery-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-    .world-card {
-      display: flex;
-      flex-direction: column;
+    .empty-card {
+      padding: 28px 26px;
       border: 1px solid var(--line);
       border-radius: var(--radius-lg);
       background: var(--card-solid);
       box-shadow: var(--shadow-md);
-      overflow: hidden;
-    }
-    .world-card.is-flagship {
-      grid-column: 1 / -1;
-      display: grid;
-      grid-template-columns: minmax(320px, 1.08fr) minmax(320px, 1fr);
-      border-color: var(--teal);
-    }
-    @media (max-width: 780px) {
-      .world-card.is-flagship {
-        grid-template-columns: 1fr;
-      }
-    }
-    .world-thumb {
-      display: block;
-      width: 100%;
-      height: 196px;
-      object-fit: cover;
-      border-bottom: 1px solid var(--line-soft);
-      background: var(--bg-deep);
-      flex-shrink: 0;
-    }
-    .world-card.is-flagship .world-thumb {
-      height: 100%;
-      min-height: 248px;
-      max-height: 288px;
-      border-bottom: 0;
-      border-right: 1px solid var(--line-soft);
-    }
-    @media (max-width: 780px) {
-      .world-card.is-flagship .world-thumb {
-        height: 210px;
-        min-height: 0;
-        border-right: 0;
-        border-bottom: 1px solid var(--line-soft);
-      }
-    }
-    .world-body {
-      padding: 14px 18px 16px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      flex: 1 1 auto;
+      gap: 12px;
     }
-    .world-card.is-flagship .world-body {
-      padding: 16px 20px 18px;
-      justify-content: center;
-    }
-    .world-body h2 {
+    .empty-card h2 {
       margin: 0;
       font-family: var(--font-display);
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.014em;
+      font-size: 19px;
       color: var(--navy);
-      line-height: 1.28;
-      text-wrap: balance;
     }
-    .world-card.is-flagship .world-body h2 {
-      font-size: 20px;
-    }
-    .world-body .guide-cue {
+    .empty-card p {
       margin: 0;
-      font-family: var(--font-sans);
-      font-size: 13px;
-      line-height: 1.48;
+      font-size: 14px;
+      line-height: 1.6;
       color: var(--ink);
     }
-    .world-tags {
+    .spec-list {
+      margin: 4px 0 0;
+      padding-left: 20px;
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       gap: 6px;
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--ink);
     }
-    .world-tag {
-      padding: 2px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: var(--card);
+    .spec-list code {
       font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      font-size: 11.5px;
-      color: var(--navy);
-    }
-    .world-tag.is-accent {
-      border-color: var(--teal);
-      background: var(--teal-soft);
-      color: var(--navy);
-      font-weight: 700;
-    }
-    .world-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: auto;
-      padding-top: 6px;
-    }
-    .world-actions a {
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-    }
-    .gallery-foot {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 10px 16px;
-      border: 1px dashed var(--line);
-      border-radius: var(--radius-lg);
-      background: var(--card-solid);
       font-size: 12.5px;
-      color: var(--muted);
-    }
-    .gallery-foot a {
-      color: var(--navy);
-      font-family: var(--font-mono);
-      text-decoration: underline;
     }
   </style>
 </head>
@@ -200,210 +90,23 @@
   <div class="gallery-shell">
     <header class="gallery-head">
       <div>
-        <h1 class="brand-title" id="gal-title">Simulify v2 · True 4D 交互原理与实验台画廊</h1>
-        <p class="brand-sub" id="gal-sub">连续 4D 渐进揭幕 · 1:1 HiDPI 非盒体雕塑引擎 · 离线四层字库与真数学排版 · MP4/WebM/GIF 导出</p>
+        <h1 class="brand-title">Simulify · True 4D 交互原理与实验台画廊</h1>
+        <p class="brand-sub">概念稿 + 工程三视图锁比例 · 1:1 HiDPI 非盒体真 4D 引擎 · 离线四层字库与 KaTeX 真数学排版</p>
       </div>
-      <div class="gallery-tools">
-        <div id="mastery-slot"></div>
-        <div id="lang-slot"></div>
-        <button type="button" id="btn-search" class="btn-chip">⌘K 搜索</button>
-      </div>
+      <div id="lang-slot"></div>
     </header>
 
-    <main class="gallery-grid" id="gallery-grid"></main>
-
-    <footer class="gallery-foot" id="gallery-foot">
-      <span id="foot-note">早期 v1 归档实验台（保留完整 git 历史与离线可运行代码）：</span>
-      <a href="./examples/archive/prob-stat-ch5-bench/index.html" id="foot-link">examples/archive/prob-stat-ch5-bench/</a>
-    </footer>
+    <main class="empty-card">
+      <h2>旧版 2D 推导样板已清空 · 等待首批三视图真 4D 实验台入驻</h2>
+      <p>
+        画廊已重置为空白起点。后续每个入驻实验台均须先通过<strong>文字概念稿 + 正/侧/俯标准工程三视图</strong>锁死三维长宽高比例（<code>L : W : H</code>）与内部空间层级，再基于 <code>kit/</code> 离线 4D 引擎构建并通过多视角几何与全节拍交互门禁。
+      </p>
+      <ul class="spec-list">
+        <li><strong>Step 1</strong>：编写架构概念稿与分拍揭示台账，并产出正视图（Front）/ 侧视图（Side）/ 俯视图（Top）三视图与 <code>DIMENSIONS</code> 尺寸常量表。</li>
+        <li><strong>Step 2</strong>：基于 <code>kit/stage-3d.js</code>、<code>kit/geo-sculpt.js</code>、<code>kit/spacetime.js</code>、<code>kit/choreography.js</code> 构建全视角自洽的立体真 4D 实验台。</li>
+        <li><strong>Step 3</strong>：通过 <code>scripts/verify_stage.py</code> 多节拍 + 正/侧/俯/等轴四视图比例验收后，由 <code>scripts/bake_thumbs.py</code> 烘焙缩略图并登记到此画廊。</li>
+      </ul>
+    </main>
   </div>
-
-  <script type="module">
-    import { mountLangSwitch, mountMasteryBar } from './shell/app-shell.js';
-    import { CommandPalette } from './shell/command-palette.js';
-    import { createI18n } from './shell/i18n.js';
-    import { createLocalStorage, MasteryStore } from './shell/storage-adapter.js';
-
-    const STAGES = [
-      {
-        id: 'rl-td-bench',
-        flagship: true,
-        href: './examples/rl-td-bench/index.html',
-        deepQuery: 't=34&paused',
-        thumb: './examples/thumbs/rl-td-bench.png',
-        tags: {
-          zh: ['v2 Flagship · True 4D', '6 节拍 · 44s 连续时间轴', '雕塑地形 + 断裂峡谷', 'WebGPU + 3D 活代码板', '3D 涂画悬崖'],
-          en: ['v2 Flagship · True 4D', '6 Beats · 44s Clock', 'Sculpted Terrain & Chasm', 'WebGPU + 3D Code Slate', '3D Cliff Brush'],
-        },
-        title: {
-          zh: 'RL 第 7 章 · TD / Sarsa / n-step / Q-Learning True 4D 旗舰实验台',
-          en: 'RL Ch.7 · TD / Sarsa / n-step / Q-Learning True 4D Flagship Bench',
-        },
-        desc: {
-          zh: '44 秒连续 4D 渐进揭幕：从车削探针初探拱门网格、连续 3D 价值地形隆起、断裂岩层 -100 峡谷刻蚀与玻璃 n-step 视野弧，到同源 Sarsa 安全绕行 vs Q-Learning 贴崖虚影对照与 3D 活代码追踪；支持直接涂画悬崖、调节 ε 查看反事实虚影并导出 MP4 / GIF。',
-          en: '44-second continuous 4D reveal featuring a turned brass-ceramic probe, continuous 3D value terrain, terraced fractured -100 cliff canyon, frosted-glass n-step arc, live Sarsa vs counterfactual Q-Learning fork, razor-sharp 3D HTML-in-Canvas code trace, direct cliff painting, and MP4/GIF export.',
-        },
-      },
-      {
-        id: 'cache-bench',
-        flagship: false,
-        href: './examples/cache-bench/index.html',
-        deepQuery: 'stage=act-4&end',
-        thumb: './examples/thumbs/cache-bench.png',
-        tags: {
-          zh: ['逻辑 + 空间', '4 幕递进', 'XY 曲线 + Ghost', 'LiveMaths'],
-          en: ['Logic + Space', '4 Progressive Acts', 'XY Curve + Ghost', 'LiveMaths'],
-        },
-        title: {
-          zh: '双槽缓存淘汰实验台 · LRU vs FIFO',
-          en: 'Dual-Bay Cache Workbench · LRU vs FIFO (4 Acts)',
-        },
-        desc: {
-          zh: '同序列对照 1 ns SRAM 命中与 100 ns 主存回源，直观暴露 FIFO 误杀热点，实时刷新 XY 命中率曲线、Ghost 基准线与 AMAT 活公式代入。',
-          en: '4 progressive acts comparing LRU vs FIFO on the same trace (1 ns SRAM vs 100 ns DRAM trays), LinkBus part-to-table highlighting, XY curves with ghost baseline, and live AMAT substitution.',
-        },
-      },
-      {
-        id: 'hysteresis-bench',
-        flagship: false,
-        href: './examples/hysteresis-bench/index.html',
-        deepQuery: 'stage=act-3&end',
-        thumb: './examples/thumbs/hysteresis-bench.png',
-        tags: {
-          zh: ['物理 × 数学', '3 幕对比', '相图滞回环', 'LiveMaths'],
-          en: ['Physics × Math', '3-Act Contrast', 'Hysteresis Phase Loop', 'LiveMaths'],
-        },
-        title: {
-          zh: '双金属恒温器 · 磁吸回差与防抖拆解',
-          en: 'Bimetallic Thermostat · Hysteresis & Chatter Workbench',
-        },
-        desc: {
-          zh: '铜钢异率膨胀弯曲配合永磁死区记忆历史状态；把回差压到 0° 即可在真实噪声下复现继电器高频火花抖动。',
-          en: 'Bimetallic strip bends across temperature while a magnetic latch forms a 4 °C memory loop; collapse the band to 0 °C to expose relay chatter under noise.',
-        },
-      },
-    ];
-
-    const params = new URLSearchParams(location.search);
-    const i18n = createI18n({
-      defaultLang: params.get('lang') === 'en' ? 'en' : 'zh',
-      dicts: {
-        zh: {
-          title: 'Simulify v2 · True 4D 交互原理与实验台画廊',
-          sub: '连续 4D 渐进揭幕 · 1:1 HiDPI 非盒体雕塑引擎 · 离线四层字库与真数学排版 · MP4/WebM/GIF 导出',
-          enter: '打开实验台',
-          deep: '直达反例 / 分叉现场',
-          search: '⌘K 搜索',
-          footNote: '早期 v1 归档实验台（保留完整 git 历史与离线可运行代码）：',
-        },
-        en: {
-          title: 'Simulify v2 · True 4D Interactive Mechanism & Simulation Gallery',
-          sub: 'True 4D Progressive Reveal · 1:1 HiDPI Non-Cuboid Sculpt Engine · Offline 4-Tier Fonts & KaTeX Math · MP4/GIF Export',
-          enter: 'Open Workbench',
-          deep: 'Jump to Fork / Counterexample',
-          search: '⌘K Search',
-          footNote: 'Archived v1 workbenches (preserved in git history and runnable standalone):',
-        },
-      },
-    });
-
-    const store = new MasteryStore(createLocalStorage('simulify:gallery:'), STAGES.map((w) => w.id));
-    mountMasteryBar(document.getElementById('mastery-slot'), store, {
-      labelFn: (p) => `${p.done}/${p.total}`,
-    });
-    mountLangSwitch(document.getElementById('lang-slot'), i18n, [
-      { code: 'zh', label: '中文' },
-      { code: 'en', label: 'EN' },
-    ]);
-
-    const palette = new CommandPalette({
-      items: STAGES.map((w) => ({
-        id: w.id,
-        title: w.title.zh,
-        subtitle: w.tags.zh.join(' · '),
-        href: w.href,
-      })),
-      onSelect: (item) => {
-        store.markDone(item.id);
-        location.href = item.href;
-      },
-    });
-
-    function render() {
-      const lang = i18n.getLang();
-      document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
-      document.getElementById('gal-title').textContent = i18n.t('title');
-      document.getElementById('gal-sub').textContent = i18n.t('sub');
-      document.getElementById('btn-search').textContent = i18n.t('search');
-      document.getElementById('foot-note').textContent = i18n.t('footNote');
-
-      const grid = document.getElementById('gallery-grid');
-      grid.replaceChildren();
-      for (const w of STAGES) {
-        const card = document.createElement('article');
-        card.className = w.flagship ? 'world-card is-flagship' : 'world-card';
-
-        const img = document.createElement('img');
-        img.className = 'world-thumb';
-        img.src = w.thumb;
-        img.alt = w.title[lang] || w.title.zh;
-
-        const body = document.createElement('div');
-        body.className = 'world-body';
-
-        const tags = document.createElement('div');
-        tags.className = 'world-tags';
-        const tagList = w.tags[lang] || w.tags.zh;
-        tagList.forEach((tg, idx) => {
-          const sp = document.createElement('span');
-          sp.className = w.flagship && idx === 0 ? 'world-tag is-accent' : 'world-tag';
-          sp.textContent = tg;
-          tags.append(sp);
-        });
-
-        const h2 = document.createElement('h2');
-        const titleText = w.title[lang] || w.title.zh;
-        for (const part of titleText.split(/(Q-Learning|n-step)/g)) {
-          if (part === 'Q-Learning' || part === 'n-step') {
-            const nb = document.createElement('span');
-            nb.style.whiteSpace = 'nowrap';
-            nb.textContent = part;
-            h2.append(nb);
-          } else if (part) {
-            h2.append(document.createTextNode(part));
-          }
-        }
-        const p = document.createElement('p');
-        p.className = 'guide-cue';
-        p.textContent = w.desc[lang] || w.desc.zh;
-
-        const actions = document.createElement('div');
-        actions.className = 'world-actions';
-
-        const aEnter = document.createElement('a');
-        aEnter.className = 'btn-primary';
-        aEnter.href = `${w.href}?lang=${lang}`;
-        aEnter.textContent = i18n.t('enter');
-        aEnter.onclick = () => store.markDone(w.id);
-
-        const aDeep = document.createElement('a');
-        aDeep.className = 'btn-secondary';
-        aDeep.href = `${w.href}?${w.deepQuery}&lang=${lang}`;
-        aDeep.textContent = i18n.t('deep');
-        aDeep.onclick = () => store.markDone(w.id);
-
-        actions.append(aEnter, aDeep);
-        body.append(tags, h2, p, actions);
-        card.append(img, body);
-        grid.append(card);
-      }
-    }
-
-    document.getElementById('btn-search').onclick = () => palette.open();
-    i18n.subscribe(render);
-    render();
-    window.__simulify = { i18n, store };
-    window.__ready = true;
-  </script>
 </body>
 </html>

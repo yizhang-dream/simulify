@@ -54,7 +54,7 @@ ES modules need HTTP, so opening files with `file://` will not work. Optional ch
 
 ```bash
 npm test
-python scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html --probe "?stage=act-4&end"
+python scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html
 ```
 
 ---
@@ -109,5 +109,5 @@ ES 模块必须走 HTTP，直接双击 `file://` 打开无法运行。可选自�
 
 ```bash
 npm test
-python scripts/verify_stage.py --root . --entry examples/rl-td-bench/index.html --probe "?stage=act-4&end"
+python scripts/verify_stage.py --root . --entry examples/<your-bench>/index.html
 ```

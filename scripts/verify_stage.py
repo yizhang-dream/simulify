@@ -28,6 +28,9 @@ v2 legs (auto-enforced when `window.__simulify.version >= 2` or `--strict-4d` is
      `cuboidRatio <= 0.70` and `sculptedMeshes > 0` (v1 classic benches remain exempt).
   7. camera-ownership: real mouse drag on desktop canvas rotates the camera and holds
      ownership for >= 400ms without script snap-back.
+  8. three-views: on v2 3D desktop stages, captures orthographic/cardinal Front / Side / Top / Iso
+     views via `setCardinalView()`, verifies non-flat volumetric LxWxH bounds (`flatnessRatio >= 0.08`),
+     and verifies Front/Side/Top views render distinct non-blank frames.
 """
 
 import argparse
@@ -920,6 +923,87 @@ def run_camera_ownership_probe(page, init_probe: dict, v2_active: bool) -> dict:
     }
 
 
+def run_three_view_audit(page, init_probe: dict, shot_path: pathlib.Path, v2_active: bool) -> dict:
+    """Capture cardinal Front / Side / Top / Iso views and check volumetric 3D LxWxH bounds."""
+    if not v2_active:
+        return {'passed': True, 'skipped': True, 'reason': 'v1 bench'}
+
+    has_hook = page.evaluate(
+        "() => typeof window.__simulify?.setCardinalView === 'function' || typeof (window.__simulify?.stage?.stage || window.__simulify?.stage || window.__simulify?.scene?.stage)?.setCardinalView === 'function'"
+    )
+    if not has_hook:
+        return {
+            'passed': False,
+            'skipped': False,
+            'reason': 'Missing setCardinalView() on window.__simulify / stage',
+        }
+
+    dur = float(init_probe.get('dur') or 0)
+    peak_t = round(dur * 0.85, 3) if dur > 0 else 0.0
+    if dur > 0:
+        page.evaluate(
+            """(t) => {
+              const h = window.__simulify;
+              if (h?.clock?.pause) h.clock.pause();
+              else if (h?.director?.pause) h.director.pause();
+              if (typeof h?.seek === 'function') h.seek(t);
+            }""",
+            peak_t,
+        )
+        page.wait_for_timeout(120)
+
+    view_shots = {}
+    view_pngs = {}
+    bounds = None
+    for vname in ('front', 'side', 'top', 'iso'):
+        res = page.evaluate(
+            """(v) => {
+              const h = window.__simulify;
+              if (typeof h?.setCardinalView === 'function') return h.setCardinalView(v, { unlock: true });
+              const st = h?.stage?.stage || h?.stage || h?.scene?.stage || null;
+              return st?.setCardinalView?.(v, { unlock: true }) ?? null;
+            }""",
+            vname,
+        )
+        if res and res.get('bounds') and bounds is None:
+            bounds = res['bounds']
+        page.wait_for_timeout(100)
+        v_path = shot_path.with_name(f'{shot_path.stem}-view-{vname}{shot_path.suffix}')
+        v_path.parent.mkdir(parents=True, exist_ok=True)
+        png_bytes = page.screenshot(path=str(v_path), animations='disabled', timeout=45000)
+        view_shots[vname] = str(v_path)
+        view_pngs[vname] = png_bytes
+
+    diff_front_side = png_mean_abs_diff(view_pngs['front'], view_pngs['side'])
+    diff_front_top = png_mean_abs_diff(view_pngs['front'], view_pngs['top'])
+    views_distinct = (
+        (diff_front_side < 0 or diff_front_side >= 0.4)
+        and (diff_front_top < 0 or diff_front_top >= 0.4)
+    )
+
+    flatness_ratio = float(bounds.get('flatnessRatio', 0.0)) if bounds else 0.0
+    bounds_ok = bool(
+        bounds
+        and float(bounds.get('width', 0)) > 0
+        and float(bounds.get('height', 0)) > 0
+        and float(bounds.get('depth', 0)) > 0
+        and flatness_ratio >= 0.08
+    )
+
+    return {
+        'passed': bool(bounds_ok and views_distinct),
+        'skipped': False,
+        'sampleTime': peak_t,
+        'bounds': bounds,
+        'flatnessRatio': round(flatness_ratio, 4),
+        'boundsOk': bounds_ok,
+        'viewsDistinct': views_distinct,
+        'diffFrontSide': round(diff_front_side, 3),
+        'diffFrontTop': round(diff_front_top, 3),
+        'screenshots': view_shots,
+    }
+
+
 def check_target(
     browser,
     base_url: str,
@@ -994,7 +1078,9 @@ def check_target(
         v2_active = (metrics['simulifyVersion'] >= 2) or strict_4d
 
         camera_ownership = {'passed': True, 'skipped': True, 'reason': 'non-primary viewport'}
+        three_views = {'passed': True, 'skipped': True, 'reason': 'non-primary viewport'}
         if run_4d_checks and width > 900 and metrics['hasCanvas']:
+            three_views = run_three_view_audit(page, init_probe, shot_path, v2_active)
             camera_ownership = run_camera_ownership_probe(page, init_probe, v2_active)
 
         page.close()
@@ -1201,6 +1287,7 @@ def check_target(
                 'surfaceDensities': all_surface_densities,
             },
             'geometryDiversity': geo_res,
+            'threeViews': three_views,
             'cameraOwnership': camera_ownership,
             'backend': {
                 'requested': requested_backend,
@@ -1241,6 +1328,7 @@ def check_target(
             and visual_integrity_ok
             and typo_ok
             and bool(geo_res.get('passed', True))
+            and bool(three_views.get('passed', True))
             and bool(camera_ownership.get('passed', True))
             and bool(sparsity_res.get('passed', True))
             and bool(scrub_res.get('passed', True))
@@ -1409,6 +1497,13 @@ def main():
             gd_str = f'OK(c={gd.get("cuboidRatio")},s={gd.get("sculptedMeshes")})'
         else:
             gd_str = f'FAIL(c={gd.get("cuboidRatio")},s={gd.get("sculptedMeshes")})'
+        tv = ora.get('threeViews', {})
+        if tv.get('skipped'):
+            tv_str = 'SKIP'
+        elif tv.get('passed'):
+            tv_str = f'OK(flat={tv.get("flatnessRatio")})'
+        else:
+            tv_str = f'FAIL(flat={tv.get("flatnessRatio")},dist={tv.get("viewsDistinct")})'
         co = ora.get('cameraOwnership', {})
         if co.get('skipped'):
             co_str = 'SKIP'
@@ -1428,7 +1523,7 @@ def main():
             f'console={len(r["consoleErrors"])} pageErr={len(r["pageErrors"])} '
             f'reqFail={len(r["failedRequests"])} overflow={r["metrics"]["guideOverflow"]} '
             f'oracle=[prose:{p_str} frame:{f_str} chart:{c_str} hud:{h_str} falsify:{fal_str} '
-            f'sparse:{sp_str} scrub:{sc_str} vis:{vi_str} typo:{ty_str} geo:{gd_str} cam:{co_str}] '
+            f'sparse:{sp_str} scrub:{sc_str} vis:{vi_str} typo:{ty_str} geo:{gd_str} views:{tv_str} cam:{co_str}] '
             f'-> {pathlib.Path(r["screenshot"]).name}'
         )
     sys.exit(0 if passed_all else 1)
