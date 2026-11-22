@@ -126,6 +126,47 @@ export function bfsShortestPath(cliffMask = null, start = START, goal = GOAL) {
 }
 
 /**
+ * Check whether at least one cliff-free walkable path exists from START to GOAL.
+ */
+export function hasWalkablePath(cliffMask = null) {
+  const path = bfsShortestPath(cliffMask, START, GOAL);
+  if (!path || path.length < 2) return false;
+  const tail = path[path.length - 1];
+  return tail[0] === GOAL[0] && tail[1] === GOAL[1];
+}
+
+/**
+ * Return a cliff-free Beat 1 exploration trajectory respecting any custom painted cliffs.
+ * Uses the organic default exploration walk when unobstructed, otherwise falls back to
+ * the exact cliff-free BFS trajectory so the probe never steps across painted -100 cliffs.
+ */
+export function getSafeExplorationWalk(cliffMask = null) {
+  const blocked = EARLY_EXPLORATION_WALK.some(([r, c]) => isCliff(r, c, cliffMask));
+  if (!blocked) return EARLY_EXPLORATION_WALK;
+  const bfs = bfsShortestPath(cliffMask, START, GOAL);
+  return bfs.length >= 2 ? bfs : [[...START]];
+}
+
+/**
+ * Compute live truncated n-step return G_{t:t+n} along `nodes` directly against a scalar V table.
+ */
+export function computeLiveNStepReturn(nodes, vTable, gamma = 0.95) {
+  if (!Array.isArray(nodes) || nodes.length < 2 || !vTable) return 0;
+  const steps = nodes.length - 1;
+  let gVal = 0;
+  for (let k = 0; k < steps; k += 1) {
+    const [cr, cc] = nodes[k + 1];
+    const rStep = cr === GOAL[0] && cc === GOAL[1] ? GOAL_REWARD : STEP_REWARD;
+    gVal += (gamma ** k) * rStep;
+  }
+  const tail = nodes[nodes.length - 1];
+  const tailIsGoal = tail[0] === GOAL[0] && tail[1] === GOAL[1];
+  const bootV = tailIsGoal ? 0 : (vTable[tail[0]]?.[tail[1]] ?? 0);
+  gVal += (gamma ** steps) * bootV;
+  return gVal;
+}
+
+/**
  * 6-Beat Unhurried 4D Progressive Temporal Story (0.0s .. 44.0s).
  * Every beat introduces a new visual layer ONLY when the previous beat creates causal friction.
  */
@@ -241,7 +282,7 @@ export const RL_BEATS = [
     start: 30.0,
     end: 38.0,
     shortTitle: { zh: '5. 策略分叉', en: '5. Policy Fork' },
-    title: { zh: '第 5 幕 · 崖边分叉：Sarsa vs Q', en: 'Beat 5 · Policy Fork: Sarsa vs Q-Learning' },
+    title: { zh: '第 5 幕 · 崖边分叉：Sarsa vs Q', en: 'Beat 5 · Sarsa vs Q-Learning Fork' },
     cue: {
       zh: '实心青线是 Sarsa 安全绕行，半透琥珀虚影是 Q-learning 贴崖最短路；点任意格移动分叉点。',
       en: 'Solid teal Sarsa detours safely while translucent amber Q hugs the cliff. Click any tile to fork.',
@@ -269,12 +310,12 @@ export const RL_BEATS = [
     shortTitle: { zh: '6. 统一与代码', en: '6. Unified Code' },
     title: { zh: '第 6 幕 · 统一视角与 3D 实时代码追踪', en: 'Beat 6 · Unified View & Live 3D Code Trace' },
     cue: {
-      zh: '四类时序差分只在 target 一行分叉；右侧悬浮 3D 代码板与棋盘双向高亮，试涂画新悬崖。',
-      en: 'All TD methods share one loop differing only in target. Paint custom cliffs to test adaptation.',
+      zh: '四类时序差分只在 target 一行分叉；上方悬浮 3D 代码板与棋盘双向高亮，试涂画新悬崖。',
+      en: 'All TD methods share one loop differing only in target. Hover the 3D code slate or paint custom cliffs.',
     },
     carries: { zh: '总览：点击右侧算法或直接涂画新悬崖，实时对照虚影策略变化。', en: 'Overview: Switch targets or paint custom cliffs against the ghost baseline.' },
     hook: { zh: '自由实验：拖时间轴回放任意瞬间，或点右下导出 4D 视频。', en: 'Explore: Scrub anywhere in 0–44s, paint cliffs, or export 4D video.' },
-    camera: { target: [2.95, 0.55, 0.0], azimuth: 26 * DEG, elevation: 35 * DEG, zoom: 0.74 },
+    camera: { target: [0.35, 1.38, -0.52], azimuth: 24 * DEG, elevation: 33 * DEG, zoom: 0.72 },
     codeTitle: 'Python · Unified td_step()',
     codeLines: [
       'def td_step(s, a, r, s2, a2, mode):',
@@ -451,6 +492,8 @@ function interpolateTdFrame(a, b, alpha) {
     vNStep,
     qSarsa,
     qLearn,
+    sarsaVisits: pick.sarsaVisits,
+    qLearnVisits: pick.qLearnVisits,
     sarsaReturn: a.sarsaReturn * inv + b.sarsaReturn * alpha,
     qReturn: a.qReturn * inv + b.qReturn * alpha,
     sarsaSmooth: a.sarsaSmooth * inv + b.sarsaSmooth * alpha,
@@ -498,12 +541,14 @@ export function runTdSimulation({
     }
   }
 
-  // 1. Initialize value tables
+  // 1. Initialize value tables & per-cell visit counters (for mathematically honest policy arrows)
   const vGrid = createEmptyV();
   const vN1 = createEmptyV();
   const vNStep = createEmptyV();
   const qSarsa = createEmptyQ();
   const qLearn = createEmptyQ();
+  const sarsaVisits = createEmptyV();
+  const qLearnVisits = createEmptyV();
 
   const rngV = mulberry32(seed + 11);
   const rngN = mulberry32(seed + 29);
@@ -535,6 +580,8 @@ export function runTdSimulation({
     vNStep: cloneV(vNStep),
     qSarsa: cloneQ(qSarsa),
     qLearn: cloneQ(qLearn),
+    sarsaVisits: cloneV(sarsaVisits),
+    qLearnVisits: cloneV(qLearnVisits),
     sarsaReturn: -40,
     qReturn: -40,
     sarsaSmooth: -40,
@@ -658,6 +705,7 @@ export function runTdSimulation({
     let sa = epsGreedyPick(qSarsa[sr][sc], epsilon, rngS);
     let sRet = 0;
     for (let st = 0; st < 120; st += 1) {
+      sarsaVisits[sr][sc] += 1;
       const { nextState: [nr, nc], reward, done } = stepEnv(sr, sc, sa, { cliffMask: mask });
       sRet += reward;
       const na = done ? 0 : epsGreedyPick(qSarsa[nr][nc], epsilon, rngS);
@@ -675,6 +723,7 @@ export function runTdSimulation({
     let [qr, qc] = START;
     let qRet = 0;
     for (let st = 0; st < 120; st += 1) {
+      qLearnVisits[qr][qc] += 1;
       const qa = epsGreedyPick(qLearn[qr][qc], epsilon, rngQ);
       const { nextState: [nr, nc], reward, done } = stepEnv(qr, qc, qa, { cliffMask: mask });
       qRet += reward;
@@ -700,6 +749,8 @@ export function runTdSimulation({
       vNStep: cloneV(vNStep),
       qSarsa: cloneQ(qSarsa),
       qLearn: cloneQ(qLearn),
+      sarsaVisits: cloneV(sarsaVisits),
+      qLearnVisits: cloneV(qLearnVisits),
       sarsaReturn: sarsaClamped,
       qReturn: qClamped,
       sarsaSmooth: +rollingMean(sarsaAllRaw, 15).toFixed(2),
@@ -825,6 +876,34 @@ export function runTdSimulation({
   };
 }
 
+function findNearestWalkableCell(r0, c0, cliffMask, preferredPath = null) {
+  if (!isCliff(r0, c0, cliffMask) && !isEndpoint(r0, c0)) return [r0, c0];
+  let best = null;
+  let bestDist = Infinity;
+  if (Array.isArray(preferredPath)) {
+    for (const [r, c] of preferredPath) {
+      if (isCliff(r, c, cliffMask) || isEndpoint(r, c)) continue;
+      const d = Math.abs(r - r0) + Math.abs(c - c0);
+      if (d < bestDist) {
+        bestDist = d;
+        best = [r, c];
+      }
+    }
+  }
+  if (best) return best;
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let c = 0; c < COLS; c += 1) {
+      if (isCliff(r, c, cliffMask) || isEndpoint(r, c)) continue;
+      const d = Math.abs(r - r0) + Math.abs(c - c0);
+      if (d < bestDist) {
+        bestDist = d;
+        best = [r, c];
+      }
+    }
+  }
+  return best || [...START];
+}
+
 /**
  * Compute real single-step TD(0) / Sarsa / Q-learning backup targets at ANY walkable cell S'.
  * Zero hardcoded clamps or fake matrix percentages.
@@ -839,7 +918,9 @@ export function computeRealForkAt(frame, {
 } = {}) {
   const fr = Math.max(0, Math.min(ROWS - 1, Math.round(forkCell[0] ?? 2)));
   const fc = Math.max(0, Math.min(COLS - 1, Math.round(forkCell[1] ?? 3)));
-  const sPrime = isCliff(fr, fc, cliffMask) ? [2, 3] : [fr, fc];
+  const sPrime = isCliff(fr, fc, cliffMask)
+    ? findNearestWalkableCell(fr, fc, cliffMask, frame.qPath || frame.sarsaPath)
+    : [fr, fc];
   const [r2, c2] = sPrime;
 
   // Locate predecessor cell S -> action A -> S'
@@ -992,6 +1073,7 @@ export class TdChapterEngine {
 
     this.cliffMask = createDefaultCliffMask();
     this._defaultCliffKey = cliffMaskKey(this.cliffMask);
+    this.lastBlockedEdit = null;
 
     this.tape = new SimulationTape({ interpolate: interpolateTdFrame });
     this._ghostMeta = null;
@@ -1037,6 +1119,8 @@ export class TdChapterEngine {
       qReturns: this._cached.qReturns.map((p) => ({ ...p })),
       sarsaGreedyReturn: this._cached.sarsaGreedyReturn,
       qGreedyReturn: this._cached.qGreedyReturn,
+      sarsaOnlineReturn: this._cached.sarsaOnlineReturn,
+      qOnlineReturn: this._cached.qOnlineReturn,
     };
     this._ghostMeta = meta;
     return this.tape.captureGhost(label, meta);
@@ -1055,8 +1139,9 @@ export class TdChapterEngine {
     this.tape.clearGhost();
   }
 
-  /** Toggle a custom cliff hazard cell on the 4x8 board (protects Start & Goal). */
+  /** Toggle a custom cliff hazard cell on the 4x8 board (protects Start & Goal + guarantees walkability). */
   toggleCliffCell(r, c, { captureGhost = true, forceValue = null } = {}) {
+    this.lastBlockedEdit = null;
     if (r < 0 || r >= ROWS || c < 0 || c >= COLS || isEndpoint(r, c)) {
       return false;
     }
@@ -1064,13 +1149,28 @@ export class TdChapterEngine {
     const next = forceValue !== null ? Boolean(forceValue) : !cur;
     if (next === cur) return false;
 
+    // Prevent completely sealing off Start -> Goal!
+    if (next) {
+      const trial = cloneCliffMask(this.cliffMask);
+      trial[r][c] = true;
+      if (!hasWalkablePath(trial)) {
+        this.lastBlockedEdit = { row: r, col: c, reason: 'path-blocked' };
+        return false;
+      }
+    }
+
     if (captureGhost && !this.hasCounterfactualGhost()) {
       this.captureCounterfactualGhost('Original Cliff');
     }
     this.cliffMask[r][c] = next;
-    // If forkCell became cliff, relocate to nearest walkable cell
+
+    // Safely relocate forkCell & selectedCell if they became cliff cells
+    const bfsNow = bfsShortestPath(this.cliffMask, START, GOAL);
     if (this.forkCell[0] === r && this.forkCell[1] === c && next) {
-      this.forkCell = [Math.max(0, r - 1), c];
+      this.forkCell = findNearestWalkableCell(r, c, this.cliffMask, bfsNow);
+    }
+    if (this.selectedCell[0] === r && this.selectedCell[1] === c && next) {
+      this.selectedCell = findNearestWalkableCell(r, c, this.cliffMask, bfsNow);
     }
     this._cacheKey = '';
     this._ensureSolved();
@@ -1211,7 +1311,18 @@ export class TdChapterEngine {
     const frame = this.tape.sampleAt(ep);
     const act = this.act;
 
-    const useQTable = act.num >= 5 ? frame.qLearn : frame.qSarsa;
+    // Mathematically honest Q-table selection:
+    // - Beat 3-4: Sarsa action values
+    // - Beat 5 (Sarsa live vs Q ghost): follow activeMethodOverride if hovering/selecting Q, else Sarsa (aligns cleanly with solid cyan Sarsa ribbon!)
+    // - Beat 6 (Unified): match the active method tab ('qlearn' -> qLearn, 'sarsa'/'td0'/'nstep' -> qSarsa)
+    const activeMethod = this.activeMethodOverride ?? act.methodId;
+    const useQLearnTable =
+      (act.num >= 6 && activeMethod === 'qlearn') ||
+      (act.num === 5 && this.activeMethodOverride === 'qlearn');
+    const useQTable = useQLearnTable ? frame.qLearn : frame.qSarsa;
+    const useQVisits = useQLearnTable ? frame.qLearnVisits : frame.sarsaVisits;
+
+    const liveNStepTarget = computeLiveNStepReturn(sim.arcNodes, frame.vNStep, this.gamma);
     const fork = computeRealForkAt(frame, {
       forkCell: this.forkCell,
       cliffMask: this.cliffMask,
@@ -1240,7 +1351,8 @@ export class TdChapterEngine {
       totalEpisodes: this.episodes,
       checkpointIdx: this.checkpointIdx,
       checkpointEp: Math.round(ep),
-      activeMethod: this.activeMethodOverride ?? act.methodId,
+      activeMethod,
+      qPolicySource: useQLearnTable ? 'qlearn' : 'sarsa',
       epsilon: this.epsilon,
       alpha: this.alpha,
       gamma: this.gamma,
@@ -1253,8 +1365,11 @@ export class TdChapterEngine {
       vN1: frame.vN1,
       vNStep: frame.vNStep,
       qGrid: useQTable,
+      qVisits: useQVisits,
       qSarsa: frame.qSarsa,
       qLearn: frame.qLearn,
+      sarsaVisits: frame.sarsaVisits,
+      qLearnVisits: frame.qLearnVisits,
       sarsaPath: frame.sarsaPath,
       qPath: frame.qPath,
       convergedSarsaPath: sim.sarsaPath,
@@ -1263,6 +1378,7 @@ export class TdChapterEngine {
       tdStep: frame.tdStep,
       arcNodes: sim.arcNodes,
       nStepTarget: sim.nStepTarget,
+      liveNStepTarget,
       nStepTargetConverged: sim.nStepTargetConverged,
       sarsaReturns,
       qReturns,

@@ -1,9 +1,18 @@
-import * as THREE from 'three';
 import { CalloutLayer } from '../../kit/callout-layer.js';
 import { ChartCard } from '../../kit/chart-card.js';
 import { ActorChoreographer } from '../../kit/choreography.js';
+import { waitForFonts } from '../../kit/fonts.js';
 import { LinkBus } from '../../kit/link-bus.js';
-import { LiveMathsPanel } from '../../kit/live-maths.js';
+import {
+  LiveMathsPanel,
+  mathGroup,
+  mathNum,
+  mathOp,
+  mathSub,
+  mathSup,
+  mathText,
+  mathVar,
+} from '../../kit/live-maths.js';
 import { GridBrush } from '../../kit/manipulator.js';
 import { TactileSound } from '../../kit/sound.js';
 import {
@@ -33,23 +42,23 @@ import { createI18n } from '../../shell/i18n.js';
 import {
   ACTIONS,
   COLS,
-  EARLY_EXPLORATION_WALK,
   GOAL,
-  isCliff,
-  isEndpoint,
+  GOAL_REWARD,
   RL_BEATS,
   ROWS,
   START,
+  STEP_REWARD,
   TdChapterEngine,
   TOTAL_DURATION,
+  getSafeExplorationWalk,
+  isCliff,
+  isEndpoint,
 } from './td-engine.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = (a, b, u) => a + (b - a) * clamp01(u);
-const SUB_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
-const SUP_DIGITS = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
-const toSub = (n) => String(n).split('').map((ch) => SUB_DIGITS[Number(ch)] ?? ch).join('');
-const toSup = (n) => String(n).split('').map((ch) => SUP_DIGITS[Number(ch)] ?? ch).join('');
+const fmtSigned = (v, digits = 2) => `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`;
+
 const urlState = parseUrlState(location.search);
 if (urlState.thumb) {
   document.documentElement.dataset.thumb = '1';
@@ -62,6 +71,7 @@ const DICT = {
     paintingCliff: '退出涂画',
     resetCliff: '重置悬崖',
     brushHint: '涂画模式：点击或拖拽 3D 格子涂画 / 擦除 -100 悬崖（按住 Alt 随时快涂）',
+    brushBlocked: '已拦截：至少需保留一条从起点 S 到终点 G 的可行路径。',
     zoomCell: '聚焦格',
     top: '俯视',
     reset: '复位',
@@ -73,11 +83,11 @@ const DICT = {
     chartNstepTitle: '早期信用回传 V(Start)',
     chartReturnTitle: 'Sarsa vs Q 回合回报',
     unifiedTitle: '统一 TD 更新模板',
-    unifiedNote: '四个算法共用同一增量更新骨架，只在 target 估值项处分叉；点上方切换实时同步 3D 代码板。',
+    unifiedNote: '四类算法共用同一增量更新骨架，仅在 target 估值项分叉；切换标签即时同步上方 3D 代码板与高亮行。',
     sarsaLabel: 'Sarsa 安全绕行',
     qGhostLabel: 'Q 贴崖虚影',
-    cliffLabel: '-100 悬崖陷阱',
-    cliffSub: '踏入立刻归零回 S',
+    cliffLabel: '-100 悬崖深渊',
+    cliffSub: '踏入即归零重返 S',
   },
   en: {
     brand: 'RL Ch.7 · Temporal Difference 4D Bench',
@@ -85,6 +95,7 @@ const DICT = {
     paintingCliff: 'Done Painting',
     resetCliff: 'Reset Cliff',
     brushHint: 'Paint mode: click or drag 3D tiles to paint / erase -100 cliffs (or hold Alt anytime)',
+    brushBlocked: 'Blocked: keep at least one walkable path from Start S to Goal G.',
     zoomCell: 'Focus',
     top: 'Top',
     reset: 'Reset',
@@ -96,13 +107,22 @@ const DICT = {
     chartNstepTitle: 'Early Credit V(Start)',
     chartReturnTitle: 'Sarsa vs Q Online Return',
     unifiedTitle: 'Unified TD Template',
-    unifiedNote: 'All four TD methods share one update loop differing only in target. Switch above to trace live.',
+    unifiedNote: 'All four TD methods share one update loop differing only in target. Switch tabs to highlight live.',
     sarsaLabel: 'Sarsa Safe Detour',
     qGhostLabel: 'Q Cliff Ghost',
     cliffLabel: '-100 Cliff Chasm',
     cliffSub: 'Resets immediately to S',
   },
 };
+
+const UNIFIED_TD_LINES = [
+  'def td_step(s, a, r, s2, a2, mode):',
+  '    if mode == "sarsa":',
+  '        target = r + gamma * Q[s2, a2]',
+  '    else:  # q-learning off-policy max',
+  '        target = r + gamma * max(Q[s2])',
+  '    Q[s, a] += alpha * (target - Q[s, a])',
+];
 
 const UNIFIED_CODES = {
   td0: {
@@ -115,22 +135,17 @@ const UNIFIED_CODES = {
       '    V[s] += alpha * delta',
       '    return delta',
     ],
+    defaultActiveLine: 3,
     lineLinks: ['td-vs', 'td-vs-next', 'td-target', 'td-delta', 'td-vs', 'td-delta'],
   },
   sarsa: {
-    title: 'Python · On-Policy Sarsa',
-    lines: [
-      'def sarsa_step(s, a, r, s2, a2):',
-      '    q_next = Q[s2, a2]  # actual A\'',
-      '    target = r + gamma * q_next',
-      '    delta = target - Q[s, a]',
-      '    Q[s, a] += alpha * delta',
-      '    return delta',
-    ],
-    lineLinks: ['td-vs', 'fork-sarsa', 'fork-sarsa', 'td-delta', 'td-vs', 'td-delta'],
+    title: 'Python · td_step("sarsa")',
+    lines: UNIFIED_TD_LINES,
+    defaultActiveLine: 3,
+    lineLinks: ['td-vs', 'fork-sarsa', 'fork-sarsa', 'fork-q', 'fork-q', 'td-delta'],
   },
   nstep: {
-    title: 'Python · n-step TD Return',
+    title: 'Python · nstep_step()',
     lines: [
       'def nstep_step(S, R, tau, n):',
       '    G = sum(gamma**k * R[tau+k+1] for k in range(n))',
@@ -139,59 +154,147 @@ const UNIFIED_CODES = {
       '    V[S[tau]] += alpha * delta',
       '    return G',
     ],
+    defaultActiveLine: 2,
     lineLinks: ['td-vs', 'td-target', 'td-vs-next', 'td-delta', 'td-vs', 'td-target'],
   },
   qlearn: {
-    title: 'Python · Unified td_step()',
-    lines: [
-      'def td_step(s, a, r, s2, a2, mode):',
-      '    if mode == "sarsa":',
-      '        target = r + gamma * Q[s2, a2]',
-      '    else:  # q-learning off-policy max',
-      '        target = r + gamma * max(Q[s2])',
-      '    Q[s, a] += alpha * (target - Q[s, a])',
-    ],
+    title: 'Python · td_step("qlearn")',
+    lines: UNIFIED_TD_LINES,
+    defaultActiveLine: 5,
     lineLinks: ['td-vs', 'fork-sarsa', 'fork-sarsa', 'fork-q', 'fork-q', 'td-delta'],
   },
 };
 
-const CODE_SLATE_POS = [7.85, 2.25, -1.35];
+// Centered overhead gallery-sky anchor for Beat 6 3D HTML-in-Canvas Code Slate:
+// Verified 0% overlap with BOTH `.right-dock` and `.beat-caption-pill` at 1280x800 & 1440x900!
+const CODE_SLATE_POS = [-0.45, 3.72, -2.55];
+
+function isMobileViewport() {
+  return typeof window !== 'undefined' && window.innerWidth <= 900;
+}
+
+/** Center the 4x8 board cleanly on mobile (<= 900px) so Start S is never clipped off the left edge. */
+function getAdaptedCamera(baseCam) {
+  if (!baseCam) return baseCam;
+  if (!isMobileViewport()) return baseCam;
+  return {
+    target: [0.0, 0.34, -0.05],
+    azimuth: baseCam.azimuth,
+    elevation: Math.max(baseCam.elevation, (35 * Math.PI) / 180),
+    zoom: 0.72,
+  };
+}
+
+/** Position hover tooltip without overlapping any visible CalloutLayer tag or leaving canvas bounds. */
+function positionTooltipSafe(tipEl, x, y, canvasEl) {
+  const sr = canvasEl.getBoundingClientRect();
+  const maxW = Math.max(200, sr.width);
+  const maxH = Math.max(160, sr.height);
+  const tipW = tipEl.offsetWidth || 156;
+  const tipH = tipEl.offsetHeight || 28;
+
+  const calloutRects = [];
+  for (const tag of document.querySelectorAll('#tags-layer .callout-tag')) {
+    const cs = getComputedStyle(tag);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) continue;
+    const r = tag.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    calloutRects.push({
+      left: r.left - sr.left - 6,
+      top: r.top - sr.top - 6,
+      right: r.right - sr.left + 6,
+      bottom: r.bottom - sr.top + 6,
+    });
+  }
+
+  const candidates = [
+    [x + 14, y - tipH - 12],
+    [x + 14, y + 18],
+    [x - tipW - 14, y - tipH - 12],
+    [x - tipW - 14, y + 18],
+  ];
+
+  let chosen = candidates[0];
+  for (const [cx, cy] of candidates) {
+    const lx = Math.max(8, Math.min(maxW - tipW - 8, cx));
+    const ty = Math.max(58, Math.min(maxH - tipH - 86, cy));
+    const hitsCallout = calloutRects.some(
+      (b) => lx < b.right && lx + tipW > b.left && ty < b.bottom && ty + tipH > b.top
+    );
+    if (!hitsCallout) {
+      chosen = [lx, ty];
+      break;
+    }
+    chosen = [lx, ty];
+  }
+
+  tipEl.style.left = `${Math.round(chosen[0])}px`;
+  tipEl.style.top = `${Math.round(chosen[1])}px`;
+}
 
 async function bootstrap() {
   const i18n = createI18n({
     defaultLang: urlState.lang === 'en' ? 'en' : 'zh',
     dicts: DICT,
   });
+  document.documentElement.lang = i18n.getLang() === 'en' ? 'en' : 'zh-CN';
 
   const engine = new TdChapterEngine();
   engine.setParams({ lang: i18n.getLang() });
   const sound = new TactileSound({ muted: Boolean(urlState.thumb || urlState.exportMode) });
   const linkBus = new LinkBus();
 
-  // Interactive runtime state (separate from pure clock state)
+  // Interactive runtime state (cleanly separated from master clock `t`)
   let hoveredCell = null;
-  let userProbeOverride = null; // null = follow timeline beat 5 auto-slip; boolean = user explicit toggle
+  let userProbeOverride = null; // null = Beat 5 auto-slip; boolean = user explicit toggle (resets on beat exit)
+  let userEpisodeOverride = null; // null = follow timeline beat; number = Beat 5-6 chart scrub override
   let unifiedMethod = 'qlearn';
   let activeLinkTarget = null;
   let mobileCodeCard = null;
+  let brushActive = false;
+  let lastBeatIndex = -1;
+  let brushToastTimer = null;
 
-  // 1. Create Simulify v2 IsometricStage (WebGPU -> WebGL2 auto-fallback, native HTML-in-Canvas ready)
-  const initCam = RL_BEATS[0].camera;
+  const hideTooltip = () => {
+    const tip = $('stage-tooltip');
+    if (tip) tip.hidden = true;
+    hoveredCell = null;
+  };
+
+  const showBrushToast = (msg) => {
+    const el = $('brush-toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.hidden = false;
+    if (brushToastTimer) clearTimeout(brushToastTimer);
+    brushToastTimer = setTimeout(() => {
+      el.hidden = true;
+      brushToastTimer = null;
+    }, 2600);
+  };
+
+  // 1. Create Simulify v2 IsometricStage (1:1 HiDPI physical pixels, sharp OutlinePass, Neutral tone mapping)
+  const initCam = getAdaptedCamera(RL_BEATS[0].camera);
   const stage = await IsometricStage.create($('stage-canvas'), {
     target: urlState.thumb ? [0.1, 0.35, 0.05] : initCam.target,
     baseSpan: 8.4,
     azimuth: initCam.azimuth,
     elevation: initCam.elevation,
     zoom: urlState.thumb ? 0.94 : initCam.zoom,
-    shadowBounds: 12,
+    outlinePreset: 'crisp',
+    shadowBounds: 13,
     gridSize: 28,
     onHover: (hit, x, y) => {
       const tip = $('stage-tooltip');
       if (!hit || !hit.meta || hit.meta.row === undefined) {
-        tip.hidden = true;
-        hoveredCell = null;
-        stage.clearHighlightRing();
-        linkBus.clearHover('3d');
+        if (!tip.hidden || hoveredCell !== null) {
+          tip.hidden = true;
+          hoveredCell = null;
+          stage.clearHighlightRing();
+          linkBus.clearHover('3d');
+          syncAll(clock.t, { skipCamera: true });
+          stage.requestRender();
+        }
         return;
       }
       const { row, col } = hit.meta;
@@ -214,11 +317,11 @@ async function bootstrap() {
         label = `(${row},${col}) max Q=${Math.max(...qRow).toFixed(1)}`;
       }
       tip.textContent = label;
-      tip.style.left = `${x + 12}px`;
-      tip.style.top = `${y - 12}px`;
       tip.hidden = false;
+      positionTooltipSafe(tip, x, y, $('stage-canvas'));
       linkBus.hover(`cell-${row}-${col}`, '3d');
-      syncAll(t);
+      syncAll(t, { skipCamera: true });
+      stage.requestRender();
     },
     onViewChange: () => {
       codeSurface.syncPose(stage.camera, CODE_SLATE_POS);
@@ -226,27 +329,42 @@ async function bootstrap() {
     },
   });
 
-  // 2. Build 3D Anodized Instrument Tray & Diegetic 3D HTML-in-Canvas Code Trace Slate
+  // Trigger one crisp redraw once offline WOFF2 fonts finish settling
+  waitForFonts(2500, () => {
+    codeSurface.surface?.markDirty?.();
+    stage.requestRender();
+  });
+
+  // 2. Build Sculpted 3D Instrument Stage & Diegetic 3D HTML-in-Canvas Code Trace Slate
   const tray = new CliffInstrumentTray(stage, { rows: ROWS, cols: COLS });
   const codeSurface = new CodeTraceSurface(stage, {
     id: 'code-trace-3d',
     linkBus,
-    worldWidth: 4.95,
-    worldHeight: 2.3,
+    worldWidth: 5.35,
+    worldHeight: 2.38,
   });
 
   // Mobile flat fallback card (only displayed <= 900px)
   mobileCodeCard = new CodeTraceCard($('mobile-code-slot'), { linkBus, surfaceMode: false });
 
-  // 3. Build Direct Manipulation GridBrush (paint/erase custom cliffs directly in 3D!)
-  let brushActive = false;
+  // 3. Build Direct Manipulation GridBrush (auto-exits on beat change via `bindClock`!)
   const brush = new GridBrush(stage, {
     targets: tray.getBrushTargets(),
     active: false,
     holdModifier: 'altKey',
+    onActiveChange: (active) => {
+      brushActive = Boolean(active);
+      stage.setCursorOverride?.(brushActive ? 'crosshair' : null);
+      if (!brushActive) {
+        hideTooltip();
+      }
+      syncAll(clock.t, { skipCamera: true });
+      stage.requestRender();
+    },
     onStrokeStart: (cell) => {
       if (isEndpoint(cell.row, cell.col)) return null;
       clock.pause();
+      hideTooltip();
       if (!engine.hasCounterfactualGhost()) {
         engine.captureCounterfactualGhost(i18n.getLang() === 'en' ? 'Original Layout' : '原悬崖布局');
       }
@@ -261,8 +379,10 @@ async function bootstrap() {
       });
       if (changed) {
         sound.click();
-        syncAll(clock.t);
-        stage.renderNow();
+        syncAll(clock.t, { skipCamera: true });
+        stage.requestRender();
+      } else if (engine.lastBlockedEdit?.reason === 'path-blocked') {
+        showBrushToast(i18n.t('brushBlocked'));
       }
     },
     onClickCell: (cell) => {
@@ -270,8 +390,8 @@ async function bootstrap() {
       sound.click();
       engine.setForkCell(cell.row, cell.col);
       linkBus.select(`cell-${cell.row}-${cell.col}`, '3d');
-      syncAll(clock.t);
-      stage.renderNow();
+      syncAll(clock.t, { skipCamera: true });
+      stage.requestRender();
     },
   });
 
@@ -279,6 +399,8 @@ async function bootstrap() {
   const callouts = new CalloutLayer(stage, $('leader-svg'), $('tags-layer'));
   callouts.setBlockers(() => {
     const sr = $('stage-canvas').getBoundingClientRect();
+    const scaleX = stage.size.width / Math.max(1, sr.width);
+    const scaleY = stage.size.height / Math.max(1, sr.height);
     const ids = ['top-ribbon', 'beat-caption-pill', 'right-dock', 'bottom-left-dock', 'bottom-transport'];
     const boxes = [];
     for (const id of ids) {
@@ -287,10 +409,10 @@ async function bootstrap() {
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       boxes.push({
-        left: r.left - sr.left - 8,
-        top: r.top - sr.top - 8,
-        right: r.right - sr.left + 8,
-        bottom: r.bottom - sr.top + 8,
+        left: (r.left - sr.left) * scaleX - 8,
+        top: (r.top - sr.top) * scaleY - 8,
+        right: (r.right - sr.left) * scaleX + 8,
+        bottom: (r.bottom - sr.top) * scaleY + 8,
       });
     }
     return boxes;
@@ -311,12 +433,13 @@ async function bootstrap() {
       const curProbe = getEffectiveForkProbe(clock.t);
       userProbeOverride = !curProbe;
       engine.setParams({ forkProbeActive: userProbeOverride });
-      syncAll(clock.t);
-      stage.renderNow();
+      syncAll(clock.t, { skipCamera: true });
+      stage.requestRender();
     },
     onSelectMethod: (beatIdx, methodId) => {
       sound.click();
       unifiedMethod = methodId;
+      stage.unlockUserCamera();
       clock.jumpToBeat(beatIdx, { play: false, offset: 2.2 });
     },
   });
@@ -330,14 +453,15 @@ async function bootstrap() {
       clock.pause();
       const beat = clock.getBeatAt(clock.t);
       if (beat.index === 3) {
-        // Scrub within Beat 4 early credit progression (22.4s .. 29.4s)
+        // Continuous scrub inside Beat 4 early credit progression (22.4s .. 29.4s)
         clock.seek(22.4 + xNorm * 7.0);
       } else {
-        // Scrub continuously across Beat 2..Beat 5 training trajectory
-        const targetEp = Math.max(1, Math.round(xNorm * engine.episodes));
+        // Real live episode scrubbing in Beats 5-6 (drives Q facets, terrain & curve crosshair!)
+        const targetEp = Math.max(1, Math.min(engine.episodes, Math.round(xNorm * engine.episodes)));
+        userEpisodeOverride = targetEp;
         engine.setParams({ episodeCursor: targetEp });
-        syncAll(clock.t);
-        stage.renderNow();
+        syncAll(clock.t, { skipCamera: true });
+        stage.requestRender();
       }
     },
   });
@@ -366,15 +490,24 @@ async function bootstrap() {
     beats: buildClockBeats(i18n.getLang()),
   });
 
+  // Bind GridBrush to SpacetimeClock: switching beats or scrubbing back to Beat 1-2 auto-exits paint mode!
+  brush.bindClock(clock, {
+    autoExitOnBeatChange: true,
+    allowedBeats: ['beat-3', 'beat-4', 'beat-5', 'beat-6'],
+    onAutoExit: () => {
+      brushActive = false;
+      stage.setCursorOverride?.(null);
+      hideTooltip();
+    },
+  });
+
   // 6. Configure ActorChoreographer (TRUE t=0 sparsity: ONLY 3 actors visible at t=0!)
   const choreographer = new ActorChoreographer({ initialCamera: RL_BEATS[0].camera });
 
-  // 3 Initial sparse actors visible at t = 0
   choreographer.register('base-deck', tray.deckGroup, { initiallyVisible: true });
   choreographer.register('start-goal', tray.endpointsGroup, { initiallyVisible: true });
   choreographer.register('agent-puck', tray.puckGroup, { initiallyVisible: true });
 
-  // Progressive 3D & HUD actors (ALL hidden at t = 0!)
   choreographer
     .register('walk-trail', tray.walkTrailGroup, { initiallyVisible: false })
     .enter('walk-trail', 1.0, 0.45, 'fade')
@@ -387,7 +520,6 @@ async function bootstrap() {
 
   choreographer.hudReveal('right-dock', 7.3, 0.55, { el: $('right-dock'), from: [18, 0, 0] });
 
-  // Progressive top-bar control disclosure (zero spoilers in Beat 1!)
   choreographer.hudReveal('pill-alpha', 7.2, 0.4, { el: $('pill-alpha'), from: [0, -6, 0], countInSparsity: false });
   choreographer.hudReveal('btn-paint-cliff', 15.4, 0.4, { el: $('btn-paint-cliff'), from: [0, -6, 0], countInSparsity: false });
   choreographer.hudReveal('pill-eps', 15.4, 0.4, { el: $('pill-eps'), from: [0, -6, 0], countInSparsity: false });
@@ -419,26 +551,23 @@ async function bootstrap() {
       initiallyVisible: false,
       restPos: CODE_SLATE_POS,
       onApply: (st) => {
-        const isMobile = window.innerWidth <= 900;
-        const show3d = st.visible && !isMobile && !urlState.thumb;
+        const show3d = st.visible && !isMobileViewport() && !urlState.thumb;
         codeSurface.setChoreoState({ ...st, visible: show3d });
         if (show3d) {
           codeSurface.syncPose(stage.camera, [st.pos[0], st.pos[1], st.pos[2]]);
         }
       },
     })
-    .enter('code-surface', 38.2, 0.65, 'rise', { distance: 0.4 });
+    .enter('code-surface', 38.2, 0.65, 'rise', { distance: 0.36 });
 
   choreographer
     .register('code-tether', tray.tetherGroup, { initiallyVisible: false })
     .enter('code-tether', 38.55, 0.45, 'fade');
 
-  // Camera choreography beats
   for (let i = 1; i < RL_BEATS.length; i += 1) {
     choreographer.cameraBeat(RL_BEATS[i].start, 1.35, RL_BEATS[i].camera);
   }
 
-  // Callout reveal windows
   choreographer.calloutReveal('cliff-lbl', 16.4, 0.4, { exitAt: 21.8, exitDur: 0.3 });
   choreographer.calloutReveal('arc-0', 22.8, 0.4, { exitAt: 29.6, exitDur: 0.3 });
   choreographer.calloutReveal('arc-end', 22.9, 0.4, { exitAt: 29.6, exitDur: 0.3 });
@@ -446,64 +575,52 @@ async function bootstrap() {
   choreographer.calloutReveal('q-lbl', 31.0, 0.4, { exitAt: 37.8, exitDur: 0.3 });
   callouts.setChoreographer(choreographer);
 
-  // 7. Helper: Pure Continuous Computations from Master Clock `t`
+  // 7. Continuous Computations & Beat-2 Real Cliff-Safe Backward Credit Steps
   function computeEpisodeForTime(t, beat) {
     const u = beat.localProgress;
     if (beat.index === 0) return 0;
     if (beat.index === 1) return lerp(1, 96, easeInOutCubic(u));
     if (beat.index === 2) return lerp(24, 185, easeInOutCubic(u));
     if (beat.index === 3) return lerp(2, 56, clamp01((t - 22.4) / 6.8));
+    if (userEpisodeOverride !== null) return userEpisodeOverride;
     return engine.episodes;
   }
 
   function getEffectiveForkProbe(t) {
     if (userProbeOverride !== null) return userProbeOverride;
-    // Dramatic auto cliff-slip window inside Beat 5 (33.5s .. 36.8s)
     return t >= 33.5 && t <= 36.8;
   }
 
-  function sampleCellPathSmooth(cells, progress) {
-    if (!cells || cells.length === 0) return { row: START[0], col: START[1] };
-    if (cells.length === 1) return { row: cells[0][0], col: cells[0][1] };
-    const u = clamp01(progress) * (cells.length - 1);
-    const idx = Math.min(cells.length - 2, Math.floor(u));
-    const frac = u - idx;
-    const pA = tray.getTileWorldPos(cells[idx][0], cells[idx][1]);
-    const pB = tray.getTileWorldPos(cells[idx + 1][0], cells[idx + 1][1]);
-    const hop = Math.sin(frac * Math.PI) * 0.11;
-    return {
-      x: lerp(pA.x, pB.x, frac),
-      y: lerp(pA.y, pB.y, frac) + 0.068 + hop,
-      z: lerp(pA.z, pB.z, frac),
-      cell: frac < 0.5 ? cells[idx] : cells[idx + 1],
-    };
+  function buildBackwardTdSteps(bfsPath) {
+    const path = Array.isArray(bfsPath) && bfsPath.length >= 2
+      ? bfsPath
+      : [[3, 0], [2, 0], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [3, 7]];
+    const steps = [];
+    for (let i = path.length - 1; i >= 1; i -= 1) {
+      const sNext = path[i];
+      const s = path[i - 1];
+      const isGoal = sNext[0] === GOAL[0] && sNext[1] === GOAL[1];
+      steps.push({ s, sNext, r: isGoal ? GOAL_REWARD : STEP_REWARD });
+      if (steps.length >= 6) break;
+    }
+    return steps.length > 0 ? steps : [{ s: [2, 7], sNext: [3, 7], r: GOAL_REWARD }];
   }
 
-  // Beat 2 backward TD(0) steps walking backward from Goal toward Start
-  const TD_BACKWARD_STEPS = [
-    { s: [2, 7], sNext: [3, 7], r: 10 },
-    { s: [2, 6], sNext: [2, 7], r: -1 },
-    { s: [2, 5], sNext: [2, 6], r: -1 },
-    { s: [2, 4], sNext: [2, 5], r: -1 },
-    { s: [2, 3], sNext: [2, 4], r: -1 },
-    { s: [2, 2], sNext: [2, 3], r: -1 },
-  ];
-
-  // LinkBus bi-directional synchronization (formula/code hover <-> 3D board highlight!)
+  // LinkBus bi-directional synchronization (hover NEVER steals or resets user camera!)
   linkBus.onHover((id) => {
     activeLinkTarget = id;
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   });
   linkBus.onFocus((id) => {
     const m = String(id).match(/^cell-(\d+)-(\d+)$/);
     if (m) tray.focusCell(Number(m[1]), Number(m[2]), 1.36);
   });
 
-  // 8. Master Pure Deterministic `syncAll(t)` Function
+  // 8. Master Deterministic `syncAll(t, opts)` Function
   let lastCalloutKey = '';
 
-  function syncAll(t = clock.t) {
+  function syncAll(t = clock.t, { skipCamera = false } = {}) {
     const time = Math.max(0, Math.min(TOTAL_DURATION, Number(t) || 0));
     const lang = i18n.getLang();
     const beat = clock.getBeatAt(time);
@@ -511,20 +628,41 @@ async function bootstrap() {
     const actMeta = RL_BEATS[beat.index] || RL_BEATS[0];
     const u = beat.localProgress;
 
-    // Evaluate choreographer purely at `time` (actors, HUD progressive reveals, camera)
-    const choreoState = choreographer.evaluate(time, { apply: true, stage });
+    // Beat-boundary housekeeping: unlock user camera for new beat framing, clear stale hover/probe/scrub overrides!
+    if (lastBeatIndex !== -1 && beat.index !== lastBeatIndex) {
+      if (!skipCamera) {
+        stage.unlockUserCamera();
+        $('view-top')?.setAttribute('aria-pressed', 'false');
+      }
+      hideTooltip();
+      if (lastBeatIndex === 4) userProbeOverride = null;
+      if (beat.index < 4) userEpisodeOverride = null;
+    }
+    lastBeatIndex = beat.index;
 
-    // Compute exact continuous episode & solve engine
+    // Evaluate choreographer actors + camera pose (apply camera cleanly through setCameraFromScript!)
+    const choreoState = choreographer.evaluate(time, { apply: true });
+    if (!skipCamera && choreoState.cameraPose) {
+      stage.setCameraFromScript(getAdaptedCamera(choreoState.cameraPose));
+    }
+
+    // Solve engine cleanly for current beat & policy view
     const epFloat = computeEpisodeForTime(time, beat);
-    const effectiveProbe = beatNum === 5 ? getEffectiveForkProbe(time) : Boolean(userProbeOverride);
+    const effectiveProbe = beatNum === 5 ? getEffectiveForkProbe(time) : false;
     engine.actIndex = beat.index;
     engine.forkProbeActive = effectiveProbe;
+    engine.activeMethodOverride =
+      beatNum === 6
+        ? unifiedMethod
+        : beatNum === 5 && activeLinkTarget === 'fork-q'
+          ? 'qlearn'
+          : null;
     const snap = engine.solve(epFloat);
 
-    // Derive continuous visual parameters purely from `time`
+    // Derive continuous 3D visual state strictly from `time` & live engine ground truth
     let tileMode = 'clean';
     let qMorph = 0;
-    let cliffCarve = engine.isCustomCliff() ? 1 : 0;
+    let cliffCarve = engine.isCustomCliff() && beatNum >= 3 ? 1 : 0;
     let vLiftStrength = 0;
     let walkProgress = 0;
     let wavefront = null;
@@ -533,26 +671,36 @@ async function bootstrap() {
     let puckPos = null;
     let puckTone = 'teal';
     let slipProbe = null;
-    let tdStepPair = TD_BACKWARD_STEPS[0];
+    const tdBackwardSteps = buildBackwardTdSteps(snap.bfsPath);
+    let tdStepPair = tdBackwardSteps[0];
+    const safeExplorationWalk = getSafeExplorationWalk(engine.cliffMask);
 
     if (beatNum === 1) {
       tileMode = 'clean';
+      cliffCarve = engine.isCustomCliff() ? 1 : 0;
       walkProgress = clamp01((time - 1.0) / 5.4);
-      puckPos = sampleCellPathSmooth(EARLY_EXPLORATION_WALK, walkProgress);
+      puckPos = { pathCells: safeExplorationWalk, pathProgress: walkProgress };
       puckTone = walkProgress > 0.94 ? 'amber' : 'teal';
     } else if (beatNum === 2) {
       tileMode = 'v';
+      cliffCarve = engine.isCustomCliff() ? 1 : 0;
       vLiftStrength = easeOutCubic(clamp01((time - 7.3) / 1.1));
-      const cycleFloat = u * TD_BACKWARD_STEPS.length;
-      const stepIdx = Math.min(TD_BACKWARD_STEPS.length - 1, Math.floor(cycleFloat));
+      const cycleFloat = u * tdBackwardSteps.length;
+      const stepIdx = Math.min(tdBackwardSteps.length - 1, Math.floor(cycleFloat));
       const phase = cycleFloat - stepIdx;
-      tdStepPair = TD_BACKWARD_STEPS[stepIdx];
+      tdStepPair = tdBackwardSteps[stepIdx];
       wavefront = {
         fromCell: tdStepPair.sNext,
         toCell: tdStepPair.s,
         phase,
       };
-      puckPos = { row: tdStepPair.s[0], col: tdStepPair.s[1] };
+      const dx = tdStepPair.sNext[1] - tdStepPair.s[1];
+      const dz = tdStepPair.sNext[0] - tdStepPair.s[0];
+      puckPos = {
+        row: tdStepPair.s[0],
+        col: tdStepPair.s[1],
+        heading: Math.atan2(-dz, dx),
+      };
       puckTone = 'teal';
     } else if (beatNum === 3) {
       tileMode = 'q';
@@ -560,7 +708,7 @@ async function bootstrap() {
       cliffCarve = engine.isCustomCliff() ? 1 : easeInOutCubic(clamp01((time - 15.4) / 2.0));
       vLiftStrength = 1 - easeInOutCubic(clamp01((time - 15.0) / 1.1));
       const safeDemoPath = snap.convergedSarsaPath.slice(0, Math.min(8, snap.convergedSarsaPath.length));
-      puckPos = sampleCellPathSmooth(safeDemoPath, clamp01((time - 15.8) / 5.4));
+      puckPos = { pathCells: safeDemoPath, pathProgress: clamp01((time - 15.8) / 5.4) };
       puckTone = 'teal';
     } else if (beatNum === 4) {
       tileMode = 'q';
@@ -568,18 +716,20 @@ async function bootstrap() {
       cliffCarve = 1;
       arcReveal = easeOutCubic(clamp01((time - 22.2) / 1.1));
       arcPulsePhase = ((time - 22.2) * 0.45) % 1;
-      puckPos = sampleCellPathSmooth(snap.arcNodes, clamp01((time - 22.5) / 6.6));
+      puckPos = { pathCells: snap.arcNodes, pathProgress: clamp01((time - 22.5) / 6.6) };
       puckTone = 'amber';
     } else if (beatNum === 5) {
       tileMode = 'q';
       qMorph = 1;
       cliffCarve = 1;
-      const forkApproach = [START, [2, 0], [2, 1], [2, 2], snap.fork.forkCell];
+      const forkApproach = snap.convergedQPath.length >= 2
+        ? snap.convergedQPath.slice(0, Math.max(2, snap.convergedQPath.findIndex(([r, c]) => r === snap.fork.forkCell[0] && c === snap.fork.forkCell[1]) + 1 || 5))
+        : [START, snap.fork.forkCell];
       const approachU = clamp01((time - 30.0) / 2.4);
       puckPos = approachU < 0.999
-        ? sampleCellPathSmooth(forkApproach, approachU)
-        : { row: snap.fork.forkCell[0], col: snap.fork.forkCell[1] };
-      puckTone = effectiveProbe ? 'amber' : 'teal';
+        ? { pathCells: forkApproach, pathProgress: approachU }
+        : { row: snap.fork.forkCell[0], col: snap.fork.forkCell[1], heading: effectiveProbe ? -Math.PI * 0.5 : 0 };
+      puckTone = effectiveProbe ? 'danger' : 'teal';
 
       if (effectiveProbe && snap.fork.cliffTargetCell) {
         const slipProgress = userProbeOverride !== null
@@ -593,18 +743,20 @@ async function bootstrap() {
         };
       }
     } else {
-      // Beat 6: Unified View & Diegetic 3D HTML-in-Canvas Code Trace
       tileMode = 'q';
       qMorph = 1;
       cliffCarve = 1;
-      arcReveal = 1;
+      // Show n-step glass arc in Beat 6 ONLY when n-step tab is active (eliminates 5-tube visual spaghetti!)
+      const showNStepArcInBeat6 = unifiedMethod === 'nstep';
+      arcReveal = showNStepArcInBeat6 ? 1 : 0;
+      tray.arcGroup.visible = showNStepArcInBeat6;
       arcPulsePhase = ((time - 38.2) * 0.4) % 1;
       const activeWalk = unifiedMethod === 'sarsa' ? snap.convergedSarsaPath : snap.convergedQPath;
-      puckPos = sampleCellPathSmooth(activeWalk, clamp01((time - 38.4) / 4.8));
+      puckPos = { pathCells: activeWalk, pathProgress: clamp01((time - 38.4) / 4.8) };
       puckTone = unifiedMethod === 'sarsa' ? 'teal' : 'amber';
     }
 
-    // If user painted a custom cliff early, keep chasm signage visible immediately
+    // If user painted a custom cliff early, keep chasm signage visible only when custom cliffs exist
     if (engine.isCustomCliff()) {
       tray.chasmSignGroup.visible = true;
     }
@@ -624,20 +776,22 @@ async function bootstrap() {
       linkSrcCell = snap.fork.prevCell;
     }
 
-    // Sync diegetic 3D code slate pose & tether target
-    const activeCellForTether = puckPos?.cell || snap.fork.forkCell || [2, 3];
+    // Sync diegetic 3D code slate pose & bottom-center tether target
     const tetherWorldTarget = codeSurface.syncPose(
       stage.camera,
       choreoState.actorStates['code-surface']?.pos || CODE_SLATE_POS
     );
-    const show3dCode = Boolean(choreoState.actorStates['code-surface']?.visible && window.innerWidth > 900 && !urlState.thumb);
+    const show3dCode = Boolean(choreoState.actorStates['code-surface']?.visible && !isMobileViewport() && !urlState.thumb);
 
-    // Custom counterfactual ghost path (from previous cliff layout before GridBrush edits!)
+    // Counterfactual Ghost: works for BOTH ε/param adjustments AND custom painted cliffs, NEVER leaks into Beat 1-2!
     const ghostMeta = engine.getGhostMeta();
-    const customGhostPath = ghostMeta && engine.isCustomCliff() ? ghostMeta.qPath : null;
-    tray.customGhostGroup.visible = Boolean(customGhostPath && cliffCarve > 0.3);
+    const hasGhost = Boolean(ghostMeta && engine.hasCounterfactualGhost());
+    const customGhostPath = hasGhost && beatNum >= 3
+      ? (engine.isCustomCliff() ? ghostMeta.qPath : ghostMeta.sarsaPath)
+      : null;
+    tray.customGhostGroup.visible = Boolean(customGhostPath && beatNum >= 3 && cliffCarve > 0.3);
 
-    // Update 3D Instrument Tray deterministically
+    // Update sculpted 3D stage deterministically
     tray.updateFromRenderState({
       t: time,
       beatNum,
@@ -648,12 +802,13 @@ async function bootstrap() {
       cliffMask: engine.cliffMask,
       vGrid: snap.vGrid,
       qGrid: snap.qGrid,
+      qVisits: snap.qVisits,
       selectedCell: beatNum >= 3 ? snap.selectedCell : null,
       hoveredCell,
       forkCell: snap.fork.forkCell,
       linkSrcCell,
       linkDstCell,
-      walkTrailCells: beatNum === 1 ? EARLY_EXPLORATION_WALK : null,
+      walkTrailCells: beatNum === 1 ? safeExplorationWalk : null,
       walkProgress,
       wavefront,
       arcNodes: snap.arcNodes,
@@ -667,7 +822,7 @@ async function bootstrap() {
       slipProbe,
       tether: {
         visible: show3dCode,
-        fromCell: activeCellForTether,
+        fromCell: null, // resolved inside tray to exact live probe cell!
         toWorld: tetherWorldTarget,
       },
       lang,
@@ -699,7 +854,7 @@ async function bootstrap() {
     $('brush-banner').hidden = !brushActive;
     $('brush-banner').textContent = i18n.t('brushHint');
 
-    // Update Right Contextual Dock content cleanly per beat (ZERO wall dump!)
+    // Update Right Contextual Dock cleanly per beat with TRUE KaTeX mathematical typesetting!
     const mathsSlot = $('td-maths-slot');
     const forkSlot = $('fork-panel-slot');
     const unifiedSlot = $('unified-slot');
@@ -711,7 +866,6 @@ async function bootstrap() {
     cellInsp.hidden = beatNum < 3 || beatNum > 4;
 
     if (beatNum === 2) {
-      // Compact single-formula TD(0) live card wired to LinkBus
       const [sr, sc] = tdStepPair.s;
       const [nr, nc] = tdStepPair.sNext;
       const vS = snap.vGrid[sr][sc];
@@ -724,26 +878,46 @@ async function bootstrap() {
         subtitle: lang === 'en' ? 'Hover terms to highlight 3D tiles' : '悬停公式项高亮 3D 对应格',
         equations: [
           {
-            label: lang === 'en' ? 'Symbolic Rule' : '增量更新律',
+            label: lang === 'en' ? 'Incremental Backup' : '增量更新律',
             tokens: [
-              { text: 'V(S)', tone: 'teal', emph: true, linkId: 'td-vs' },
-              { text: ' ← ' },
-              { text: 'V(S)', tone: 'teal', linkId: 'td-vs' },
-              { text: ' + α[' },
-              { text: 'R + γV(S\')', tone: 'amber', emph: true, linkId: 'td-vs-next' },
-              { text: ' − ' },
-              { text: 'V(S)', tone: 'teal', linkId: 'td-vs' },
-              { text: ']' },
+              mathGroup([mathVar('V'), '(', mathVar('S'), ')'], { tone: 'teal', emph: true, linkId: 'td-vs' }),
+              ' ← ',
+              mathVar('V'),
+              ' + ',
+              mathVar('α'),
+              '[',
+              mathGroup([mathVar('R'), '+', mathVar('γ'), mathVar('V'), '(', mathVar("S'"), ')'], {
+                tone: 'amber',
+                emph: true,
+                linkId: 'td-vs-next',
+              }),
+              ' − ',
+              mathVar('V'),
+              ']',
             ],
           },
           {
             label: lang === 'en' ? 'Live Substitution' : '实时数值代入',
             tokens: [
-              { text: `${vS.toFixed(2)}`, tone: 'teal', linkId: 'td-vs' },
-              { text: ` + ${engine.alpha.toFixed(1)}×[` },
-              { text: `${tdStepPair.r >= 0 ? '+' : ''}${tdStepPair.r} + ${engine.gamma.toFixed(2)}×${vNext.toFixed(1)}`, tone: 'amber', linkId: 'td-vs-next' },
-              { text: ` − ${vS.toFixed(1)}] ` },
-              { text: `δ=${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`, tone: delta >= 0 ? 'teal' : 'danger', emph: true, linkId: 'td-delta' },
+              mathNum(vS.toFixed(2), { tone: 'teal', linkId: 'td-vs' }),
+              ' + ',
+              mathNum(engine.alpha.toFixed(1)),
+              '×[',
+              mathGroup([
+                mathNum(`${tdStepPair.r >= 0 ? '+' : ''}${tdStepPair.r}`),
+                ' + ',
+                mathNum(engine.gamma.toFixed(2)),
+                '×',
+                mathNum(vNext.toFixed(1)),
+              ], { tone: 'amber', linkId: 'td-vs-next' }),
+              ' − ',
+              mathNum(vS.toFixed(1)),
+              '] ',
+              mathGroup([mathVar('δ'), '=', mathNum(fmtSigned(delta, 2))], {
+                tone: delta >= 0 ? 'teal' : 'danger',
+                emph: true,
+                linkId: 'td-delta',
+              }),
             ],
           },
         ],
@@ -760,10 +934,24 @@ async function bootstrap() {
           {
             label: lang === 'en' ? 'Action-Value Backup' : '动作价值回传',
             tokens: [
-              { text: 'Q(S,A)', tone: 'teal', emph: true, linkId: 'td-vs' },
-              { text: ' ← Q + α[' },
-              { text: 'R + γQ(S\',A\')', tone: 'amber', emph: true, linkId: 'td-vs-next' },
-              { text: ' − Q]' },
+              mathGroup([mathVar('Q'), '(', mathVar('S'), ',', mathVar('A'), ')'], {
+                tone: 'teal',
+                emph: true,
+                linkId: 'td-vs',
+              }),
+              ' ← ',
+              mathVar('Q'),
+              ' + ',
+              mathVar('α'),
+              '[',
+              mathGroup([mathVar('R'), '+', mathVar('γ'), mathVar('Q'), '(', mathVar("S'"), ',', mathVar("A'"), ')'], {
+                tone: 'amber',
+                emph: true,
+                linkId: 'td-vs-next',
+              }),
+              ' − ',
+              mathVar('Q'),
+              ']',
             ],
           },
         ],
@@ -778,25 +966,42 @@ async function bootstrap() {
       renderCellInspector(snap, lang);
     } else if (beatNum === 4) {
       const fNow = engine.sampleAtEpisode(epFloat);
-      const nSub = toSub(engine.nStep);
-      const nSup = toSup(engine.nStep);
-      liveMaths.titleEl.textContent = lang === 'en' ? `n-step Return (n=${engine.nStep})` : `n 步截断回报 (n=${engine.nStep})`;
+      const nVal = engine.nStep;
+      const liveG = snap.liveNStepTarget;
+      liveMaths.titleEl.textContent = lang === 'en' ? `n-step Return (n=${nVal})` : `n 步截断回报 (n=${nVal})`;
       liveMaths.update({
-        badge: `G=${snap.nStepTarget.toFixed(1)}`,
+        badge: `G=${liveG.toFixed(1)}`,
         subtitle: lang === 'en' ? 'Chains n real rewards before bootstrapping' : '先累加 n 步真实回报再自举',
         equations: [
           {
             label: lang === 'en' ? 'Truncated Horizon' : '多步回报目标',
             tokens: [
-              { text: `Gₜ:ₜ₊${nSub}`, tone: 'amber', emph: true, linkId: 'td-target' },
-              { text: ' = Σ γᵏ R + ' },
-              { text: `γ${nSup} V(Sₜ₊${nSub})`, tone: 'teal', emph: true, linkId: 'td-vs-next' },
+              mathSub(mathVar('G'), [mathVar('t'), ':', mathVar('t'), '+', mathNum(nVal)], {
+                tone: 'amber',
+                emph: true,
+                linkId: 'td-target',
+              }),
+              ' = ',
+              mathOp('∑', { lower: [mathVar('k'), '=0'], upper: [mathNum(nVal - 1)], stacked: false }),
+              mathSup(mathVar('γ'), mathVar('k')),
+              mathSub(mathVar('R'), [mathVar('t'), '+', mathVar('k'), '+1']),
+              ' + ',
+              mathGroup(
+                [
+                  mathSup(mathVar('γ'), mathNum(nVal)),
+                  mathVar('V'),
+                  '(',
+                  mathSub(mathVar('S'), [mathVar('t'), '+', mathNum(nVal)]),
+                  ')',
+                ],
+                { tone: 'teal', emph: true, linkId: 'td-vs-next' }
+              ),
             ],
           },
         ],
         breakdown: [
           {
-            tag: `n=${engine.nStep}`,
+            tag: `n=${nVal}`,
             tone: 'teal',
             text: `V(Start) = ${fNow.nStepStartV.toFixed(2)}  (vs n=1: ${fNow.n1StartV.toFixed(2)})`,
           },
@@ -812,32 +1017,55 @@ async function bootstrap() {
         btn.setAttribute('aria-pressed', String(btn.dataset.method === unifiedMethod));
       });
       const diffBadge = $('ghost-diff-badge');
-      if (ghostMeta && engine.isCustomCliff()) {
-        const oldSteps = ghostMeta.qPath.length - 1;
-        const newSteps = snap.convergedQPath.length - 1;
+      if (hasGhost) {
         diffBadge.hidden = false;
-        diffBadge.textContent = lang === 'en'
-          ? `Ghost ${oldSteps} steps → New ${newSteps} steps (${newSteps - oldSteps >= 0 ? '+' : ''}${newSteps - oldSteps})`
-          : `原布局 ${oldSteps} 步 → 现布局 ${newSteps} 步 (${newSteps - oldSteps >= 0 ? '+' : ''}${newSteps - oldSteps})`;
+        if (engine.isCustomCliff()) {
+          const oldSteps = ghostMeta.qPath.length - 1;
+          const newSteps = snap.convergedQPath.length - 1;
+          const diff = newSteps - oldSteps;
+          diffBadge.textContent = lang === 'en'
+            ? `Ghost ${oldSteps} steps → New ${newSteps} steps (${diff >= 0 ? '+' : ''}${diff})`
+            : `原悬崖 ${oldSteps} 步 → 新布局 ${newSteps} 步 (${diff >= 0 ? '+' : ''}${diff})`;
+        } else {
+          const oldRet = ghostMeta.sarsaOnlineReturn ?? ghostMeta.sarsaGreedyReturn;
+          const newRet = snap.sarsaOnlineReturn;
+          const diff = newRet - oldRet;
+          diffBadge.textContent = lang === 'en'
+            ? `Ghost (${ghostMeta.label}) Sarsa ${oldRet.toFixed(1)} → ${newRet.toFixed(1)} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`
+            : `对照 (${ghostMeta.label}) Sarsa ${oldRet.toFixed(1)} → ${newRet.toFixed(1)} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`;
+        }
       } else {
         diffBadge.hidden = true;
       }
     }
 
-    // Update Bottom-Left ChartCard (Revealed in Beat 4+)
+    // Update Bottom-Left ChartCard + Legend Strip (Revealed in Beat 4+)
     if (beatNum >= 4) {
-      updateChart(snap, beatNum, epFloat, lang);
+      updateChart(snap, beatNum, epFloat, lang, hasGhost, ghostMeta);
     }
 
     // Update Diegetic 3D HTML-in-Canvas Python Code Trace (Beat 6) + Mobile fallback
+    // Real algorithmic line highlighting + real live δ/target watch (ZERO fake timer loop!)
     const codeSpec = UNIFIED_CODES[unifiedMethod] || UNIFIED_CODES.qlearn;
-    const stepCycle = Math.floor(((time - 38.0) * 1.15) % codeSpec.lines.length);
-    const activeLine = beatNum === 6
-      ? (stepCycle + 1)
-      : (actMeta.activeCodeLine || 3);
-    const watchStr = unifiedMethod === 'td0'
-      ? `V=${snap.vGrid[snap.fork.forkCell[0]][snap.fork.forkCell[1]].toFixed(1)}`
-      : `δ=${(unifiedMethod === 'sarsa' ? snap.fork.sarsaDelta : snap.fork.qDelta).toFixed(1)}`;
+    let activeLine = codeSpec.defaultActiveLine;
+    if (activeLinkTarget && Array.isArray(codeSpec.lineLinks)) {
+      const hoverLineIdx = codeSpec.lineLinks.indexOf(activeLinkTarget);
+      if (hoverLineIdx >= 0) activeLine = hoverLineIdx + 1;
+    }
+
+    const [fr, fc] = snap.fork.forkCell;
+    const vHere = snap.vGrid[fr]?.[fc] ?? 0;
+    const td0Delta = engine.alpha * (snap.fork.td0Target - vHere);
+    let watchStr;
+    if (unifiedMethod === 'td0') {
+      watchStr = `V=${vHere.toFixed(1)} · δ=${fmtSigned(td0Delta, 2)}`;
+    } else if (unifiedMethod === 'nstep') {
+      watchStr = `n=${engine.nStep} · G=${snap.liveNStepTarget.toFixed(1)}`;
+    } else if (unifiedMethod === 'sarsa') {
+      watchStr = `target=${snap.fork.sarsaTarget.toFixed(1)} · δ=${fmtSigned(snap.fork.sarsaDelta, 2)}`;
+    } else {
+      watchStr = `target=${snap.fork.qTarget.toFixed(1)} · δ=${fmtSigned(snap.fork.qDelta, 2)}`;
+    }
 
     const codePayload = {
       title: codeSpec.title,
@@ -850,10 +1078,13 @@ async function bootstrap() {
     mobileCodeCard.update(codePayload);
     $('mobile-code-slot').hidden = beatNum < 6;
 
-    // Sync view controls & screen-reader status
+    // Sync view controls, mobile thumb dock & screen-reader status
     $('view-top').textContent = i18n.t('top');
     $('view-reset').textContent = i18n.t('reset');
+    $('mob-prev').textContent = i18n.t('prev');
+    $('mob-next').textContent = i18n.t('next');
     $('mob-play').textContent = clock.playing ? i18n.t('pause') : i18n.t('play');
+    $('mob-paint').hidden = beatNum < 3;
     $('mob-paint').textContent = brushActive ? `✓ ${i18n.t('paintingCliff')}` : `🖌 ${i18n.t('paintCliff')}`;
     $('status-bar').textContent = `${actMeta.shortTitle[lang]} | t=${time.toFixed(1)}s | ep=${Math.round(epFloat)}`;
 
@@ -880,14 +1111,13 @@ async function bootstrap() {
     });
   }
 
-  function updateChart(snap, beatNum, epFloat, lang) {
-    const ghostMeta = engine.getGhostMeta();
+  function updateChart(snap, beatNum, epFloat, lang, hasGhost, ghostMeta) {
+    const legendEl = $('chart-legend-strip');
     if (beatNum === 4) {
-      // Beat 4: Live n-step early credit propagation V(Start) vs n=1 Ghost baseline
       const maxEp = 60;
       const n1Pts = snap.n1Curve.filter((p) => p.x <= maxEp);
       const nLivePts = snap.nStepCurve.filter((p) => p.x <= maxEp);
-      const curEp = clamp01(epFloat / maxEp) * maxEp;
+      const curEp = Math.max(1, clamp01(epFloat / maxEp) * maxEp);
       const fCur = engine.sampleAtEpisode(curEp);
       chartCard.setHeader(i18n.t('chartNstepTitle'), `n=${engine.nStep} vs n=1`);
       chartCard.updateXY({
@@ -900,12 +1130,20 @@ async function bootstrap() {
         yLabel: 'V(Start)',
         ghost: { points: n1Pts, tone: 'navy', opacity: 0.65, dash: '4 3' },
         series: [{ points: nLivePts, tone: 'teal' }],
-        dot: { x: Math.max(1, curEp), y: fCur.nStepStartV, tone: 'teal' },
-        scrubX: Math.max(1, curEp),
+        dot: { x: curEp, y: fCur.nStepStartV, tone: 'teal' },
+        scrubX: curEp,
       });
+      if (legendEl) {
+        legendEl.innerHTML = `
+          <span class="legend-item"><i class="legend-dot teal"></i>n=${engine.nStep}</span>
+          <span class="legend-item"><i class="legend-dot navy"></i>n=1 (${lang === 'en' ? 'baseline' : '基准'})</span>
+        `;
+      }
     } else {
-      // Beats 5–6: Real continuous Sarsa vs Q-learning online returns + Counterfactual Ghost
       const totalEps = engine.episodes;
+      const curEp = Math.max(1, Math.min(totalEps, Math.round(epFloat)));
+      const fCur = engine.sampleAtEpisode(curEp);
+
       const ghosts = [
         {
           points: [
@@ -913,20 +1151,20 @@ async function bootstrap() {
             { x: totalEps, y: snap.greedyRef },
           ],
           tone: 'navy',
-          opacity: 0.48,
+          opacity: 0.45,
           dash: '3 3',
         },
       ];
-      if (ghostMeta && engine.isCustomCliff() && ghostMeta.sarsaReturns?.length >= 2) {
+      if (hasGhost && ghostMeta?.sarsaReturns?.length >= 2) {
         ghosts.push({
           points: ghostMeta.sarsaReturns,
           tone: '#6366f1',
-          opacity: 0.72,
+          opacity: 0.78,
           dash: '4 3',
+          movingAverageWindow: 5,
         });
       }
-      const lastS = snap.sarsaReturns[snap.sarsaReturns.length - 1] || { x: totalEps, y: snap.sarsaOnlineReturn };
-      const lastQ = snap.qReturns[snap.qReturns.length - 1] || { x: totalEps, y: snap.qOnlineReturn };
+
       chartCard.setHeader(i18n.t('chartReturnTitle'), `ε=${engine.epsilon.toFixed(2)}`);
       chartCard.updateXY({
         badge: `S:${snap.sarsaOnlineReturn.toFixed(0)} Q:${snap.qOnlineReturn.toFixed(0)}`,
@@ -934,26 +1172,37 @@ async function bootstrap() {
         xMax: totalEps,
         yMin: -108,
         yMax: Math.max(24, snap.greedyRef + 22),
-        xLabel: lang === 'en' ? 'Episodes (1–240)' : '训练回合 (1–240)',
+        xLabel: lang === 'en' ? 'Episodes (drag to scrub)' : '训练回合（拖拽可擦洗）',
         yLabel: lang === 'en' ? 'Return' : '回合回报',
         ghosts,
         series: [
-          { points: snap.sarsaReturns, tone: 'teal' },
-          { points: snap.qReturns, tone: 'amber' },
+          { points: snap.sarsaReturns, tone: 'teal', movingAverageWindow: 5, rawOpacity: 0.24 },
+          { points: snap.qReturns, tone: 'amber', movingAverageWindow: 7, rawOpacity: 0.22 },
         ],
         marks: [{ axis: 'y', value: snap.greedyRef, label: `Opt ${snap.greedyRef >= 0 ? '+' : ''}${snap.greedyRef}`, tone: 'navy' }],
         dot: {
-          x: snap.forkProbeActive ? lastQ.x : lastS.x,
-          y: snap.forkProbeActive ? lastQ.y : lastS.y,
+          x: curEp,
+          y: snap.forkProbeActive ? fCur.qSmooth : fCur.sarsaSmooth,
           tone: snap.forkProbeActive ? 'danger' : 'teal',
         },
+        scrubX: userEpisodeOverride !== null ? curEp : null,
       });
+      if (legendEl) {
+        const ghostChip = hasGhost
+          ? `<span class="legend-item"><i class="legend-dot ghost"></i>${lang === 'en' ? 'Ghost' : '反事实虚影'}</span>`
+          : '';
+        legendEl.innerHTML = `
+          <span class="legend-item"><i class="legend-dot teal"></i>Sarsa (${lang === 'en' ? 'avg' : '均值'})</span>
+          <span class="legend-item"><i class="legend-dot amber"></i>Q-learn (${lang === 'en' ? 'avg' : '均值'})</span>
+          ${ghostChip}
+        `;
+      }
     }
   }
 
   function syncCallouts(snap, beatNum, lang) {
     const arcNodes = tray.getArcNodeTargets();
-    const key = `${beatNum}|${lang}|${engine.nStep}|${arcNodes.length}|${snap.fork.forkCell.join(',')}`;
+    const key = `${beatNum}|${lang}|${engine.nStep}|${arcNodes.length}|${snap.fork.forkCell.join(',')}|${snap.sarsaOnlineReturn.toFixed(1)}`;
     if (key === lastCalloutKey) return;
     lastCalloutKey = key;
 
@@ -971,10 +1220,10 @@ async function bootstrap() {
     if (arcNodes.length >= 2) {
       const first = arcNodes[0];
       const last = arcNodes[arcNodes.length - 1];
-      const spanSub = toSub(arcNodes.length - 1);
+      const span = arcNodes.length - 1;
       items.push({
         id: 'arc-0',
-        label: 'sₜ',
+        label: 'S(t)',
         sublabel: lang === 'en' ? 'Update target' : '回写起点',
         tone: 'teal',
         dx: -46,
@@ -983,7 +1232,7 @@ async function bootstrap() {
       });
       items.push({
         id: 'arc-end',
-        label: `sₜ₊${spanSub}`,
+        label: `S(t+${span})`,
         sublabel: `n = ${engine.nStep}`,
         tone: 'amber',
         dx: 46,
@@ -1015,8 +1264,9 @@ async function bootstrap() {
     callouts.setItems(items);
   }
 
-  // 9. Mount Interactive 4D Timeline Bar & One-Click Video/GIF Exporter
+  // 9. Mount Interactive 4D Timeline Bar & Export Button (full live i18n sync!)
   const timelineBar = mountTimelineBar($('timeline-bar-slot'), clock, {
+    lang: i18n.getLang(),
     speeds: [0.25, 0.5, 1, 2],
     showStages: true,
     showEndButton: false,
@@ -1029,22 +1279,23 @@ async function bootstrap() {
     },
   });
 
-  // Subscribe SpacetimeClock to sync entire 3D + HUD scene purely from `t`
+  // Single on-demand clock subscription (NO duplicate rAF, NO redundant renderNow during idle!)
   clock.onTick((st) => {
+    if (clock.playing && userEpisodeOverride !== null) {
+      userEpisodeOverride = null;
+    }
     syncAll(st.t);
-    stage.renderNow();
+    stage.requestRender();
   });
   clock.onSeek((st) => {
     syncAll(st.t);
-    stage.renderNow();
+    stage.requestRender();
   });
 
   // Wire UI Controls
   const togglePaintMode = () => {
     sound.click();
-    brushActive = !brushActive;
-    brush.setActive(brushActive);
-    syncAll(clock.t);
+    brush.setActive(!brushActive);
   };
   $('btn-paint-cliff').onclick = togglePaintMode;
   $('mob-paint').onclick = togglePaintMode;
@@ -1052,59 +1303,59 @@ async function bootstrap() {
   $('btn-reset-cliff').onclick = () => {
     sound.click();
     engine.resetCliff();
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
 
   $('eps-dec').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ epsilon: Math.max(0, +(engine.epsilon - 0.05).toFixed(2)), captureGhost: true });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
   $('eps-inc').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ epsilon: Math.min(0.3, +(engine.epsilon + 0.05).toFixed(2)), captureGhost: true });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
   $('alpha-dec').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ alpha: Math.max(0.1, +(engine.alpha - 0.1).toFixed(2)) });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
   $('alpha-inc').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ alpha: Math.min(0.9, +(engine.alpha + 0.1).toFixed(2)) });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
   $('n-dec').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ nStep: Math.max(1, engine.nStep - 1) });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
   $('n-inc').onclick = () => {
     sound.click();
     clock.pause();
     engine.setParams({ nStep: Math.min(6, engine.nStep + 1) });
-    syncAll(clock.t);
-    stage.renderNow();
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   };
 
   $('unified-tabs').querySelectorAll('.unified-tab').forEach((btn) => {
     btn.onclick = () => {
       sound.click();
       unifiedMethod = btn.dataset.method || 'qlearn';
-      syncAll(clock.t);
-      stage.renderNow();
+      syncAll(clock.t, { skipCamera: true });
+      stage.requestRender();
     };
   });
 
@@ -1119,15 +1370,34 @@ async function bootstrap() {
     $('view-top').setAttribute('aria-pressed', String(top));
   };
   $('view-reset').onclick = () => {
+    stage.unlockUserCamera();
     const beat = clock.getBeatAt(clock.t);
-    const cam = RL_BEATS[beat.index]?.camera || RL_BEATS[0].camera;
-    stage.flyTo(cam, 380);
+    const cam = getAdaptedCamera(RL_BEATS[beat.index]?.camera || RL_BEATS[0].camera);
+    stage.flyTo(cam, 380, { lockUser: false });
     $('view-top').setAttribute('aria-pressed', 'false');
   };
 
-  $('mob-prev').onclick = () => clock.prevBeat();
+  $('mob-prev').onclick = () => {
+    stage.unlockUserCamera();
+    clock.prevBeat();
+  };
   $('mob-play').onclick = () => clock.toggle();
-  $('mob-next').onclick = () => clock.nextBeat();
+  $('mob-next').onclick = () => {
+    stage.unlockUserCamera();
+    clock.nextBeat();
+  };
+
+  // Clear hover tooltip cleanly when pointer leaves canvas
+  $('stage-canvas').addEventListener('pointerleave', () => {
+    hideTooltip();
+    stage.clearHighlightRing();
+  });
+
+  // Re-adapt mobile/desktop camera framing & code slate on viewport resize
+  window.addEventListener('resize', () => {
+    syncAll(clock.t, { skipCamera: stage.isUserCameraLocked() });
+    stage.requestRender();
+  });
 
   mountLangSwitch($('lang-slot'), i18n, [
     { code: 'zh', label: '中文' },
@@ -1138,37 +1408,16 @@ async function bootstrap() {
     placeholder: i18n.t('searchPh'),
     items: RL_BEATS.map((b) => ({
       id: b.id,
-      title: b.title.zh,
-      subtitle: b.hook.zh,
+      title: b.title[i18n.getLang()] || b.title.zh,
+      subtitle: b.hook[i18n.getLang()] || b.hook.zh,
       keywords: [b.id, b.shortTitle.zh, b.shortTitle.en],
     })),
     onSelect: (item) => {
+      stage.unlockUserCamera();
       clock.jumpToBeat(item.id, { play: false, offset: 1.5 });
     },
   });
   $('btn-palette').onclick = () => palette.open();
-
-  i18n.subscribe((lang) => {
-    engine.setParams({ lang });
-    clock.setTimeline({ duration: TOTAL_DURATION, beats: buildClockBeats(lang) });
-    timelineBar.setLabels({
-      prev: i18n.t('prev'),
-      play: i18n.t('play'),
-      pause: i18n.t('pause'),
-      next: i18n.t('next'),
-    });
-    palette.setPlaceholder(i18n.t('searchPh'));
-    palette.setItems(
-      RL_BEATS.map((b) => ({
-        id: b.id,
-        title: b.title[lang] || b.title.zh,
-        subtitle: b.hook[lang] || b.hook.zh,
-        keywords: [b.id, b.shortTitle.zh, b.shortTitle.en],
-      }))
-    );
-    syncAll(clock.t);
-    stage.renderNow();
-  });
 
   // 10. Expose unified Simulify v2 contract BEFORE mounting Export Button
   const getCaptionState = () => {
@@ -1210,32 +1459,57 @@ async function bootstrap() {
     getCaptionState,
     setParams: (patch) => {
       const res = engine.setParams(patch);
-      syncAll(clock.t);
-      stage.renderNow();
+      syncAll(clock.t, { skipCamera: true });
+      stage.requestRender();
       return res;
     },
     falsify: () => engine.runFalsificationSuite(),
   });
 
-  mountExportButton($('export-btn-slot'), {
+  const exportBtn = mountExportButton($('export-btn-slot'), {
     filenamePrefix: 'simulify-rl-td-4d',
     lang: i18n.getLang(),
+    i18n,
+  });
+
+  // Full bilingual EN/ZH synchronization (timeline beats + stage pills + export popover + palette + 3D plaques!)
+  i18n.subscribe((lang) => {
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+    engine.setParams({ lang });
+    clock.setTimeline({ duration: TOTAL_DURATION, beats: buildClockBeats(lang) });
+    timelineBar.setLang(lang, {
+      prev: i18n.t('prev'),
+      play: i18n.t('play'),
+      pause: i18n.t('pause'),
+      next: i18n.t('next'),
+    });
+    timelineBar.setStageLabels(RL_BEATS.map((b) => b.shortTitle[lang] || b.shortTitle.zh));
+    exportBtn.setLang(lang);
+    palette.setPlaceholder(i18n.t('searchPh'));
+    palette.setItems(
+      RL_BEATS.map((b) => ({
+        id: b.id,
+        title: b.title[lang] || b.title.zh,
+        subtitle: b.hook[lang] || b.hook.zh,
+        keywords: [b.id, b.shortTitle.zh, b.shortTitle.en],
+      }))
+    );
+    syncAll(clock.t, { skipCamera: true });
+    stage.requestRender();
   });
 
   initToolbars();
 
-  // 11. Position timeline deterministically from URL or start sparse at t = 0 (NEVER showEnd on load!)
+  // 11. Position timeline deterministically from URL or start sparse at t = 0
   const applied = applyUrlState(clock, location.search);
   const hasExplicitUrlPos = Boolean(
     applied && (applied.stage !== null || applied.step !== null || applied.end || applied.paused || applied.t !== null)
   );
 
   if (urlState.thumb && !hasExplicitUrlPos) {
-    // Rich hero frame for automated thumbnail baking (?thumb=1)
     clock.pause();
     clock.seek(35.0);
   } else if (!hasExplicitUrlPos) {
-    // TRUE 4D Progressive Opening: start cleanly & sparsely at t = 0!
     clock.seek(0);
     if (!stage.reducedMotion && !urlState.exportMode) {
       clock.play();
