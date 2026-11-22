@@ -436,10 +436,42 @@ export function createFrameCompositor({
   onNotice = null,
 }) {
   const rootEl = targets.rootEl || document.querySelector('.artboard-shell') || document.body;
-  const stageCanvas = targets.stageCanvas || document.querySelector('#stage-canvas, canvas.stage-canvas');
+  const stage = targets.stage || globalThis.__simulify?.stage?.stage || globalThis.__simulify?.stage || null;
+  const stageCanvas = targets.stageCanvas || stage?.canvas || document.querySelector('#stage-canvas, canvas.stage-canvas');
   const stageSvg = targets.stageSvg || (!stageCanvas ? document.querySelector('.stage-2d-svg') : null);
   const w = Math.max(2, Math.round(width));
   const h = Math.max(2, Math.round(height));
+
+  // Flush any pending 3D HTML-in-Canvas paints (or HiDPI fallback textures) before sampling stageCanvas
+  const flushStageHtmlSurfaces = async () => {
+    if (stage?.htmlSurfaces?.flushPaint) {
+      await stage.htmlSurfaces.flushPaint();
+    } else if (stage?.htmlSurfaces?.syncPaint) {
+      stage.htmlSurfaces.syncPaint(null);
+    }
+  };
+
+  // Render stage deterministically: on WebGPU await renderNowAsync() so init + HIC paints finish cleanly
+  const renderStageAsync = async () => {
+    await flushStageHtmlSurfaces();
+    if (typeof targets.renderNowAsync === 'function') {
+      await targets.renderNowAsync();
+    } else if (stage && stage.backendKind === 'webgpu' && typeof stage.renderNowAsync === 'function') {
+      await stage.renderNowAsync();
+    } else if (typeof targets.renderNow === 'function') {
+      await targets.renderNow();
+    } else if (stage && typeof stage.renderNow === 'function') {
+      stage.renderNow();
+    }
+  };
+
+  const renderStageSync = () => {
+    if (typeof targets.renderNow === 'function') {
+      targets.renderNow();
+    } else if (stage && typeof stage.renderNow === 'function') {
+      stage.renderNow();
+    }
+  };
 
   // Choose Path A (HTML-in-Canvas) only when supported AND DOM overlays are actually needed (`caption` or `hud`)
   const hicAvailable = supportsHtmlInCanvasCompositor();
@@ -471,7 +503,7 @@ export function createFrameCompositor({
 
     let fitBox = null;
     if (stageCanvas) {
-      targets.renderNow?.();
+      await renderStageAsync();
       fitBox = drawFittedImage(
         fallbackCtx,
         stageCanvas,
@@ -550,7 +582,13 @@ export function createFrameCompositor({
   for (const el of candidateOverlays) {
     if (!el || !(el instanceof Element) || seen.has(el)) continue;
     if (el === stageCanvas || (stageCanvas && stageCanvas.contains(el))) continue;
-    if (el.getAttribute('data-export-role') === 'chrome' || el.classList.contains('export-popover')) continue;
+    if (
+      el.getAttribute('data-export-role') === 'chrome' ||
+      el.classList.contains('export-popover') ||
+      el.classList.contains('simulify-html-fallback')
+    ) {
+      continue;
+    }
     // Skip nested descendants if an ancestor is already being moved
     let ancestorMoved = false;
     for (const prev of seen) {
@@ -635,6 +673,11 @@ export function createFrameCompositor({
       }
       const pal = readThemePalette(rootEl);
 
+      // Flush stage's own 3D HTML-in-Canvas surfaces and await WebGPU init before compositing
+      if (stageCanvas) {
+        await renderStageAsync();
+      }
+
       try {
         await new Promise((resolve, reject) => {
           let settled = false;
@@ -653,7 +696,7 @@ export function createFrameCompositor({
               compCtx.reset();
               drawStudioBackdrop(compCtx, w, h, pal);
               if (stageCanvas) {
-                targets.renderNow?.();
+                renderStageSync();
                 drawFittedImage(
                   compCtx,
                   stageCanvas,
