@@ -1,9 +1,9 @@
-import { CalloutLayer } from '../../kit/callout-layer.js';
-import { ChartCard } from '../../kit/chart-card.js';
-import { LinkBus } from '../../kit/link-bus.js';
-import { LiveMathsPanel } from '../../kit/live-maths.js';
-import { FloatingPopups } from '../../kit/popups.js';
-import { TactileSound } from '../../kit/sound.js';
+import { CalloutLayer } from '../../../kit/callout-layer.js';
+import { ChartCard } from '../../../kit/chart-card.js';
+import { LinkBus } from '../../../kit/link-bus.js';
+import { LiveMathsPanel } from '../../../kit/live-maths.js';
+import { FloatingPopups } from '../../../kit/popups.js';
+import { TactileSound } from '../../../kit/sound.js';
 import {
   applyUrlState,
   easeLinear,
@@ -11,12 +11,12 @@ import {
   mountTimelineBar,
   parseUrlState,
   TimelineDirector,
-} from '../../kit/timeline-director.js';
-import { initToolbars } from '../../kit/toolbar-a11y.js';
-import { mountLangSwitch, mountMasteryBar } from '../../shell/app-shell.js';
-import { CommandPalette } from '../../shell/command-palette.js';
-import { createI18n } from '../../shell/i18n.js';
-import { createLocalStorage, MasteryStore } from '../../shell/storage-adapter.js';
+} from '../../../kit/timeline-director.js';
+import { initToolbars } from '../../../kit/toolbar-a11y.js';
+import { mountLangSwitch, mountMasteryBar } from '../../../shell/app-shell.js';
+import { CommandPalette } from '../../../shell/command-palette.js';
+import { createI18n } from '../../../shell/i18n.js';
+import { createLocalStorage, MasteryStore } from '../../../shell/storage-adapter.js';
 import { PROB_ACTS, ProbBenchEngine } from './prob-engine.js';
 import { ACT_CAMERAS, ProbStage } from './prob-stage.js';
 

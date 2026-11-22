@@ -1,19 +1,13 @@
 [
   {
-    "id": "prob-stat-ch5-bench",
-    "url": "examples/prob-stat-ch5-bench/index.html?stage=act-1&end&thumb=1",
-    "out": "examples/thumbs/prob-stat-ch5-bench.png",
-    "width": 960,
-    "height": 600,
-    "waitMs": 550
-  },
-  {
     "id": "rl-td-bench",
-    "url": "examples/rl-td-bench/index.html?stage=act-4&end&thumb=1",
+    "url": "examples/rl-td-bench/index.html?t=34&paused",
     "out": "examples/thumbs/rl-td-bench.png",
     "width": 960,
     "height": 600,
-    "waitMs": 550
+    "waitMs": 550,
+    "t": 34,
+    "exportMode": "stage"
   },
   {
     "id": "cache-bench",

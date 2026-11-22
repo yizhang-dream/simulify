@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { IsometricStage } from '../../kit/stage-3d.js';
+import { IsometricStage } from '../../../kit/stage-3d.js';
 import {
   ArrivalRail,
   BarField,
