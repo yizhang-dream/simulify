@@ -388,16 +388,24 @@ export class SpacetimeClock {
 
   /**
    * Continuous reversible global seek to any time `t` in [0, duration].
+   * Fires strictly ONE handler channel (`onSeek` when registered, otherwise `onTick`
+   * fallback) so consumers registering both `onTick` and `onSeek` never run 2× per seek.
    */
-  seek(t, { silent = false } = {}) {
+  seek(t, { silent = false, notifyHandlers = true, emitTick = false } = {}) {
     const raw = Number(t);
     const next = Number.isFinite(raw) ? Math.max(0, Math.min(this.duration, raw)) : 0;
     this.t = next;
     this.complete = !this.loop && this.t >= this.duration - 1e-6;
     const snap = this.getState();
     if (!silent) {
-      this.#notifySeek(snap);
-      this.#notifyTick(snap);
+      if (notifyHandlers) {
+        if (this._seekSubs.size > 0) {
+          this.#notifySeek(snap);
+          if (emitTick) this.#notifyTick(snap);
+        } else {
+          this.#notifyTick(snap);
+        }
+      }
       this.#notifyState(snap);
     }
     return snap;

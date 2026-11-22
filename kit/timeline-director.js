@@ -742,11 +742,43 @@ function isPhaseScrubber(ctrl) {
   return Boolean(ctrl && typeof ctrl.scrub === 'function' && typeof ctrl.jumpToSteady === 'function');
 }
 
+const TIMELINE_I18N = {
+  zh: {
+    prev: '上一步',
+    play: '播放',
+    pause: '暂停',
+    next: '下一步',
+    end: '直达终态',
+    regionLabel: '分幕时间轴控制',
+    stagesLabel: '章节分幕',
+    scrubLabel: '时间轴进度',
+    speedLabel: '播放倍速',
+    stageFallback: (i) => `第 ${i + 1} 幕`,
+  },
+  en: {
+    prev: 'Prev',
+    play: 'Play',
+    pause: 'Pause',
+    next: 'Next',
+    end: 'End',
+    regionLabel: 'Timeline controls',
+    stagesLabel: 'Chapters',
+    scrubLabel: 'Timeline scrub',
+    speedLabel: 'Playback speed',
+    stageFallback: (i) => `Act ${i + 1}`,
+  },
+};
+
+function resolveTimelineLocale(lang) {
+  const code = String(lang || 'zh').toLowerCase();
+  return code.startsWith('en') ? TIMELINE_I18N.en : TIMELINE_I18N.zh;
+}
+
 /**
  * Mount a standard accessible chapter/4D timeline control dock bound to either
  * `TimelineDirector` or `SpacetimeClock`. Always provides an interactive pointer-drag
  * scrubber with beat markers, speed dilation (`0.25x / 0.5x / 1x / 2x`), play/pause,
- * and act/beat jump pills.
+ * act/beat jump pills, and live runtime i18n (`setStageLabels` / `setLang`).
  *
  * @param {HTMLElement} containerEl
  * @param {TimelineDirector | import('./spacetime.js').SpacetimeClock} controller
@@ -756,7 +788,9 @@ function isPhaseScrubber(ctrl) {
  *   showEndButton?: boolean,
  *   globalScrub?: boolean,
  *   showBeatMarkers?: boolean,
+ *   lang?: string,
  *   labels?: Record<string, string>,
+ *   stageLabels?: string[] | Record<string, string>,
  * }} [opts]
  */
 export function mountTimelineBar(
@@ -768,7 +802,9 @@ export function mountTimelineBar(
     showEndButton = undefined,
     globalScrub = undefined,
     showBeatMarkers = true,
+    lang = 'zh',
     labels = {},
+    stageLabels = null,
   } = {}
 ) {
   if (!containerEl || !controller) {
@@ -779,49 +815,87 @@ export function mountTimelineBar(
   const useGlobalScrub = globalScrub !== undefined ? Boolean(globalScrub) : isClock;
   const displayEndBtn = showEndButton !== undefined ? Boolean(showEndButton) : !isClock;
 
+  let currentLang = lang || 'zh';
+  let localeDefaults = resolveTimelineLocale(currentLang);
   let copy = {
-    prev: '上一步',
-    play: '播放',
-    pause: '暂停',
-    next: '下一步',
-    end: '直达终态',
+    ...localeDefaults,
     ...labels,
   };
+  let customStageLabels = stageLabels ?? labels.stageLabels ?? labels.stages ?? null;
 
   const root = document.createElement('div');
   root.className = 'timeline-dock';
   root.setAttribute('role', 'region');
-  root.setAttribute('aria-label', '分幕时间轴控制');
+  root.setAttribute('aria-label', copy.regionLabel);
 
-  const timelineInfo = typeof controller.getTimelineInfo === 'function'
-    ? controller.getTimelineInfo()
-    : { stages: [], duration: 0 };
-  const stageList = isClock ? (controller.acts || timelineInfo.stages || []) : (controller.stages || []);
+  const getStageList = () => {
+    const info = typeof controller.getTimelineInfo === 'function'
+      ? controller.getTimelineInfo()
+      : { stages: [], duration: 0 };
+    return isClock ? (controller.acts || info.stages || []) : (controller.stages || []);
+  };
 
+  const resolveStageLabel = (stage, idx) => {
+    if (Array.isArray(customStageLabels) && typeof customStageLabels[idx] === 'string') {
+      return customStageLabels[idx];
+    }
+    if (customStageLabels && typeof customStageLabels === 'object' && !Array.isArray(customStageLabels)) {
+      if (stage?.id && typeof customStageLabels[stage.id] === 'string') {
+        return customStageLabels[stage.id];
+      }
+      if (typeof customStageLabels[idx] === 'string') {
+        return customStageLabels[idx];
+      }
+    }
+    return stage?.title || localeDefaults.stageFallback(idx);
+  };
+
+  let stageRow = null;
   const stageBtns = [];
-  if (showStages && stageList.length > 0) {
-    const stageRow = document.createElement('div');
-    stageRow.className = 'timeline-stages';
-    stageRow.setAttribute('role', 'tablist');
-    stageRow.setAttribute('aria-label', '章节分幕');
 
-    stageList.forEach((stage, idx) => {
+  const buildStageButtons = () => {
+    if (!showStages) return;
+    const list = getStageList();
+    if (list.length === 0) return;
+
+    if (!stageRow) {
+      stageRow = document.createElement('div');
+      stageRow.className = 'timeline-stages';
+      stageRow.setAttribute('role', 'tablist');
+      stageRow.setAttribute('aria-label', copy.stagesLabel);
+      root.append(stageRow);
+    }
+
+    if (stageBtns.length === list.length) {
+      list.forEach((stage, idx) => {
+        stageBtns[idx].textContent = resolveStageLabel(stage, idx);
+      });
+      return;
+    }
+
+    stageBtns.length = 0;
+    const nextBtns = [];
+    list.forEach((stage, idx) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'timeline-stage-btn';
-      btn.textContent = stage.title || `第 ${idx + 1} 幕`;
+      btn.textContent = resolveStageLabel(stage, idx);
       btn.addEventListener('click', () => {
+        const freshList = getStageList();
+        const curStage = freshList[idx] || stage;
         if (isClock) {
-          controller.jumpToAct(stage.id ?? idx, { play: true });
+          controller.jumpToAct(curStage?.id ?? idx, { play: true });
         } else {
           controller.jumpStage(idx, { play: true, emitCamera: true });
         }
       });
-      stageRow.append(btn);
+      nextBtns.push(btn);
       stageBtns.push(btn);
     });
-    root.append(stageRow);
-  }
+    stageRow.replaceChildren(...nextBtns);
+  };
+
+  buildStageButtons();
 
   const controlsRow = document.createElement('div');
   controlsRow.className = 'timeline-controls';
@@ -963,7 +1037,19 @@ export function mountTimelineBar(
   root.append(controlsRow);
   containerEl.append(root);
 
+  const syncAriaAndLabels = () => {
+    root.setAttribute('aria-label', copy.regionLabel);
+    if (stageRow) stageRow.setAttribute('aria-label', copy.stagesLabel);
+    scrub.setAttribute('aria-label', copy.scrubLabel);
+    prevBtn.setAttribute('aria-label', copy.prev);
+    nextBtn.setAttribute('aria-label', copy.next);
+    playBtn.setAttribute('aria-label', `${copy.play}/${copy.pause}`);
+    speedBtn.setAttribute('aria-label', copy.speedLabel);
+    if (endBtn) endBtn.setAttribute('aria-label', copy.end);
+  };
+
   const renderState = (state) => {
+    buildStageButtons();
     stageBtns.forEach((btn, idx) => {
       if (idx === state.stageIndex) {
         btn.setAttribute('aria-current', 'step');
@@ -1007,15 +1093,46 @@ export function mountTimelineBar(
     speedBtn.textContent = `${state.speed}×`;
   };
 
+  syncAriaAndLabels();
   const unsub = controller.subscribe(renderState);
+
+  const setStageLabels = (nextStageLabels = null) => {
+    customStageLabels = nextStageLabels;
+    buildStageButtons();
+    renderBeatMarkers();
+    renderState(controller.getState());
+  };
+
+  const setLang = (nextLang, nextLabels = {}) => {
+    currentLang = nextLang || 'zh';
+    localeDefaults = resolveTimelineLocale(currentLang);
+    const { stages, stageLabels: nextStages, ...restLabels } = nextLabels || {};
+    copy = { ...localeDefaults, ...restLabels };
+    if (nextStages !== undefined || stages !== undefined) {
+      customStageLabels = nextStages ?? stages;
+    }
+    syncAriaAndLabels();
+    buildStageButtons();
+    renderBeatMarkers();
+    renderState(controller.getState());
+  };
 
   return {
     root,
     scrub,
     unsub,
     refreshMarkers: renderBeatMarkers,
+    setStageLabels,
+    setLang,
     setLabels(nextLabels = {}) {
-      copy = { ...copy, ...nextLabels };
+      const { stages, stageLabels: nextStages, ...restLabels } = nextLabels || {};
+      copy = { ...copy, ...restLabels };
+      if (nextStages !== undefined || stages !== undefined) {
+        customStageLabels = nextStages ?? stages;
+      }
+      syncAriaAndLabels();
+      buildStageButtons();
+      renderBeatMarkers();
       renderState(controller.getState());
     },
     unmount() {
@@ -1192,35 +1309,40 @@ export function exposeTestHooks(controller, extra = {}) {
     return { mode: 'static', duration: 0, defaultFps: 60, stages: [] };
   };
 
-  const seek = (globalTimeSec) => {
+  const seek = (globalTimeSec, { forceCamera = true } = {}) => {
     const t = Math.max(0, Number(globalTimeSec) || 0);
+    const stage = resolveStage();
+    if (forceCamera) {
+      stage?.unlockUserCamera?.();
+    }
+
+    const hasExplicitSync = typeof extra.syncAll === 'function';
+    const prevEvalCount = choreographer ? (choreographer._evalCount ?? 0) : 0;
     let snap = null;
 
     if (isClock) {
-      snap = controller.seek(t);
+      // Suppress clock onSeek/onTick handlers when extra.syncAll will perform the single authoritative sync
+      snap = controller.seek(t, { notifyHandlers: !hasExplicitSync });
     } else if (isDirector) {
       snap = controller.seekGlobal(t, { emitCamera: true });
     } else if (isScrubber) {
       snap = controller.scrub(t);
     }
 
-    const stage = resolveStage();
-    if (choreographer) {
-      const choreoState = choreographer.evaluate(t, { apply: true, stage });
-      if (choreoState?.cameraPose && stage?.setCameraImmediate) {
-        stage.setCameraImmediate(choreoState.cameraPose);
-      }
-    }
-
     if (typeof extra.onSeek === 'function') {
       extra.onSeek(t, snap);
     }
-    if (typeof extra.syncAll === 'function') {
+    if (hasExplicitSync) {
       extra.syncAll(t);
     }
 
+    const evalCountAfter = choreographer ? (choreographer._evalCount ?? 0) : 0;
+    if (choreographer && evalCountAfter === prevEvalCount) {
+      choreographer.evaluate(t, { apply: true, stage, forceCamera });
+    }
+
     const callouts = resolveCallouts();
-    if (callouts && typeof callouts.update === 'function') {
+    if (!hasExplicitSync && callouts && typeof callouts.update === 'function') {
       callouts.update();
     }
     if (stage && typeof stage.renderNow === 'function') {
@@ -1247,6 +1369,7 @@ export function exposeTestHooks(controller, extra = {}) {
 
     controller?.pause?.();
     controller?.setManualMode?.(true);
+    stage?.unlockUserCamera?.();
     stage?.setManualMode?.(true);
 
     if (muteAudio && sound?.setMuted) {
@@ -1377,6 +1500,69 @@ export function exposeTestHooks(controller, extra = {}) {
     return null;
   };
 
+  const getGeometryAudit = () => {
+    if (typeof extra.getGeometryAudit === 'function') {
+      return extra.getGeometryAudit();
+    }
+    const stage = resolveStage();
+    return stage?.getGeometryAudit?.() ?? null;
+  };
+
+  const getFontAudit = () => {
+    if (typeof extra.getFontAudit === 'function') {
+      return extra.getFontAudit();
+    }
+    const hasFonts =
+      typeof document !== 'undefined' &&
+      document.fonts &&
+      typeof document.fonts[Symbol.iterator] === 'function';
+    if (!hasFonts) {
+      return {
+        supported: false,
+        status: 'unavailable',
+        totalCount: 0,
+        loadedCount: 0,
+        failedCount: 0,
+        families: [],
+        loadedFamilies: [],
+        faces: [],
+      };
+    }
+    const allFamilies = new Set();
+    const loadedFamilies = new Set();
+    const faces = [];
+    let totalCount = 0;
+    let loadedCount = 0;
+    let failedCount = 0;
+    for (const face of document.fonts) {
+      totalCount += 1;
+      const family = String(face.family || '').replace(/^["']|["']$/g, '');
+      if (family) allFamilies.add(family);
+      if (face.status === 'loaded') {
+        loadedCount += 1;
+        if (family) loadedFamilies.add(family);
+      } else if (face.status === 'error') {
+        failedCount += 1;
+      }
+      faces.push({
+        family,
+        weight: String(face.weight ?? 'normal'),
+        style: String(face.style ?? 'normal'),
+        status: String(face.status ?? 'unloaded'),
+      });
+    }
+    return {
+      supported: true,
+      status: String(document.fonts.status || 'loaded'),
+      totalCount,
+      loadedCount,
+      failedCount,
+      families: Array.from(allFamilies),
+      loadedFamilies: Array.from(loadedFamilies),
+      faces,
+    };
+  };
+
   const setParams = typeof extra.setParams === 'function'
     ? extra.setParams
     : typeof extra.engine?.setParams === 'function'
@@ -1409,6 +1595,8 @@ export function exposeTestHooks(controller, extra = {}) {
     getCaptionState,
     getActiveActorCount,
     getMotionMagnitude,
+    getGeometryAudit,
+    getFontAudit,
     ...(setParams ? { setParams } : {}),
     ...(setLang ? { setLang } : {}),
   };
