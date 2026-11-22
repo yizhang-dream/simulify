@@ -45,26 +45,24 @@
 
 ---
 
-## 3. 离线四层字体与扩展 KaTeX 数学排版（铁律 2）
+## 3. Claude 风格离线衬线排印与完整 KaTeX 公式渲染（铁律 2）
 
-[`kit/primer-tokens.css`](../kit/primer-tokens.css) 零 CDN 加载 18 个随包 `.woff2` 字体：
-- `--font-display`：`Newsreader` + `Simulify Display SC`（标题、分幕 Banner、阅读列头）
-- `--font-sans`：`Inter` + `Simulify Sans SC`（正文、导语、UI 标签）
-- `--font-math` / `--font-math-italic`：`KaTeX_Main`, `KaTeX_Math`, `KaTeX_Size1`, `KaTeX_Size2`
-- `--font-mono`：`JetBrains Mono` + `Simulify Sans SC` 自动 CJK 回退（代码、`tabular-nums` 数值）
+[`kit/primer-tokens.css`](../kit/primer-tokens.css) 零 CDN 加载随包 `.woff2` 字体与完整离线 KaTeX 样式表（`@import "./fonts/fonts.css"; @import "./katex/katex.min.css";`），在全部 6 套皮肤中统一采用 **Claude 编辑衬线阅读节奏 + 清晰无衬线控件** 分层：
+- `--font-display` / `--font-prose` / `--font-serif`：`Newsreader`（Variable 200–800）+ `Simulify Serif SC`（`NotoSerifSC-Regular.woff2` 400 常规体 + `NotoSerifSC-Display.woff2` 650 标题体，保留 `Simulify Display SC` 兼容别名）——用于标题（`font-weight: 500–600`、`text-wrap: balance`）、Scrollytelling 长文（`16px / 1.74`、`max-width: 60ch`）、分幕导语、卡片叙述段落、引言块与推导注释。
+- `--font-sans`：`Inter` + `Simulify Sans SC`——用于按钮、工具栏、胶囊标签、滑块、表头、KPI 标签与坐标轴等高密交互控件。
+- `--font-math` / `--font-math-italic` + 完整 20 枚 `KaTeX_*.woff2`（AMS / Caligraphic / Fraktur / Main / Math / SansSerif / Script / Size1–4 / Typewriter）。
+- `--font-mono`：`JetBrains Mono` + `Simulify Sans SC` 自动 CJK 回退——用于代码、`tabular-nums` 实时读数与坐标。
 
-### 扩展数学 AST 构造器（[`kit/live-maths.js`](../kit/live-maths.js)）
-除基础 `mathVar`、`mathSub`、`mathSup`、`mathSubSup`、`mathFrac`、`mathOp`、`mathNum`、`mathText`、`mathGroup` 外，v2.2 补齐完整科学排版原语（自适应非缩放描边 SVG 符号，任意高度零锯齿）：
-- `mathSqrt(radicand, { index })`（根号 / $n$ 次方根）
-- `mathMatrix(rows, { fence: 'brackets'|'parens'|'bars'|'braces'|'none' })`（矩阵 / 列向量）
-- `mathCases(branches)`（分段函数大花括号）
-- `mathAccent(base, 'vec'|'hat'|'bar'|'dot'|'ddot'|'tilde')`（矢量箭头、帽子、均值横线、一/二阶时间导数点）
-- `mathFence(inner, { left, right })`（自适应伸缩括号）
-- `mathAlign(rows)`（多行等号/不等号对齐推导）
+### 完整离线 KaTeX 引擎与扩展 AST（[`kit/live-maths.js`](../kit/live-maths.js)）
+- **离线 KaTeX 运行时（零 CDN）**：内置 [`kit/katex/katex.mjs`](../kit/katex/katex.mjs) + [`kit/katex/katex.min.css`](../kit/katex/katex.min.css)（MIT，`scripts/setup_vendor.py` 自动同步）：
+  - `renderTex(tex, container?, { displayMode, vars, linkMap, linkBus, macros })`：离线渲染任意 LaTeX 公式；支持 `\htmlData{link-id=...}` 与 `\htmlClass` 受控白名单，公式内变量直接与 3D 部件双向悬停/点选联动。
+  - `substituteTexVars(tex, vars, { linkMap, formatNumber })`：将模板中的 `{{name}}` / `\var{name}` 替换为实时数值或带色调（`teal`/`amber`/`danger`/`navy`）与 `linkId` 的交互高亮项。
+  - `renderMathInElement(root, opts)`：自动扫描正文、长文阅读列、卡片与标注中的 `$...$`、`\(...\)`、`$$...$$`、`\[...\]` 并就地渲染，内置转义 `\$` 与货币金额（如 `$100`、`$5 and $10`）防误触保护，且自动跳过 `<code>`/`<pre>`/`[data-no-math]`。
+  - `LiveMathsPanel` 原生支持 `{ label, tex, displayMode, vars, linkMap }`，并与旧版 JS AST 构造器（`mathVar`、`mathFrac`、`mathSqrt`、`mathMatrix`、`mathCases`、`mathAccent`、`mathFence`、`mathAlign`）100% 向后兼容；[`CalloutLayer`](../kit/callout-layer.js) 标注文本亦自动支持行内 KaTeX。
 
 ### 清晰度与 ClearType 铁律
-- **禁 `backdrop-filter`**，**禁稳态 `translate3d` 与静态 `will-change: transform`**；所有可见 HUD / 按钮 / 标注 / SVG 刻度字号 `>= 11.5px`（门禁底线 `< 10.5px` 直接判败），正文 `>= 13.5px`，Scrollytelling 长文 `15.5px`。
-- 独立交付项目可用 `uv run --with fonttools --with brotli python scripts/setup_vendor.py <target_dir> --fonts-only --subset-cjk <project_dir>` 瘦身汉字子集。
+- **禁 `backdrop-filter`**，**禁稳态 `translate3d` 与静态 `will-change: transform`**；所有可见 HUD / 按钮 / 标注 / SVG 刻度字号 `>= 11.5px`（门禁底线 `< 10.5px` 直接判败），正文 `>= 13.5px`，Scrollytelling 衬线长文 `16px`。
+- 独立交付项目可用 `uv run --with fonttools --with brotli python scripts/setup_vendor.py <target_dir> --fonts-only --subset-cjk <project_dir>` 同时瘦身无衬线与衬线汉字子集并自动同步 `kit/katex/`。
 
 ---
 

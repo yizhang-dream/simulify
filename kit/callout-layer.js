@@ -1,4 +1,15 @@
+import { renderMathInElement } from './live-maths.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const TEX_HINT_RE = /\$|\\\(|\\\[/;
+
+function setCalloutText(el, text) {
+  const str = String(text ?? '');
+  el.textContent = str;
+  if (str && TEX_HINT_RE.test(str)) {
+    renderMathInElement(el);
+  }
+}
 
 const TONE_ACCENT = {
   teal: '#149694',
@@ -208,9 +219,9 @@ export class CalloutLayer {
       }
 
       const title = document.createElement('strong');
-      title.textContent = def.label;
+      setCalloutText(title, def.label);
       const sub = document.createElement('span');
-      sub.textContent = def.sublabel ?? '';
+      setCalloutText(sub, def.sublabel ?? '');
       tag.append(title, sub);
 
       this.svg.append(shadow, polyline, dot);
@@ -233,8 +244,8 @@ export class CalloutLayer {
     const item = this.items.get(id);
     if (!item) return;
     Object.assign(item, patch);
-    if (patch.label !== undefined) item.titleEl.textContent = patch.label;
-    if (patch.sublabel !== undefined) item.subEl.textContent = patch.sublabel;
+    if (patch.label !== undefined) setCalloutText(item.titleEl, patch.label);
+    if (patch.sublabel !== undefined) setCalloutText(item.subEl, patch.sublabel);
     if (patch.tone !== undefined) {
       if (patch.tone) {
         item.polyline.dataset.tone = patch.tone;

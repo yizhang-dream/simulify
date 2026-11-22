@@ -36,6 +36,10 @@ import {
   mathText,
   mathVar,
   normalizeUnicodeScripts,
+  parseMathSegments,
+  renderMathInElement,
+  renderTex,
+  substituteTexVars,
 } from '../kit/live-maths.js';
 import {
   ICONS,
@@ -2132,4 +2136,162 @@ withMockDocument(() => {
 });
 
 console.log('[OK] Simulify v2.2 upgrades verified (6 layouts, 6 themes, aligned lights/rim/cutaway-cap, micro-PBR/X-Ray, field-viz, matte focus, ClearType callouts, extended maths/charts & 4D stage-2d)');
+
+// ============================================================================
+// 17. Claude Editorial Serif Typography & Full Offline KaTeX Formula Rendering
+// ============================================================================
+{
+  // 17a. Verify offline KaTeX runtime & CSS + every font URL resolves on disk
+  const katexJsPath = path.join(ROOT, 'kit', 'katex', 'katex.mjs');
+  const katexCssPath = path.join(ROOT, 'kit', 'katex', 'katex.min.css');
+  const fontsCssPath = path.join(ROOT, 'kit', 'fonts', 'fonts.css');
+  const primerCssPath = path.join(ROOT, 'kit', 'primer-tokens.css');
+  const studioCssPath = path.join(ROOT, 'kit', 'theme-studio.css');
+
+  assert.ok(fs.existsSync(katexJsPath), 'kit/katex/katex.mjs must exist offline');
+  assert.ok(fs.existsSync(katexCssPath), 'kit/katex/katex.min.css must exist offline');
+  assert.ok(fs.existsSync(path.join(ROOT, 'kit', 'fonts', 'NotoSerifSC-Regular.woff2')), 'NotoSerifSC-Regular.woff2 must exist offline');
+
+  for (const cssFile of [fontsCssPath, katexCssPath]) {
+    const cssText = fs.readFileSync(cssFile, 'utf8');
+    const urlMatches = [...cssText.matchAll(/url\((['"]?)([^'")]+)\1\)/g)];
+    assert.ok(urlMatches.length > 0, `${path.basename(cssFile)} must declare local font URLs`);
+    for (const m of urlMatches) {
+      const target = path.resolve(path.dirname(cssFile), m[2]);
+      assert.ok(fs.existsSync(target), `Missing local font asset referenced in ${path.basename(cssFile)}: ${m[2]}`);
+    }
+  }
+
+  // 17b. Claude serif editorial typography tokens & still exactly 6 skins (no extra skins)
+  const primerCss = fs.readFileSync(primerCssPath, 'utf8');
+  const studioCss = fs.readFileSync(studioCssPath, 'utf8');
+  assert.ok(primerCss.includes('@import "./katex/katex.min.css";'), 'primer-tokens.css must import offline katex.min.css');
+  assert.ok(primerCss.includes('--font-prose:'), 'primer-tokens.css must define --font-prose Claude serif stack');
+  assert.ok(primerCss.includes('--font-serif:'), 'primer-tokens.css must define --font-serif stack');
+  assert.ok(!primerCss.includes('backdrop-filter'), 'primer-tokens.css must maintain zero backdrop-filter ClearType rule');
+  assert.equal(THEME_PRESETS.length, 6, 'Theme count must remain strictly 6 curated skins');
+  const studioThemeNames = new Set([...studioCss.matchAll(/:root\[data-theme="([^"]+)"\]/g)].map((m) => m[1]));
+  assert.equal(studioThemeNames.size, 5, 'theme-studio.css must declare exactly the 5 non-default skins (6 total with paper-ink)');
+
+  assert.ok(FONT_STACKS.prose.includes('Newsreader') && FONT_STACKS.prose.includes('Simulify Serif SC'));
+  assert.ok(FONT_STACKS.serif.includes('Simulify Serif SC'));
+  assert.ok(canvasFont('prose', 16, 400).includes('Simulify Serif SC'));
+
+  // 17c. Offline KaTeX renderTex + substituteTexVars
+  const rawHtml = renderTex(String.raw`\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}`, null, { displayMode: true });
+  assert.ok(rawHtml.includes('katex-display') && rawHtml.includes('katex-html'), 'renderTex must output real KaTeX HTML');
+
+  const subTex = substituteTexVars(
+    String.raw`V(s) \leftarrow V(s) + {{alpha}} \big(\var{reward} + \gamma V(s')\big)`,
+    {
+      alpha: { value: 0.25, tone: 'teal', emph: true, linkId: 'param-alpha' },
+      reward: 1.5,
+    },
+    { linkMap: { reward: 'term-r' } }
+  );
+  assert.ok(subTex.includes('\\htmlClass{lm-tex-val lm-tone-teal is-emph}'));
+  assert.ok(subTex.includes('\\htmlData{link-id=param-alpha}{0.25}'));
+  assert.ok(subTex.includes('\\htmlData{link-id=term-r}{1.5}'));
+
+  const subHtml = renderTex(subTex);
+  assert.ok(subHtml.includes('data-link-id="param-alpha"'), 'KaTeX trust filter must allow \\htmlData{link-id=...}');
+  assert.ok(subHtml.includes('lm-tone-teal'), 'KaTeX trust filter must allow \\htmlClass');
+
+  // 17d. parseMathSegments & renderMathInElement (delimiters, escapes, currency guard, code skip)
+  const parsed = parseMathSegments(String.raw`Price \$100 vs $5 and $10, inline $E = mc^2$, paren \(\alpha+\beta\), display $$a^2+b^2=c^2$$ and \[\nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0}\].`);
+  assert.equal(parsed.hasMath, true);
+  assert.equal(parsed.hasEscapedDollar, true);
+  const mathSegs = parsed.segments.filter((s) => s.type === 'math');
+  assert.equal(mathSegs.length, 4, 'Must parse exactly 4 math segments without currency false positives');
+  assert.deepEqual(
+    mathSegs.map((s) => [s.displayMode, s.value]),
+    [
+      [false, 'E = mc^2'],
+      [false, '\\alpha+\\beta'],
+      [true, 'a^2+b^2=c^2'],
+      [true, '\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}'],
+    ]
+  );
+
+  const currencyOnly = parseMathSegments('Budget is $100 to $250 for 2 items ($5.50 each).');
+  assert.equal(currencyOnly.hasMath, false, 'Plain currency amounts must NEVER trigger math rendering');
+
+  withMockDocument(() => {
+    // Minimal text-node helper compatible with renderMathInElement
+    const makeTextNode = (val, parent) => ({
+      nodeType: 3,
+      nodeValue: val,
+      textContent: val,
+      parentNode: parent,
+      replaceWith(...nodes) {
+        const idx = parent.childNodes.indexOf(this);
+        if (idx >= 0) {
+          const flat = [];
+          for (const n of nodes) {
+            if (n && n.nodeType === 11 && Array.isArray(n.childNodes)) flat.push(...n.childNodes);
+            else flat.push(n);
+          }
+          parent.childNodes.splice(idx, 1, ...flat);
+          parent.children = parent.childNodes.filter((c) => c && c.nodeType !== 3);
+        }
+      },
+    });
+    const prevCreateText = document.createTextNode;
+    const prevCreateFrag = document.createDocumentFragment;
+    document.createTextNode = (v) => makeTextNode(v, null);
+    document.createDocumentFragment = () => {
+      const frag = {
+        nodeType: 11,
+        childNodes: [],
+        append(...items) {
+          for (const it of items) this.childNodes.push(it);
+        },
+      };
+      return frag;
+    };
+    try {
+      const article = createMockElement('article');
+      const p = createMockElement('p');
+      p.childNodes = [makeTextNode('Energy $E = mc^2$ and cost $100.', p)];
+      const code = createMockElement('code');
+      code.childNodes = [makeTextNode('$not_math$', code)];
+      article.childNodes = [p, code];
+      article.children = [p, code];
+
+      const renderedCount = renderMathInElement(article);
+      assert.equal(renderedCount, 1, 'renderMathInElement must render $E=mc^2$ and skip <code> and $100');
+      assert.equal(code.childNodes[0].nodeValue, '$not_math$', '<code> elements must remain untouched');
+      const mathEl = p.childNodes.find((n) => n.className === 'lm-inline-math');
+      assert.ok(mathEl && mathEl.innerHTML.includes('katex'), 'Rendered inline holder must contain KaTeX markup');
+    } finally {
+      document.createTextNode = prevCreateText;
+      document.createDocumentFragment = prevCreateFrag;
+    }
+
+    // 17e. LiveMathsPanel native tex + vars + LinkBus alongside legacy AST
+    const host = createMockElement('div');
+    const bus = new LinkBus();
+    const panel = new LiveMathsPanel(host, { title: 'Hybrid KaTeX', linkBus: bus });
+    panel.update({
+      equations: [
+        {
+          label: 'KaTeX TD Target',
+          tex: String.raw`\delta_t = {{r}} + \gamma V(S_{t+1}) - V(S_t)`,
+          displayMode: true,
+          vars: { r: { value: '+1.0', tone: 'teal', linkId: 'reward-term' } },
+        },
+        {
+          label: 'Legacy AST Equation',
+          tokens: [mathVar('F'), '=', mathVar('m'), mathVar('a')],
+        },
+      ],
+    });
+    const katexLines = host.querySelectorAll((n) => n.classList?.contains('is-katex'));
+    assert.equal(katexLines.length, 1, 'LiveMathsPanel must render native tex equation with .is-katex');
+    assert.ok(katexLines[0].innerHTML.includes('katex-display') && katexLines[0].innerHTML.includes('data-link-id="reward-term"'));
+  });
+
+  console.log('[OK] Claude editorial serif typography & full offline KaTeX formula rendering verified (20 KaTeX woff2 + NotoSerifSC Regular/Display + renderTex/renderMathInElement/LiveMathsPanel)');
+}
+
 console.log('[OK] All Simulify v1 + v2.2 unit, typography, geo-sculpt, field-viz, layout, mathematical, muxer, syntax, and link-integrity tests PASSED');

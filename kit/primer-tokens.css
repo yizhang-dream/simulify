@@ -1,4 +1,5 @@
 @import "./fonts/fonts.css";
+@import "./katex/katex.min.css";
 
 :root {
   color-scheme: light;
@@ -41,8 +42,10 @@
   --stage-dot-pattern: radial-gradient(#cbbda8 1px, transparent 1px);
   --stage-dot-size: 22px 22px;
 
-  /* Four-tier offline typography */
-  --font-display: "Newsreader", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif;
+  /* Four-tier offline typography (Claude-inspired editorial serif prose + crisp sans UI) */
+  --font-display: "Newsreader", "Simulify Serif SC", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif;
+  --font-serif: "Newsreader", "Simulify Serif SC", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif;
+  --font-prose: var(--font-serif);
   --font-sans: "Inter", "Simulify Sans SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
   --font-math: "KaTeX_Main", "KaTeX_Size1", "KaTeX_Math", "Inter", "Simulify Sans SC", "Cambria Math", "STIX Two Math", serif;
   --font-math-italic: "KaTeX_Math", "KaTeX_Main", "Inter", "Simulify Sans SC", serif;
@@ -51,10 +54,10 @@
   /* Editorial typographic scale */
   --fs-hero: clamp(28px, 3.2vw, 42px);
   --fs-kpi: clamp(24px, 2.2vw, 32px);
-  --fs-act: clamp(18px, 1.5vw, 22px);
+  --fs-act: clamp(19px, 1.55vw, 23px);
   --fs-title: 17px;
   --fs-body: 14px;
-  --fs-prose: 15.5px;
+  --fs-prose: 16px;
   --fs-caption: 12px;
   --fs-floor: 11.5px;
 
@@ -95,18 +98,54 @@ pre,
   font-variant-numeric: tabular-nums;
 }
 
+h1,
+h2,
+h3,
+h4,
 .display-title,
 .act-title {
   font-family: var(--font-display);
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: -0.018em;
   color: var(--navy);
   text-rendering: optimizeLegibility;
+  text-wrap: balance;
+}
+
+.prose-body,
+.editorial-prose,
+.narrative-text,
+.caption-body {
+  font-family: var(--font-prose);
+  font-size: var(--fs-prose);
+  font-weight: 400;
+  line-height: 1.74;
+  letter-spacing: 0.004em;
+  font-optical-sizing: auto;
+  text-wrap: pretty;
+  color: var(--ink);
+}
+
+.prose-body p + p,
+.editorial-prose p + p {
+  margin-top: 0.9em;
+}
+
+blockquote {
+  margin: 0.85em 0;
+  padding: 2px 0 2px 14px;
+  border-inline-start: 2px solid var(--line);
+  font-family: var(--font-prose);
+  font-style: italic;
+  line-height: 1.68;
+  color: var(--muted);
 }
 
 button,
 input,
 select {
   font: inherit;
+  font-family: var(--font-sans);
   color: inherit;
 }
 
@@ -580,37 +619,42 @@ button {
 }
 
 .scrolly-header {
-  max-width: 58ch;
+  max-width: 60ch;
   padding-bottom: 24px;
   margin-bottom: 28px;
-  border-bottom: 1.5px solid var(--navy);
+  border-bottom: 1px solid var(--line);
 }
 
 .scrolly-header h1 {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-family: var(--font-display);
   font-size: var(--fs-hero);
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
   color: var(--navy);
 }
 
 .scrolly-header p {
   margin: 0;
+  font-family: var(--font-prose);
   font-size: var(--fs-prose);
-  line-height: 1.65;
+  font-weight: 400;
+  line-height: 1.72;
+  letter-spacing: 0.004em;
+  text-wrap: pretty;
   color: var(--muted);
 }
 
 .scrolly-step {
-  max-width: 58ch;
+  max-width: 60ch;
   min-block-size: 56vh;
-  padding: 20px 0 36px;
+  padding: 24px 0 40px;
   border-top: 1px solid var(--line-soft);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   opacity: 0.56;
   transition: opacity 220ms ease;
 }
@@ -623,8 +667,8 @@ button {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--teal);
 }
@@ -633,15 +677,21 @@ button {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--fs-act);
-  font-weight: 700;
-  line-height: 1.24;
+  font-weight: 500;
+  line-height: 1.26;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
   color: var(--navy);
 }
 
 .scrolly-step p {
   margin: 0;
+  font-family: var(--font-prose);
   font-size: var(--fs-prose);
-  line-height: 1.7;
+  font-weight: 400;
+  line-height: 1.74;
+  letter-spacing: 0.004em;
+  text-wrap: pretty;
   color: var(--ink);
 }
 
@@ -810,16 +860,22 @@ button {
 .beat-caption-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
   color: var(--navy);
-  line-height: 1.25;
+  line-height: 1.28;
 }
 
-.beat-caption-cue {
+.beat-caption-cue,
+.beat-caption-pill p {
   margin: 0;
-  font-size: 13.5px;
-  line-height: 1.48;
+  font-family: var(--font-prose);
+  font-size: 14.5px;
+  font-weight: 400;
+  line-height: 1.62;
+  letter-spacing: 0.004em;
+  text-wrap: pretty;
   color: var(--ink);
 }
 
@@ -833,14 +889,14 @@ button {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .act-index {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--teal);
@@ -850,16 +906,21 @@ button {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--fs-hero);
-  font-weight: 700;
-  line-height: 1.1;
+  font-weight: 500;
+  line-height: 1.12;
   letter-spacing: -0.025em;
+  text-wrap: balance;
   color: var(--navy);
 }
 
 .hero-act-banner p {
   margin: 4px 0 0;
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--font-prose);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.64;
+  letter-spacing: 0.004em;
+  text-wrap: pretty;
   color: var(--muted);
 }
 
@@ -867,9 +928,20 @@ button {
 .editorial-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 0;
+  gap: 9px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
+}
+
+.editorial-block p {
+  margin: 0;
+  font-family: var(--font-prose);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.68;
+  letter-spacing: 0.004em;
+  text-wrap: pretty;
+  color: var(--ink);
 }
 
 .editorial-block:first-child {
@@ -1177,13 +1249,13 @@ button {
   cursor: pointer;
 }
 
-.callout-tag strong {
+.callout-tag > strong {
   display: block;
   font-weight: 700;
   font-size: 12px;
 }
 
-.callout-tag span {
+.callout-tag > span {
   display: block;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -1196,7 +1268,7 @@ button {
   background: var(--teal-soft);
 }
 
-.callout-tag[data-tone="teal"] span {
+.callout-tag[data-tone="teal"] > span {
   color: #0e6b69;
 }
 
@@ -1205,7 +1277,7 @@ button {
   background: var(--amber-soft);
 }
 
-.callout-tag[data-tone="amber"] span {
+.callout-tag[data-tone="amber"] > span {
   color: #924810;
 }
 
@@ -2821,6 +2893,99 @@ input[type="range"] {
   justify-self: start;
 }
 
+/* Offline Full KaTeX Formula Rendering & Interactive LinkBus Tokens */
+.katex {
+  font-size: 1.06em;
+  color: inherit;
+  line-height: 1.25;
+}
+
+.katex-display {
+  margin: 0.68em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 2px;
+}
+
+.katex-display > .katex {
+  text-align: left;
+}
+
+.eq-line.is-katex {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.eq-line.is-katex .katex-display {
+  margin: 0.18em 0;
+}
+
+.lm-inline-math {
+  display: inline;
+  white-space: nowrap;
+}
+
+.lm-display-math {
+  display: block;
+  margin: 0.72em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.lm-tex-val {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 4px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.lm-tex-val.is-emph {
+  font-weight: 600;
+  background: rgba(24, 33, 61, 0.08);
+}
+
+.lm-tex-val.lm-tone-teal {
+  color: #0b6967;
+  background: var(--teal-soft);
+}
+
+.lm-tex-val.lm-tone-amber {
+  color: #924810;
+  background: var(--amber-soft);
+}
+
+.lm-tex-val.lm-tone-danger {
+  color: #8f2222;
+  background: var(--danger-soft);
+}
+
+.lm-tex-val.lm-tone-navy {
+  color: var(--navy);
+  background: var(--bg-deep);
+}
+
+.katex [data-link-id] {
+  cursor: pointer;
+  border-radius: 4px;
+  padding-inline: 2px;
+}
+
+.katex [data-link-id]:hover {
+  background: var(--teal-soft);
+}
+
+.callout-tag .katex {
+  font-size: 1em;
+}
+
+.live-table-note,
+.breakdown-text {
+  font-family: var(--font-prose);
+  letter-spacing: 0.003em;
+}
+
 .live-table-wrap {
   display: flex;
   flex-direction: column;
@@ -3048,10 +3213,12 @@ input[type="range"] {
 
 .qc-carries,
 .qc-hook {
-  padding: 5px 8px;
+  padding: 6px 9px;
   border-radius: 7px;
-  font-size: 12.5px;
-  line-height: 1.42;
+  font-family: var(--font-prose);
+  font-size: 13.5px;
+  line-height: 1.56;
+  letter-spacing: 0.003em;
 }
 
 .qc-carries {
@@ -3356,8 +3523,9 @@ html[data-export="caption"] [data-export-role="hud"] {
 
 .export-caption-text {
   margin: 0;
-  font-size: 13.5px;
-  line-height: 1.45;
+  font-family: var(--font-prose);
+  font-size: 14px;
+  line-height: 1.56;
   color: var(--ink);
 }
 

@@ -241,20 +241,23 @@
   color: var(--teal);
 }
 
-:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="teal"] span,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="teal"] > span,
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="teal"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lm-tex-val.lm-tone-teal,
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="teal"],
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .export-caption-badge {
   color: var(--teal);
 }
 
-:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="amber"] span,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .callout-tag[data-tone="amber"] > span,
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="amber"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lm-tex-val.lm-tone-amber,
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="amber"] {
   color: var(--amber);
 }
 
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term[data-tone="danger"],
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lm-tex-val.lm-tone-danger,
 :is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .breakdown-tag[data-tone="danger"] {
   color: var(--danger);
 }
@@ -264,7 +267,8 @@
   color: var(--teal);
 }
 
-:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term.is-emph {
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .eq-term.is-emph,
+:is(:root[data-theme="dark-studio"], :root[data-theme="blueprint"], :root[data-theme="obsidian-gallery"]) .lm-tex-val.is-emph {
   background: rgba(255, 255, 255, 0.12);
 }
 

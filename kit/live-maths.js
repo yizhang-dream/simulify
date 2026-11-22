@@ -18,6 +18,8 @@
  *   compatible with legacy `{ text, tone, emph, sub, linkId }` tokens.
  */
 
+import katex from './katex/katex.mjs';
+
 const UNICODE_SUB_MAP = Object.freeze({
   '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
   '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
@@ -700,6 +702,386 @@ function renderMathContent(parent, node, { inScript = false } = {}) {
   appendScripts(parent, node.sub, node.sup);
 }
 
+// ============================================================================
+// Full Offline KaTeX Formula Rendering & Auto-Delimiter Scanner
+// ============================================================================
+
+const SAFE_KATEX_TRUST_CMDS = new Set(['\\htmlData', '\\htmlClass', '\\htmlStyle']);
+const SKIP_MATH_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'PRE', 'CODE']);
+const TEX_DELIM_HINT_RE = /\$|\\\(|\\\[/;
+const CURRENCY_PROSE_RE = /^\d+(?:[.,]\d+)?\s+[A-Za-z\u4e00-\u9fff]/;
+const MATH_SIGNAL_RE = /[\\^_=<>+*/{}|]/;
+const VALID_TONES = new Set(['teal', 'amber', 'danger', 'navy', 'muted']);
+
+function sanitizeLinkId(id) {
+  return String(id ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9_.:-]/g, '-');
+}
+
+function formatTexScalar(value, formatNumber) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return typeof formatNumber === 'function' ? String(formatNumber(value)) : String(value);
+  }
+  return String(value ?? '');
+}
+
+/**
+ * Substitute live variables into a LaTeX template string (`{{name}}` or `\var{name}`).
+ * Scalar values are formatted inline; rich descriptors `{ value, tex, tone, emph, linkId }`
+ * are wrapped with KaTeX `\htmlClass` / `\htmlData{link-id=...}` for live tone styling
+ * and bidirectional `LinkBus` interactivity.
+ *
+ * @param {string} tex
+ * @param {Record<string, any>} [vars]
+ * @param {{ formatNumber?: (n: number) => string, linkMap?: Record<string, string> }} [opts]
+ * @returns {string}
+ */
+export function substituteTexVars(tex, vars = null, opts = {}) {
+  const source = String(tex ?? '');
+  if (!source || !vars || typeof vars !== 'object') return source;
+  const formatNumber = typeof opts?.formatNumber === 'function' ? opts.formatNumber : null;
+  const linkMap = opts?.linkMap && typeof opts.linkMap === 'object' ? opts.linkMap : null;
+
+  return source.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}|\\var\{([A-Za-z0-9_.-]+)\}/g, (full, g1, g2) => {
+    const key = g1 || g2;
+    if (!Object.prototype.hasOwnProperty.call(vars, key)) return full;
+    const entry = vars[key];
+    const mappedLink = linkMap?.[key] ?? null;
+
+    if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+      let inner = entry.tex !== undefined ? String(entry.tex) : formatTexScalar(entry.value, formatNumber);
+      const linkId = entry.linkId ?? mappedLink;
+      if (linkId) {
+        inner = `\\htmlData{link-id=${sanitizeLinkId(linkId)}}{${inner}}`;
+      }
+      const classes = ['lm-tex-val'];
+      if (entry.tone && VALID_TONES.has(entry.tone)) classes.push(`lm-tone-${entry.tone}`);
+      if (entry.emph) classes.push('is-emph');
+      if (classes.length > 1 || entry.emph || linkId) {
+        return `\\htmlClass{${classes.join(' ')}}{${inner}}`;
+      }
+      return inner;
+    }
+
+    let inner = formatTexScalar(entry, formatNumber);
+    if (mappedLink) {
+      inner = `\\htmlClass{lm-tex-val}{\\htmlData{link-id=${sanitizeLinkId(mappedLink)}}{${inner}}}`;
+    }
+    return inner;
+  });
+}
+
+function wireContainerLinks(container, linkBus) {
+  if (!linkBus || !container || typeof container.querySelectorAll !== 'function') return;
+  let linked = [];
+  try {
+    linked = container.querySelectorAll('[data-link-id]');
+  } catch {
+    return;
+  }
+  for (const el of linked) {
+    const id = el?.dataset?.linkId || el?.getAttribute?.('data-link-id');
+    if (!id || el.dataset?.lmLinkWired === 'true') continue;
+    if (el.dataset) el.dataset.lmLinkWired = 'true';
+    el.tabIndex = 0;
+    el.addEventListener('pointerenter', () => linkBus.hover?.(id, 'live-maths'));
+    el.addEventListener('pointerleave', () => {
+      if (linkBus.hoveredId === id) linkBus.clearHover?.('live-maths');
+    });
+    el.addEventListener('click', () => linkBus.select?.(id, 'live-maths'));
+  }
+}
+
+/**
+ * Render a LaTeX expression offline using bundled KaTeX (`kit/katex/katex.mjs`).
+ * When `container` is provided, renders into it and returns `container`;
+ * otherwise returns the rendered HTML string.
+ *
+ * @param {string} tex
+ * @param {HTMLElement | null} [container]
+ * @param {{
+ *   displayMode?: boolean,
+ *   throwOnError?: boolean,
+ *   strict?: boolean | string,
+ *   macros?: Record<string, string>,
+ *   vars?: Record<string, any> | null,
+ *   linkMap?: Record<string, string> | null,
+ *   formatNumber?: (n: number) => string,
+ *   linkBus?: import('./link-bus.js').LinkBus | null,
+ * }} [opts]
+ * @returns {HTMLElement | string}
+ */
+export function renderTex(tex, container = null, opts = {}) {
+  const resolved = opts?.vars ? substituteTexVars(tex, opts.vars, opts) : String(tex ?? '');
+  const katexOpts = {
+    displayMode: Boolean(opts?.displayMode),
+    throwOnError: opts?.throwOnError ?? false,
+    strict: opts?.strict ?? 'ignore',
+    trust: (ctx) => SAFE_KATEX_TRUST_CMDS.has(ctx?.command),
+  };
+  if (opts?.macros && typeof opts.macros === 'object') {
+    katexOpts.macros = opts.macros;
+  }
+
+  if (!container) {
+    return katex.renderToString(resolved, katexOpts);
+  }
+
+  try {
+    katex.render(resolved, container, katexOpts);
+  } catch {
+    container.innerHTML = katex.renderToString(resolved, katexOpts);
+  }
+  if (opts?.linkBus) {
+    wireContainerLinks(container, opts.linkBus);
+  }
+  return container;
+}
+
+function isEscapedAt(str, idx) {
+  let slashes = 0;
+  for (let i = idx - 1; i >= 0 && str[i] === '\\'; i -= 1) {
+    slashes += 1;
+  }
+  return slashes % 2 === 1;
+}
+
+/**
+ * Split plain text into prose and math delimiter segments (`$$...$$`, `\[...\]`, `$...$`, `\(...\)`).
+ * Safely respects escaped `\$` and ignores plain currency values like `$100` or `$5 and $10`.
+ *
+ * @param {string} text
+ * @returns {{ hasMath: boolean, hasEscapedDollar: boolean, segments: Array<{ type: 'text' | 'math', value: string, displayMode?: boolean }> }}
+ */
+export function parseMathSegments(text) {
+  const str = String(text ?? '');
+  const segments = [];
+  let hasMath = false;
+  let hasEscapedDollar = false;
+  let buf = '';
+  let i = 0;
+
+  const flushText = () => {
+    if (buf) {
+      segments.push({ type: 'text', value: buf });
+      buf = '';
+    }
+  };
+
+  while (i < str.length) {
+    const ch = str[i];
+
+    // Escaped dollar `\$` -> literal `$`
+    if (ch === '\\' && str[i + 1] === '$') {
+      buf += '$';
+      hasEscapedDollar = true;
+      i += 2;
+      continue;
+    }
+
+    // Display math: `\[ ... \]`
+    if (ch === '\\' && str[i + 1] === '[') {
+      let end = i + 2;
+      let found = -1;
+      while (end < str.length - 1) {
+        if (str[end] === '\\' && str[end + 1] === ']' && !isEscapedAt(str, end)) {
+          found = end;
+          break;
+        }
+        end += 1;
+      }
+      if (found > i + 2) {
+        const expr = str.slice(i + 2, found).trim();
+        if (expr) {
+          flushText();
+          segments.push({ type: 'math', value: expr, displayMode: true });
+          hasMath = true;
+          i = found + 2;
+          continue;
+        }
+      }
+    }
+
+    // Inline math: `\( ... \)`
+    if (ch === '\\' && str[i + 1] === '(') {
+      let end = i + 2;
+      let found = -1;
+      while (end < str.length - 1) {
+        if (str[end] === '\\' && str[end + 1] === ')' && !isEscapedAt(str, end)) {
+          found = end;
+          break;
+        }
+        end += 1;
+      }
+      if (found > i + 2) {
+        const expr = str.slice(i + 2, found).trim();
+        if (expr) {
+          flushText();
+          segments.push({ type: 'math', value: expr, displayMode: false });
+          hasMath = true;
+          i = found + 2;
+          continue;
+        }
+      }
+    }
+
+    // Display math: `$$ ... $$`
+    if (ch === '$' && str[i + 1] === '$') {
+      let end = i + 2;
+      let found = -1;
+      while (end < str.length - 1) {
+        if (str[end] === '$' && str[end + 1] === '$' && !isEscapedAt(str, end)) {
+          found = end;
+          break;
+        }
+        end += 1;
+      }
+      if (found > i + 2) {
+        const expr = str.slice(i + 2, found).trim();
+        if (expr) {
+          flushText();
+          segments.push({ type: 'math', value: expr, displayMode: true });
+          hasMath = true;
+          i = found + 2;
+          continue;
+        }
+      }
+    }
+
+    // Inline math: `$ ... $` (guarded against currency like `$100` or `$5 and $10`)
+    if (ch === '$' && str[i + 1] !== '$' && i + 1 < str.length && !/\s/.test(str[i + 1])) {
+      let end = i + 1;
+      let found = -1;
+      while (end < str.length) {
+        if (str[end] === '\n' && str[end + 1] === '\n') break;
+        if (str[end] === '$' && !isEscapedAt(str, end)) {
+          if (str[end + 1] !== '$' && !/\s/.test(str[end - 1])) {
+            found = end;
+          }
+          break;
+        }
+        end += 1;
+      }
+      if (found > i + 1) {
+        const inner = str.slice(i + 1, found);
+        const charAfter = str[found + 1] ?? '';
+        const isCurrencyBoundary = /[0-9]/.test(charAfter);
+        const isCurrencyProse = CURRENCY_PROSE_RE.test(inner) && !MATH_SIGNAL_RE.test(inner);
+        if (!isCurrencyBoundary && !isCurrencyProse) {
+          flushText();
+          segments.push({ type: 'math', value: inner, displayMode: false });
+          hasMath = true;
+          i = found + 1;
+          continue;
+        }
+      }
+    }
+
+    buf += ch;
+    i += 1;
+  }
+
+  flushText();
+  return { hasMath, hasEscapedDollar, segments };
+}
+
+function shouldSkipMathElement(el) {
+  if (!el) return true;
+  const tag = String(el.tagName || el.nodeName || '').toUpperCase();
+  if (SKIP_MATH_TAGS.has(tag)) return true;
+  if (el.dataset?.noMath !== undefined) return true;
+  if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-no-math')) return true;
+  const cls = String(el.className || '');
+  if (/\bkatex\b|\bkatex-display\b|\blm-inline-math\b|\blm-display-math\b/.test(cls)) return true;
+  return false;
+}
+
+function collectMathTextNodes(root, out = []) {
+  if (!root) return out;
+  const children = root.childNodes ? Array.from(root.childNodes) : [];
+  for (const child of children) {
+    const nodeType = child.nodeType ?? (typeof child.nodeValue === 'string' && !child.tagName ? 3 : 1);
+    if (nodeType === 3) {
+      const val = child.nodeValue ?? child.textContent ?? '';
+      if (val && TEX_DELIM_HINT_RE.test(val)) {
+        out.push(child);
+      }
+    } else if (nodeType === 1) {
+      if (!shouldSkipMathElement(child)) {
+        collectMathTextNodes(child, out);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Scan a DOM subtree and auto-render inline (`$...$`, `\(...\)`) and display
+ * (`$$...$$`, `\[...\]`) LaTeX formulas offline via bundled KaTeX.
+ * Skips `<script>`, `<style>`, `<pre>`, `<code>`, `<textarea>`, `.katex`, and `[data-no-math]`.
+ *
+ * @param {HTMLElement | null} root
+ * @param {{ macros?: Record<string, string>, linkBus?: import('./link-bus.js').LinkBus | null, throwOnError?: boolean }} [opts]
+ * @returns {number} Count of rendered mathematical expressions.
+ */
+export function renderMathInElement(root, opts = {}) {
+  if (!root || typeof document === 'undefined') return 0;
+  if (shouldSkipMathElement(root)) return 0;
+
+  const textNodes = collectMathTextNodes(root);
+  let count = 0;
+
+  for (const node of textNodes) {
+    const raw = node.nodeValue ?? node.textContent ?? '';
+    const { hasMath, hasEscapedDollar, segments } = parseMathSegments(raw);
+    if (!hasMath) {
+      if (hasEscapedDollar) {
+        const unescaped = segments.map((s) => s.value).join('');
+        if ('nodeValue' in node) node.nodeValue = unescaped;
+        else node.textContent = unescaped;
+      }
+      continue;
+    }
+
+    const parent = node.parentNode;
+    if (!parent) continue;
+
+    const frag =
+      typeof document.createDocumentFragment === 'function'
+        ? document.createDocumentFragment()
+        : null;
+    const replacements = [];
+
+    for (const seg of segments) {
+      if (seg.type === 'text') {
+        const tn =
+          typeof document.createTextNode === 'function'
+            ? document.createTextNode(seg.value)
+            : { nodeType: 3, nodeValue: seg.value, textContent: seg.value };
+        if (frag) frag.append(tn);
+        else replacements.push(tn);
+      } else {
+        const holder = document.createElement(seg.displayMode ? 'div' : 'span');
+        holder.className = seg.displayMode ? 'lm-display-math' : 'lm-inline-math';
+        renderTex(seg.value, holder, { ...opts, displayMode: Boolean(seg.displayMode) });
+        if (frag) frag.append(holder);
+        else replacements.push(holder);
+        count += 1;
+      }
+    }
+
+    if (typeof node.replaceWith === 'function') {
+      if (frag) node.replaceWith(frag);
+      else node.replaceWith(...replacements);
+    } else if (typeof parent.replaceChild === 'function' && frag) {
+      parent.replaceChild(frag, node);
+    }
+  }
+
+  return count;
+}
+
 export class LiveMathsPanel {
   /**
    * @param {HTMLElement | null} containerEl
@@ -747,7 +1129,7 @@ export class LiveMathsPanel {
 
     this.subtitleEl = document.createElement('span');
     this.subtitleEl.className = 'live-maths-subtitle';
-    this.subtitleEl.textContent = subtitle;
+    this.#setAutoMathText(this.subtitleEl, subtitle);
     this.subtitleEl.hidden = !subtitle;
 
     titleWrap.append(this.titleEl, this.subtitleEl);
@@ -824,7 +1206,7 @@ export class LiveMathsPanel {
    */
   update({ badge, subtitle, equations = [], table = null, breakdown = [] } = {}) {
     if (subtitle !== undefined) {
-      this.subtitleEl.textContent = subtitle;
+      this.#setAutoMathText(this.subtitleEl, subtitle);
       this.subtitleEl.hidden = !subtitle;
     }
     if (badge !== undefined) {
@@ -919,6 +1301,14 @@ export class LiveMathsPanel {
     }
   }
 
+  #setAutoMathText(el, text) {
+    const str = String(text ?? '');
+    el.textContent = str;
+    if (str && TEX_DELIM_HINT_RE.test(str)) {
+      renderMathInElement(el, { linkBus: this.linkBus });
+    }
+  }
+
   #buildEquationBlock(eq) {
     const block = document.createElement('div');
     block.className = 'eq-block';
@@ -926,26 +1316,51 @@ export class LiveMathsPanel {
     if (eq.label) {
       const label = document.createElement('div');
       label.className = 'eq-label';
-      label.textContent = eq.label;
+      this.#setAutoMathText(label, eq.label);
       block.append(label);
     }
 
     const line = document.createElement('div');
     line.className = 'eq-line';
-    for (const token of eq.tokens || []) {
-      const span = document.createElement('span');
-      span.className = 'eq-term';
-      if (token && typeof token === 'object') {
-        if (token.tone) span.dataset.tone = token.tone;
-        if (token.emph) span.classList.add('is-emph');
-        renderMathContent(span, token, { inScript: false });
-        if (token.linkId) {
-          this.#wireLinkTarget(span, token.linkId);
+    if (typeof eq.tex === 'string' && eq.tex.length > 0) {
+      line.classList.add('is-katex');
+      renderTex(eq.tex, line, {
+        displayMode: eq.displayMode ?? true,
+        vars: eq.vars ?? null,
+        linkMap: eq.linkMap ?? null,
+        macros: eq.macros,
+        formatNumber: eq.formatNumber,
+      });
+      if (typeof line.querySelectorAll === 'function') {
+        try {
+          const linkedNodes = line.querySelectorAll('[data-link-id]');
+          for (const node of linkedNodes) {
+            const lid = node?.dataset?.linkId || node?.getAttribute?.('data-link-id');
+            if (lid) this.#wireLinkTarget(node, lid);
+          }
+        } catch {
+          // Ignore non-CSS querySelectorAll mocks in headless Node tests
         }
-      } else {
-        renderMathContent(span, token, { inScript: false });
       }
-      line.append(span);
+      if (eq.linkId) {
+        this.#wireLinkTarget(line, eq.linkId);
+      }
+    } else {
+      for (const token of eq.tokens || []) {
+        const span = document.createElement('span');
+        span.className = 'eq-term';
+        if (token && typeof token === 'object') {
+          if (token.tone) span.dataset.tone = token.tone;
+          if (token.emph) span.classList.add('is-emph');
+          renderMathContent(span, token, { inScript: false });
+          if (token.linkId) {
+            this.#wireLinkTarget(span, token.linkId);
+          }
+        } else {
+          renderMathContent(span, token, { inScript: false });
+        }
+        line.append(span);
+      }
     }
     block.append(line);
     return block;
@@ -961,7 +1376,7 @@ export class LiveMathsPanel {
     if (table.caption) {
       const cap = document.createElement('caption');
       cap.className = 'live-table-caption';
-      cap.textContent = table.caption;
+      this.#setAutoMathText(cap, table.caption);
       tableEl.append(cap);
     }
 
@@ -1000,7 +1415,7 @@ export class LiveMathsPanel {
     if (table.note) {
       const note = document.createElement('div');
       note.className = 'live-table-note';
-      note.textContent = table.note;
+      this.#setAutoMathText(note, table.note);
       wrap.append(note);
     }
 
@@ -1022,7 +1437,7 @@ export class LiveMathsPanel {
 
     const text = document.createElement('span');
     text.className = 'breakdown-text';
-    text.textContent = String(item.text ?? '');
+    this.#setAutoMathText(text, item.text ?? '');
 
     li.append(tag, text);
     return li;

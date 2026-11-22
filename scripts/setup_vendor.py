@@ -1,14 +1,17 @@
-"""Extract offline Three.js ESM runtime (WebGPU + TSL + addons) and four-tier WOFF2 fonts into a Simulify project."""
+"""Install offline Three.js and KaTeX runtimes and four-tier WOFF2 fonts into a Simulify project."""
 import argparse
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+from os.path import relpath
 from pathlib import Path
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_FONTS_SRC = REPO_ROOT / "kit" / "fonts"
+KATEX_SRC = REPO_ROOT / "kit" / "katex"
 
 BASE_FILES = {
     "package/build/three.core.js": "three.core.js",
@@ -136,6 +139,27 @@ def sync_fonts(
     return dest_dir
 
 
+def sync_katex(target_dir: Path, *, fonts_subdir: str = "kit/fonts") -> Path:
+    """Copy the offline KaTeX ESM and CSS into <target>/kit/katex."""
+    target_dir = Path(target_dir).resolve()
+    dest_dir = (target_dir / "kit" / "katex").resolve()
+    if dest_dir == KATEX_SRC:
+        return dest_dir
+
+    fonts_dir = (target_dir / fonts_subdir).resolve()
+    relative_fonts = Path(relpath(fonts_dir, dest_dir)).as_posix()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(KATEX_SRC / "katex.mjs", dest_dir / "katex.mjs")
+    css_src = KATEX_SRC / "katex.min.css"
+    css_dest = dest_dir / css_src.name
+    if relative_fonts == "../fonts":
+        shutil.copy2(css_src, css_dest)
+    else:
+        css = css_src.read_text(encoding="utf-8")
+        css_dest.write_text(css.replace("url(../fonts/", f"url({quote(relative_fonts)}/"), encoding="utf-8")
+    return dest_dir
+
+
 def _find_system_font(candidates: list[str]) -> Path | None:
     search_roots = [
         Path(r"C:\Windows\Fonts"),
@@ -241,6 +265,11 @@ def subset_cjk_for_project(
         written.append(_build_one(resolved_sans, "NotoSansSC-Variable.woff2", {"wght": (400, 700)}))
     if resolved_serif:
         written.append(_build_one(resolved_serif, "NotoSerifSC-Display.woff2", {"wght": 650}))
+        with TTFont(resolved_serif, lazy=True) as serif:
+            regular_src = resolved_serif
+            if "fvar" not in serif and serif["OS/2"].usWeightClass != 400:
+                regular_src = DEFAULT_FONTS_SRC / "NotoSerifSC-Regular.woff2"
+        written.append(_build_one(regular_src, "NotoSerifSC-Regular.woff2", {"wght": 400}))
     return written
 
 
@@ -268,12 +297,13 @@ def main() -> None:
             "--fonts-only --subset-cjk my-explainer\n"
         ),
     )
-    parser.add_argument("target", type=Path, help="Destination project directory (receives vendor/three/ and kit/fonts/)")
+    parser.add_argument("target", type=Path, help="Destination project directory (receives vendor/three/, kit/fonts/, and kit/katex/)")
     parser.add_argument("--version", default="0.187.0", help="Official three npm version (default: 0.187.0)")
     parser.add_argument("--no-legacy", action="store_true", help="Omit legacy three.module.js WebGL-only bundle")
     parser.add_argument("--no-fx", action="store_true", help="Omit TSL post-processing display nodes (Bloom/DoF)")
     parser.add_argument("--no-fonts", action="store_true", help="Skip syncing offline kit/fonts/ WOFF2 assets")
-    parser.add_argument("--fonts-only", action="store_true", help="Only sync/subset offline fonts (skip npm pack three)")
+    parser.add_argument("--no-katex", action="store_true", help="Skip syncing offline KaTeX ESM and CSS")
+    parser.add_argument("--fonts-only", action="store_true", help="Sync/subset offline fonts and sync KaTeX (skip npm pack three)")
     parser.add_argument(
         "--fonts-dir",
         default="kit/fonts",
@@ -286,7 +316,8 @@ def main() -> None:
         metavar="PROJECT_DIR",
         help=(
             "Scan PROJECT_DIR for used CJK glyphs and rebuild ultra-compact offline "
-            "NotoSansSC-Variable.woff2 / NotoSerifSC-Display.woff2 subsets (requires fonttools + brotli)"
+            "NotoSansSC-Variable.woff2 / NotoSerifSC-Display.woff2 / NotoSerifSC-Regular.woff2 subsets "
+            "(requires fonttools + brotli)"
         ),
     )
     parser.add_argument("--cjk-sans-src", type=Path, default=None, help="Explicit NotoSansSC-VF.ttf path for --subset-cjk")
@@ -313,6 +344,10 @@ def main() -> None:
             )
             print(f"Rebuilt {len(rebuilt)} project-tailored CJK subset(s) from {args.subset_cjk}")
         _report_dir("fonts", fonts_dest)
+
+    if not args.no_katex:
+        katex_dest = sync_katex(args.target, fonts_subdir=args.fonts_dir)
+        _report_dir("KaTeX", katex_dest)
 
 
 if __name__ == "__main__":

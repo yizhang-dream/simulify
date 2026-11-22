@@ -8,7 +8,11 @@
 
 export const FONT_STACKS = Object.freeze({
   display:
-    '"Newsreader", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif',
+    '"Newsreader", "Simulify Serif SC", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif',
+  serif:
+    '"Newsreader", "Simulify Serif SC", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif',
+  prose:
+    '"Newsreader", "Simulify Serif SC", "Simulify Display SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", Georgia, serif',
   sans:
     '"Inter", "Simulify Sans SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif',
   math:
@@ -21,6 +25,8 @@ export const FONT_STACKS = Object.freeze({
 
 const ROLE_CSS_VAR = Object.freeze({
   display: '--font-display',
+  serif: '--font-serif',
+  prose: '--font-prose',
   sans: '--font-sans',
   math: '--font-math',
   mono: '--font-mono',
@@ -35,7 +41,12 @@ const PRELOAD_SPECIFIERS = Object.freeze([
   ['700 16px "Inter"', 'Aa01'],
   ['400 16px "Simulify Sans SC"', '中文字体'],
   ['600 16px "Simulify Sans SC"', '中文字体'],
+  ['400 16px "Newsreader"', 'Aa01'],
+  ['italic 400 16px "Newsreader"', 'Aa01'],
+  ['500 20px "Newsreader"', 'Simulify'],
   ['700 20px "Newsreader"', 'Simulify'],
+  ['400 16px "Simulify Serif SC"', '中文字体原理'],
+  ['600 20px "Simulify Serif SC"', '原理图解'],
   ['700 20px "Simulify Display SC"', '原理图解'],
   ['400 14px "JetBrains Mono"', '0123+-=αδ'],
   ['500 14px "JetBrains Mono"', '0123+-=αδ'],
@@ -59,7 +70,7 @@ function normalizeRole(role) {
 }
 
 function ensureCjkFallback(stack) {
-  if (/(Simulify\s+(Sans|Display)\s+SC|Noto\s+(Sans|Serif)\s+SC|Source\s+Han|HarmonyOS|MiSans|PingFang|YaHei)/i.test(stack)) {
+  if (/(Simulify\s+(Sans|Display|Serif)\s+SC|Noto\s+(Sans|Serif)\s+SC|Source\s+Han|HarmonyOS|MiSans|PingFang|YaHei)/i.test(stack)) {
     return stack;
   }
   return `${stack}, ${CJK_FALLBACK_SUFFIX}`;
