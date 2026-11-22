@@ -36,7 +36,7 @@ function lerpAngle(a, b, u) {
 function detectKind(target, explicitKind) {
   if (explicitKind) return explicitKind;
   if (!target) return '3d';
-  if (target.mesh || (target.element && typeof target.setOpacity === 'function')) return 'surface';
+  if (target.mesh || ((target.el || target.element) && typeof target.setOpacity === 'function')) return 'surface';
   if (typeof target.setAttribute === 'function' && 'style' in target) return 'hud';
   return '3d';
 }
@@ -121,6 +121,7 @@ export class ActorChoreographer {
     this._initialCamera = initialCamera ? this.#normalizePose(initialCamera) : null;
     this._matOriginals = new WeakMap();
     this._lastT = 0;
+    this._evalCount = 0;
   }
 
   /**
@@ -140,7 +141,7 @@ export class ActorChoreographer {
   register(id, target, opts = {}) {
     const kind = detectKind(target, opts.kind);
     const obj3d = kind === 'surface' ? target?.mesh || null : kind === '3d' ? target : null;
-    const domEl = kind === 'surface' ? target?.element || null : kind === 'hud' ? target : null;
+    const domEl = kind === 'surface' ? (target?.el || target?.element || null) : kind === 'hud' ? target : null;
 
     const restPos = opts.restPos
       ? readVec3(opts.restPos)
@@ -170,7 +171,7 @@ export class ActorChoreographer {
       _sorted: true,
     };
 
-    if (domEl && domEl.classList) {
+    if (kind === 'hud' && domEl && domEl.classList) {
       domEl.classList.add('hud-reveal');
     }
 
@@ -404,9 +405,10 @@ export class ActorChoreographer {
    * Deterministically evaluate and apply all actor lifecycles, focus dimming,
    * HUD progressive reveals, and camera pose at time `t`.
    */
-  evaluate(t, { apply = true, stage = null } = {}) {
+  evaluate(t, { apply = true, stage = null, forceCamera = false } = {}) {
     const time = Math.max(0, Number(t) || 0);
     this._lastT = time;
+    this._evalCount += 1;
 
     const focusInfo = this.#computeFocusAt(time);
     const cameraPose = this.getCameraPoseAt(time);
@@ -446,8 +448,19 @@ export class ActorChoreographer {
       }
     }
 
-    if (apply && stage && cameraPose && typeof stage.setCameraImmediate === 'function') {
-      stage.setCameraImmediate(cameraPose);
+    if (apply && stage && cameraPose) {
+      if (forceCamera) {
+        if (typeof stage.setCameraImmediate === 'function') {
+          stage.setCameraImmediate(cameraPose);
+        }
+      } else if (typeof stage.setCameraFromScript === 'function') {
+        stage.setCameraFromScript(cameraPose);
+      } else {
+        const locked = typeof stage.isUserCameraLocked === 'function' ? stage.isUserCameraLocked() : false;
+        if (!locked && typeof stage.setCameraImmediate === 'function') {
+          stage.setCameraImmediate(cameraPose);
+        }
+      }
     }
 
     return {
@@ -557,30 +570,37 @@ export class ActorChoreographer {
       if (actor.obj3d.scale?.set) {
         actor.obj3d.scale.set(state.scale[0], state.scale[1], state.scale[2]);
       }
-      this.#apply3dOpacity(actor.obj3d, state.opacity);
+      if (actor.kind !== 'surface') {
+        this.#apply3dOpacity(actor.obj3d, state.opacity);
+      }
     }
 
     if (actor.domEl) {
       const el = actor.domEl;
       if (el.dataset) {
-        el.dataset.hudHidden = state.visible ? 'false' : 'true';
+        if (actor.kind === 'hud') {
+          el.dataset.hudHidden = state.visible ? 'false' : 'true';
+        }
         el.dataset.choreoVisible = state.visible ? 'true' : 'false';
       }
-      if ('hidden' in el && actor.kind === 'hud') {
-        el.hidden = !state.visible;
-      }
-      if (el.style) {
-        el.style.opacity = state.opacity.toFixed(3);
-        el.style.pointerEvents = state.visible && state.opacity > 0.25 ? '' : 'none';
-        if (actor.kind === 'hud') {
-          const dx = state.pos[0] - actor.restPos[0];
-          const dy = state.pos[1] - actor.restPos[1];
-          if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
-            el.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0)`;
+      if (actor.kind === 'hud') {
+        if ('hidden' in el) {
+          el.hidden = !state.visible;
+        }
+        if (el.style) {
+          el.style.opacity = state.opacity >= 0.999 ? '1' : state.opacity.toFixed(3);
+          el.style.pointerEvents = state.visible && state.opacity > 0.25 ? '' : 'none';
+          const dx = Math.round(state.pos[0] - actor.restPos[0]);
+          const dy = Math.round(state.pos[1] - actor.restPos[1]);
+          if (dx !== 0 || dy !== 0) {
+            el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
           } else {
             el.style.transform = '';
           }
         }
+      } else if (actor.kind === 'surface' && typeof actor.target?.setOpacity !== 'function' && el.style) {
+        el.style.opacity = state.opacity >= 0.999 ? '1' : state.opacity.toFixed(3);
+        el.style.pointerEvents = state.visible && state.opacity > 0.25 ? '' : 'none';
       }
     }
 

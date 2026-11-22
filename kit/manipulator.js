@@ -34,32 +34,83 @@ function isObjectVisibleInHierarchy(obj) {
   return true;
 }
 
+function getClockBeatKey(state) {
+  if (!state || typeof state !== 'object') return null;
+  const stagePart = state.stageId ?? state.stageIndex ?? '';
+  const stepPart = state.stepId ?? state.beatIndex ?? state.stepIndex ?? '';
+  return `${stagePart}:${stepPart}`;
+}
+
+function isBeatAllowed(state, allowedBeats) {
+  if (!allowedBeats) return true;
+  const list = allowedBeats instanceof Set ? allowedBeats : new Set(allowedBeats);
+  if (list.size === 0) return true;
+  if (!state) return false;
+  return (
+    list.has(state.beatIndex) ||
+    list.has(state.stepIndex) ||
+    list.has(state.stageIndex) ||
+    (state.stepId !== undefined && list.has(state.stepId)) ||
+    (state.stageId !== undefined && list.has(state.stageId))
+  );
+}
+
 /**
  * Direct 3D manipulation toolkit for Simulify stages.
  * Intercepts pointer events in capture phase BEFORE IsometricStage orbit controls so
- * dragging a 3D handle/slider/lever manipulates the mechanism instead of spinning the camera.
+ * dragging a 3D handle/slider/lever manipulates the mechanism instead of spinning the camera,
+ * and enforces cursor priority in bubble phase AFTER `stage-3d.js` hover updates.
  */
 export class StageManipulator {
-  constructor(stage, { onHover = null, onClick = null } = {}) {
+  constructor(
+    stage,
+    {
+      onHover = null,
+      onClick = null,
+      clock = null,
+      autoExitOnBeatChange = true,
+      allowedBeats = null,
+      disableOnBeatChange = false,
+      onBeatExit = null,
+    } = {}
+  ) {
     this.stage = stage;
     this.canvas = stage.canvas;
     this._onHover = onHover;
     this._onClick = onClick;
+    this._onBeatExit = typeof onBeatExit === 'function' ? onBeatExit : null;
     this._entries = new Map();
     this._roots = [];
     this._enabled = true;
     this._hoveredId = null;
     this._activeDrag = null;
+    this._desiredCursor = null;
+    this._clockUnsub = null;
     this._disposed = false;
 
     this._onPointerDown = (e) => this._handlePointerDown(e);
     this._onPointerMove = (e) => this._handlePointerMove(e);
     this._onPointerUp = (e) => this._handlePointerUp(e);
+    this._onBubbleCursorSync = () => this._syncCursorAfterStage();
 
     this.canvas.addEventListener('pointerdown', this._onPointerDown, { capture: true });
     this.canvas.addEventListener('pointermove', this._onPointerMove, { capture: true });
     this.canvas.addEventListener('pointerup', this._onPointerUp, { capture: true });
     this.canvas.addEventListener('pointercancel', this._onPointerUp, { capture: true });
+
+    // Bubble-phase cursor enforcement runs strictly after stage-3d.js _setHover()
+    this.canvas.addEventListener('pointermove', this._onBubbleCursorSync);
+    this.canvas.addEventListener('pointerup', this._onBubbleCursorSync);
+    this.canvas.addEventListener('pointercancel', this._onBubbleCursorSync);
+
+    if (clock) {
+      this.bindClock(clock, {
+        autoExitOnBeatChange,
+        allowedBeats,
+        disableOnBeatChange,
+        onBeatExit: this._onBeatExit,
+      });
+    }
   }
 
   /**
@@ -150,8 +201,77 @@ export class StageManipulator {
 
   setEnabled(enabled) {
     this._enabled = Boolean(enabled);
-    if (!this._enabled && this._activeDrag) {
+    if (!this._enabled) {
+      this._cancelActiveState();
+    }
+  }
+
+  /**
+   * Bind a `SpacetimeClock` or `TimelineDirector` so crossing a beat/stage boundary
+   * cleanly cancels active drags/hovers and optionally disables edit mode.
+   */
+  bindClock(
+    clock,
+    {
+      autoExitOnBeatChange = true,
+      allowedBeats = null,
+      disableOnBeatChange = false,
+      autoRestore = false,
+      onBeatExit = null,
+    } = {}
+  ) {
+    if (this._clockUnsub) {
+      this._clockUnsub();
+      this._clockUnsub = null;
+    }
+    if (!clock || typeof clock.subscribe !== 'function') return () => {};
+
+    let lastBeatKey = null;
+    const unsub = clock.subscribe((state) => {
+      if (this._disposed) return;
+      const nextKey = getClockBeatKey(state);
+      const beatChanged = lastBeatKey !== null && nextKey !== lastBeatKey;
+      const allowed = isBeatAllowed(state, allowedBeats);
+      lastBeatKey = nextKey;
+
+      if ((beatChanged && autoExitOnBeatChange) || !allowed) {
+        this._cancelActiveState();
+        if (disableOnBeatChange || !allowed) {
+          this.setEnabled(false);
+        }
+        onBeatExit?.(state);
+        if (onBeatExit !== this._onBeatExit) this._onBeatExit?.(state);
+      } else if (allowed && autoRestore && !this._enabled) {
+        this.setEnabled(true);
+      }
+    });
+    this._clockUnsub = unsub;
+    return unsub;
+  }
+
+  _cancelActiveState() {
+    if (this._activeDrag) {
+      const ptrId = this._activeDrag.pointerId;
       this._activeDrag = null;
+      try {
+        this.canvas.releasePointerCapture?.(ptrId);
+      } catch {
+        // Ignore
+      }
+    }
+    if (this._hoveredId) {
+      const prev = this._entries.get(this._hoveredId);
+      this._hoveredId = null;
+      if (prev) prev.onHover?.(false, { id: prev.id, entry: prev, event: null });
+      this._onHover?.(null, null, null);
+    }
+    this._desiredCursor = null;
+  }
+
+  _syncCursorAfterStage() {
+    if (!this._enabled || this._disposed || this.stage._drag) return;
+    if (this._desiredCursor && this.canvas.style) {
+      this.canvas.style.cursor = this._desiredCursor;
     }
   }
 
@@ -231,6 +351,7 @@ export class StageManipulator {
         moved: 0,
         started: false,
       };
+      this._desiredCursor = entry.dragCursor;
       this.canvas.style.cursor = entry.dragCursor;
     } else if (entry.kind === 'clickable') {
       // Allow orbit if dragged, trigger click on release if stationary
@@ -294,6 +415,7 @@ export class StageManipulator {
     if (this.stage._drag) return;
     const found = this._raycast(e.clientX, e.clientY);
     const nextId = found ? found.entry.id : null;
+    this._desiredCursor = found ? found.entry.cursor : null;
     if (nextId !== this._hoveredId) {
       const prev = this._hoveredId ? this._entries.get(this._hoveredId) : null;
       if (prev) prev.onHover?.(false, { id: prev.id, entry: prev, event: e });
@@ -320,6 +442,7 @@ export class StageManipulator {
       } catch {
         // Ignore
       }
+      this._desiredCursor = drag.entry.cursor;
       this.canvas.style.cursor = drag.entry.cursor;
       if (drag.started) {
         drag.entry.onDragEnd?.({
@@ -340,13 +463,21 @@ export class StageManipulator {
 
   dispose() {
     this._disposed = true;
+    if (this._clockUnsub) {
+      this._clockUnsub();
+      this._clockUnsub = null;
+    }
     this.canvas.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
     this.canvas.removeEventListener('pointermove', this._onPointerMove, { capture: true });
     this.canvas.removeEventListener('pointerup', this._onPointerUp, { capture: true });
     this.canvas.removeEventListener('pointercancel', this._onPointerUp, { capture: true });
+    this.canvas.removeEventListener('pointermove', this._onBubbleCursorSync);
+    this.canvas.removeEventListener('pointerup', this._onBubbleCursorSync);
+    this.canvas.removeEventListener('pointercancel', this._onBubbleCursorSync);
     this._entries.clear();
     this._roots = [];
     this._activeDrag = null;
+    this._desiredCursor = null;
   }
 }
 
@@ -368,6 +499,11 @@ export class GridBrush {
       mode = 'toggle',
       holdModifier = 'altKey',
       paintCursor = 'crosshair',
+      clock = null,
+      autoExitOnBeatChange = true,
+      autoExitOnSeek = false,
+      allowedBeats = null,
+      onActiveChange = null,
       onHoverCell = null,
       onClickCell = null,
       onPaintCell = null,
@@ -383,6 +519,7 @@ export class GridBrush {
     this.mode = mode;
     this.holdModifier = holdModifier;
     this.paintCursor = paintCursor;
+    this._onActiveChange = typeof onActiveChange === 'function' ? onActiveChange : null;
     this._onHoverCell = onHoverCell;
     this._onClickCell = onClickCell;
     this._onPaintCell = onPaintCell;
@@ -392,16 +529,44 @@ export class GridBrush {
     this._hoveredKey = null;
     this._stroke = null;
     this._clickCandidate = null;
+    this._modifierEngaged = false;
+    this._clockUnsub = null;
+    this._clockSeekUnsub = null;
     this._disposed = false;
 
     this._onPointerDown = (e) => this._handlePointerDown(e);
     this._onPointerMove = (e) => this._handlePointerMove(e);
     this._onPointerUp = (e) => this._handlePointerUp(e);
+    this._onBubbleCursorSync = (e) => this._syncCursorAfterStage(e);
+    this._onKeyChange = (e) => this._handleModifierKey(e);
 
     this.canvas.addEventListener('pointerdown', this._onPointerDown, { capture: true });
     this.canvas.addEventListener('pointermove', this._onPointerMove, { capture: true });
     this.canvas.addEventListener('pointerup', this._onPointerUp, { capture: true });
     this.canvas.addEventListener('pointercancel', this._onPointerUp, { capture: true });
+
+    // Bubble-phase cursor enforcement runs strictly AFTER stage-3d.js _setHover()
+    this.canvas.addEventListener('pointermove', this._onBubbleCursorSync);
+    this.canvas.addEventListener('pointerup', this._onBubbleCursorSync);
+    this.canvas.addEventListener('pointercancel', this._onBubbleCursorSync);
+    this.canvas.addEventListener('pointerenter', this._onBubbleCursorSync);
+
+    if (typeof window !== 'undefined' && this.holdModifier) {
+      window.addEventListener('keydown', this._onKeyChange);
+      window.addEventListener('keyup', this._onKeyChange);
+    }
+
+    if (this.active) {
+      this._applyCanvasCursor(true);
+    }
+
+    if (clock) {
+      this.bindClock(clock, {
+        autoExitOnBeatChange,
+        autoExitOnSeek,
+        allowedBeats,
+      });
+    }
   }
 
   _defaultGetCell(hit) {
@@ -425,16 +590,129 @@ export class GridBrush {
     this._targets = Array.isArray(meshes) ? [...meshes] : [];
   }
 
-  setActive(active) {
-    this.active = Boolean(active);
+  setActive(active, meta = { reason: 'manual' }) {
+    const next = Boolean(active);
+    const changed = next !== this.active;
+    this.active = next;
     if (!this.active && this._stroke) {
+      const ptrId = this._stroke.pointerId;
       this._stroke = null;
+      try {
+        this.canvas.releasePointerCapture?.(ptrId);
+      } catch {
+        // Ignore
+      }
     }
-    this.canvas.style.cursor = this.active ? this.paintCursor : 'grab';
+    this._applyCanvasCursor(this.active);
+    if (changed) {
+      this._onActiveChange?.(this.active, meta);
+    }
+  }
+
+  /**
+   * Bind a `SpacetimeClock` or `TimelineDirector` so switching beats/acts automatically
+   * exits paint mode and clears stale hover states (preventing trapped edit states when
+   * earlier beats hide the paint toggle button).
+   */
+  bindClock(
+    clock,
+    {
+      autoExitOnBeatChange = true,
+      autoExitOnSeek = false,
+      allowedBeats = null,
+      onAutoExit = null,
+    } = {}
+  ) {
+    if (this._clockUnsub) {
+      this._clockUnsub();
+      this._clockUnsub = null;
+    }
+    if (this._clockSeekUnsub) {
+      this._clockSeekUnsub();
+      this._clockSeekUnsub = null;
+    }
+    if (!clock || typeof clock.subscribe !== 'function') return () => {};
+
+    let lastBeatKey = null;
+
+    const exitIfNeeded = (reason, state) => {
+      if (this._hoveredKey !== null) {
+        this._hoveredKey = null;
+        this._onHoverCell?.(null, null, null);
+      }
+      if (this.active || this._stroke) {
+        this.setActive(false, { reason, state });
+        onAutoExit?.(state, reason);
+      }
+    };
+
+    const unsub = clock.subscribe((state) => {
+      if (this._disposed) return;
+      const nextKey = getClockBeatKey(state);
+      const beatChanged = lastBeatKey !== null && nextKey !== lastBeatKey;
+      const allowed = isBeatAllowed(state, allowedBeats);
+      lastBeatKey = nextKey;
+
+      if (!allowed) {
+        exitIfNeeded('beat-disallowed', state);
+      } else if (beatChanged && autoExitOnBeatChange) {
+        exitIfNeeded('beat-change', state);
+      }
+    });
+    this._clockUnsub = unsub;
+
+    if (autoExitOnSeek && typeof clock.onSeek === 'function') {
+      this._clockSeekUnsub = clock.onSeek((state) => {
+        if (!this._disposed) exitIfNeeded('seek', state);
+      });
+    }
+
+    return () => {
+      unsub();
+      if (this._clockUnsub === unsub) this._clockUnsub = null;
+      if (this._clockSeekUnsub) {
+        this._clockSeekUnsub();
+        this._clockSeekUnsub = null;
+      }
+    };
   }
 
   setMode(mode) {
     this.mode = mode;
+  }
+
+  _applyCanvasCursor(engaged) {
+    if (this.canvas.dataset) {
+      this.canvas.dataset.brushActive = this.active ? 'true' : 'false';
+    }
+    if (!this.canvas.style) return;
+    if (engaged) {
+      this.canvas.style.cursor = this.paintCursor;
+    } else if (!this.stage._drag) {
+      this.canvas.style.cursor = 'grab';
+    }
+  }
+
+  _syncCursorAfterStage(e) {
+    if (this._disposed || this.stage._drag) return;
+    const mod = Boolean(this.holdModifier && e && e[this.holdModifier]);
+    if (this.active || this._stroke || (mod && this._hoveredKey !== null)) {
+      if (this.canvas.style) {
+        this.canvas.style.cursor = this.paintCursor;
+      }
+    }
+  }
+
+  _handleModifierKey(e) {
+    if (this._disposed || !this.holdModifier) return;
+    const mod = Boolean(e && e[this.holdModifier]);
+    if (mod === this._modifierEngaged) return;
+    this._modifierEngaged = mod;
+    if (!this.active && !this._stroke && this._hoveredKey !== null && !this.stage._drag) {
+      if (this.canvas.style) {
+        this.canvas.style.cursor = mod ? this.paintCursor : 'pointer';
+      }
+    }
   }
 
   _pickCell(clientX, clientY) {
@@ -529,7 +807,7 @@ export class GridBrush {
       this._hoveredKey = nextKey;
       this._onHoverCell?.(found ? found.cell : null, found ? found.hit : null, e);
     }
-    if (found && this._isBrushEngaged(e)) {
+    if (this.active || (found && this._isBrushEngaged(e))) {
       this.canvas.style.cursor = this.paintCursor;
     }
   }
@@ -565,10 +843,26 @@ export class GridBrush {
 
   dispose() {
     this._disposed = true;
+    if (this._clockUnsub) {
+      this._clockUnsub();
+      this._clockUnsub = null;
+    }
+    if (this._clockSeekUnsub) {
+      this._clockSeekUnsub();
+      this._clockSeekUnsub = null;
+    }
     this.canvas.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
     this.canvas.removeEventListener('pointermove', this._onPointerMove, { capture: true });
     this.canvas.removeEventListener('pointerup', this._onPointerUp, { capture: true });
     this.canvas.removeEventListener('pointercancel', this._onPointerUp, { capture: true });
+    this.canvas.removeEventListener('pointermove', this._onBubbleCursorSync);
+    this.canvas.removeEventListener('pointerup', this._onBubbleCursorSync);
+    this.canvas.removeEventListener('pointercancel', this._onBubbleCursorSync);
+    this.canvas.removeEventListener('pointerenter', this._onBubbleCursorSync);
+    if (typeof window !== 'undefined' && this.holdModifier) {
+      window.removeEventListener('keydown', this._onKeyChange);
+      window.removeEventListener('keyup', this._onKeyChange);
+    }
     this._targets = [];
     this._stroke = null;
     this._clickCandidate = null;
