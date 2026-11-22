@@ -9,7 +9,445 @@
  * - Optional compact `surfaceMode: true` so the panel's root element (`getElement()`)
  *   can be mounted directly onto `HtmlSurfaceManager` in 3D space (while seamlessly
  *   rendering as standard DOM on fallback).
+ * - True mathematical typography (`--font-math` via offline KaTeX fonts):
+ *   automatic italic variables (`<var class="lm-var">`), tabular numerals,
+ *   automatic Unicode subscript/superscript rescue (`ₜ`/`ₙ`/`ᵏ`/`⁴` -> real `<sub>`/`<sup>`),
+ *   stacked fractions (`.lm-frac`), and big operators with limits (`.lm-op`),
+ *   plus clean composable AST helpers (`mathVar`, `mathSub`, `mathSup`, `mathSubSup`,
+ *   `mathFrac`, `mathOp`, `mathNum`, `mathText`, `mathGroup`) — 100% backward
+ *   compatible with legacy `{ text, tone, emph, sub, linkId }` tokens.
  */
+
+const UNICODE_SUB_MAP = Object.freeze({
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+  '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+  '₊': '+', '₋': '−', '₌': '=', '₍': '(', '₎': ')',
+  'ₐ': 'a', 'ₑ': 'e', 'ₒ': 'o', 'ₓ': 'x', 'ₕ': 'h',
+  'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₚ': 'p',
+  'ₛ': 's', 'ₜ': 't', 'ᵢ': 'i', 'ⱼ': 'j', 'ᵣ': 'r',
+  'ᵤ': 'u', 'ᵥ': 'v',
+});
+
+const UNICODE_SUP_MAP = Object.freeze({
+  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+  '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+  '⁺': '+', '⁻': '−', '⁼': '=', '⁽': '(', '⁾': ')',
+  'ⁿ': 'n', 'ⁱ': 'i', 'ᵏ': 'k', 'ᵗ': 't', 'ᵃ': 'a',
+  'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f',
+  'ᵍ': 'g', 'ʰ': 'h', 'ʲ': 'j', 'ˡ': 'l', 'ᵐ': 'm',
+  'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵘ': 'u',
+  'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z',
+});
+
+const SUB_CLASS = Object.keys(UNICODE_SUB_MAP).join('');
+const SUP_CLASS = Object.keys(UNICODE_SUP_MAP).join('');
+const SCRIPT_RUN_RE = new RegExp(
+  `([${SUB_CLASS}]+(?:[:,][${SUB_CLASS}]+)*)|([${SUP_CLASS}]+(?:[:,][${SUP_CLASS}]+)*)`,
+  'g'
+);
+
+const BIG_OP_SYMBOLS = new Set(['∑', 'Σ', '∏', 'Π', '∫', '∬', '∮', '⋃', '⋂']);
+const MATH_WORD_OPS = new Set([
+  'max', 'min', 'arg', 'argmax', 'argmin', 'lim', 'sup', 'inf',
+  'exp', 'log', 'ln', 'sin', 'cos', 'tan', 'det', 'Pr', 'Var', 'Cov',
+]);
+
+// Splits math plain text into typed fragments while preserving exact characters:
+// 1) Multi-letter Latin identifiers / words (stay upright Roman, e.g. AMAT, ON, OFF, max, ns)
+// 2) Numeric literals (tabular-nums upright, e.g. 0.75, 100)
+// 3) Single Latin math variables (not preceded by ° or _ or alnum, not followed by _ or alnum)
+// 4) Lowercase Greek math variables (α..ω)
+// 5) Big operator glyphs (∑, ∏, ∫, standalone Σ)
+// 6) Binary / relational operators (←, →, ↔, ⇒, ⇔, ≤, ≥, ≠, ≈, ×, ·, ⋅, −, +, =)
+const INLINE_MATH_RE =
+  /([A-Za-z]{2,}|[A-Za-z]+_[A-Za-z0-9]+)|(\d+(?:\.\d+)?)|((?<![A-Za-z0-9_°])[A-Za-z](?![A-Za-z0-9_]))|([α-ω])|([∑∏∫]|(?<![A-Za-z0-9])Σ(?![A-Za-z0-9]))|([←→↔⇒⇔≤≥≠≈×·⋅−+=])/g;
+
+function mapScriptChars(str, table) {
+  let out = '';
+  for (const ch of str) {
+    out += table[ch] ?? ch;
+  }
+  return out;
+}
+
+/**
+ * Split a string containing legacy Unicode subscripts/superscripts (e.g. `Gₜ:ₜ₊₄`, `γᵏ`, `Sₜ₊ₙ`)
+ * into structured segments `{ type: 'text' | 'sub' | 'sup', value: string }` so `LiveMathsPanel`
+ * renders crisp semantic HTML `<sub>` / `<sup>` instead of broken Unicode micro-glyphs.
+ *
+ * @param {string} input
+ * @returns {Array<{ type: 'text' | 'sub' | 'sup', value: string }>}
+ */
+export function normalizeUnicodeScripts(input) {
+  const str = String(input ?? '');
+  if (!str) return [];
+  const segments = [];
+  let lastIdx = 0;
+  SCRIPT_RUN_RE.lastIndex = 0;
+  let match;
+  while ((match = SCRIPT_RUN_RE.exec(str)) !== null) {
+    if (match.index > lastIdx) {
+      segments.push({ type: 'text', value: str.slice(lastIdx, match.index) });
+    }
+    if (match[1]) {
+      segments.push({ type: 'sub', value: mapScriptChars(match[1], UNICODE_SUB_MAP) });
+    } else if (match[2]) {
+      segments.push({ type: 'sup', value: mapScriptChars(match[2], UNICODE_SUP_MAP) });
+    }
+    lastIdx = SCRIPT_RUN_RE.lastIndex;
+  }
+  if (lastIdx < str.length) {
+    segments.push({ type: 'text', value: str.slice(lastIdx) });
+  }
+  return segments;
+}
+
+// ============================================================================
+// Structured Math AST Helpers (composable inside `equations[i].tokens`)
+// ============================================================================
+
+/**
+ * Create a true italic mathematical variable token (rendered in `KaTeX_Math-Italic`).
+ * @param {string} name
+ * @param {{ sub?: any, sup?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathVar(name, opts = {}) {
+  return { ...opts, kind: 'var', text: String(name ?? '') };
+}
+
+/**
+ * Create a base-with-subscript math token (`<sub class="lm-sub">`).
+ * Both `base` and `sub` may be strings, numbers, math tokens, or arrays of tokens.
+ * @param {any} base
+ * @param {any} sub
+ * @param {{ sup?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathSub(base, sub, opts = {}) {
+  return { ...opts, kind: 'script', base, sub };
+}
+
+/**
+ * Create a base-with-superscript math token (`<sup class="lm-sup">`).
+ * Both `base` and `sup` may be strings, numbers, math tokens, or arrays of tokens.
+ * @param {any} base
+ * @param {any} sup
+ * @param {{ sub?: any, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathSup(base, sup, opts = {}) {
+  return { ...opts, kind: 'script', base, sup };
+}
+
+/**
+ * Create a base with aligned stacked subscript and superscript (`.lm-subsup`).
+ * @param {any} base
+ * @param {any} sub
+ * @param {any} sup
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathSubSup(base, sub, sup, opts = {}) {
+  return { ...opts, kind: 'script', base, sub, sup };
+}
+
+/**
+ * Create a stacked mathematical fraction (`.lm-frac`).
+ * @param {any} num Numerator (string, number, math token, or array of tokens)
+ * @param {any} den Denominator (string, number, math token, or array of tokens)
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathFrac(num, den, opts = {}) {
+  return { ...opts, kind: 'frac', num, den };
+}
+
+/**
+ * Create a large mathematical operator (`∑`, `∏`, `∫`, `max`, `min`, `lim`, `arg max`)
+ * with optional stacked or inline lower/upper limits (`.lm-op`).
+ * @param {string} symbol
+ * @param {{ lower?: any, upper?: any, display?: boolean, stacked?: boolean, tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathOp(symbol, opts = {}) {
+  return { ...opts, kind: 'op', symbol: String(symbol ?? '') };
+}
+
+/**
+ * Create an upright tabular numeral token (`.lm-num`).
+ * @param {string | number} value
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathNum(value, opts = {}) {
+  return { ...opts, kind: 'num', text: String(value ?? '') };
+}
+
+/**
+ * Create an upright prose/unit text token inside an equation (`.lm-text`).
+ * @param {string} text
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathText(text, opts = {}) {
+  return { ...opts, kind: 'text', text: String(text ?? '') };
+}
+
+/**
+ * Group multiple structured math tokens under a single tone / emphasis / `linkId` highlight.
+ * @param {Array<any>} parts
+ * @param {{ tone?: string, emph?: boolean, linkId?: string }} [opts]
+ */
+export function mathGroup(parts, opts = {}) {
+  return { ...opts, kind: 'group', parts: Array.isArray(parts) ? parts : [parts] };
+}
+
+function isUnarySign(str, index, op) {
+  if (op !== '+' && op !== '-' && op !== '−') return false;
+  const before = str.slice(0, index).trimEnd();
+  if (!before) return true;
+  const prev = before[before.length - 1];
+  return '(=[,:{←→↔⇒⇔≤≥≠≈+−-×·⋅'.includes(prev);
+}
+
+function appendInlineMathText(parent, rawText, { inScript = false } = {}) {
+  const str = String(rawText ?? '');
+  if (!str) return;
+  let lastIdx = 0;
+  INLINE_MATH_RE.lastIndex = 0;
+  let match;
+  while ((match = INLINE_MATH_RE.exec(str)) !== null) {
+    if (match.index > lastIdx) {
+      parent.append(document.createTextNode(str.slice(lastIdx, match.index)));
+    }
+    const [full, word, num, singleVar, greekVar, bigOp, binOp] = match;
+    if (word) {
+      if (MATH_WORD_OPS.has(word)) {
+        const opEl = document.createElement('span');
+        opEl.className = 'lm-op-sym';
+        opEl.textContent = word;
+        parent.append(opEl);
+      } else {
+        parent.append(document.createTextNode(word));
+      }
+    } else if (num) {
+      const nEl = document.createElement('span');
+      nEl.className = 'lm-num';
+      nEl.textContent = num;
+      parent.append(nEl);
+    } else if (singleVar || greekVar) {
+      const vEl = document.createElement('var');
+      vEl.className = 'lm-var';
+      vEl.textContent = singleVar || greekVar;
+      parent.append(vEl);
+    } else if (bigOp && !inScript) {
+      const wrap = document.createElement('span');
+      wrap.className = 'lm-op';
+      const sym = document.createElement('span');
+      sym.className = 'lm-op-sym';
+      sym.textContent = bigOp;
+      wrap.append(sym);
+      parent.append(wrap);
+    } else if (binOp) {
+      if (inScript || isUnarySign(str, match.index, binOp)) {
+        parent.append(document.createTextNode(binOp));
+      } else {
+        const bEl = document.createElement('span');
+        bEl.className = 'lm-bin';
+        bEl.textContent = binOp;
+        parent.append(bEl);
+      }
+    } else {
+      parent.append(document.createTextNode(full));
+    }
+    lastIdx = INLINE_MATH_RE.lastIndex;
+  }
+  if (lastIdx < str.length) {
+    parent.append(document.createTextNode(str.slice(lastIdx)));
+  }
+}
+
+function appendScriptedText(parent, rawText, { inScript = false } = {}) {
+  const segments = normalizeUnicodeScripts(rawText);
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      appendInlineMathText(parent, seg.value, { inScript });
+    } else if (seg.type === 'sub') {
+      const sub = document.createElement('sub');
+      sub.className = 'lm-sub';
+      appendInlineMathText(sub, seg.value, { inScript: true });
+      parent.append(sub);
+    } else if (seg.type === 'sup') {
+      const sup = document.createElement('sup');
+      sup.className = 'lm-sup';
+      appendInlineMathText(sup, seg.value, { inScript: true });
+      parent.append(sup);
+    }
+  }
+}
+
+function appendScripts(parent, subVal, supVal) {
+  const hasSub = subVal !== undefined && subVal !== null && subVal !== '';
+  const hasSup = supVal !== undefined && supVal !== null && supVal !== '';
+  if (!hasSub && !hasSup) return;
+
+  if (hasSub && hasSup) {
+    const stack = document.createElement('span');
+    stack.className = 'lm-subsup';
+    const sup = document.createElement('sup');
+    sup.className = 'lm-subsup-sup';
+    renderMathContent(sup, supVal, { inScript: true });
+    const sub = document.createElement('sub');
+    sub.className = 'lm-subsup-sub';
+    renderMathContent(sub, subVal, { inScript: true });
+    stack.append(sup, sub);
+    parent.append(stack);
+    return;
+  }
+
+  if (hasSub) {
+    const sub = document.createElement('sub');
+    sub.className = 'lm-sub';
+    renderMathContent(sub, subVal, { inScript: true });
+    parent.append(sub);
+  }
+  if (hasSup) {
+    const sup = document.createElement('sup');
+    sup.className = 'lm-sup';
+    renderMathContent(sup, supVal, { inScript: true });
+    parent.append(sup);
+  }
+}
+
+function renderMathContent(parent, node, { inScript = false } = {}) {
+  if (node === null || node === undefined) return;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      renderMathContent(parent, child, { inScript });
+    }
+    return;
+  }
+  if (typeof node === 'string' || typeof node === 'number') {
+    appendScriptedText(parent, String(node), { inScript });
+    return;
+  }
+  if (typeof node !== 'object') {
+    parent.append(document.createTextNode(String(node)));
+    return;
+  }
+
+  const kind = node.kind;
+  if (kind === 'var') {
+    const v = document.createElement('var');
+    v.className = 'lm-var';
+    v.textContent = String(node.text ?? '');
+    parent.append(v);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'num') {
+    const n = document.createElement('span');
+    n.className = 'lm-num';
+    n.textContent = String(node.text ?? '');
+    parent.append(n);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'text') {
+    const t = document.createElement('span');
+    t.className = 'lm-text';
+    t.textContent = String(node.text ?? '');
+    parent.append(t);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'script') {
+    renderMathContent(parent, node.base, { inScript });
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'frac') {
+    const frac = document.createElement('span');
+    frac.className = 'lm-frac';
+    const num = document.createElement('span');
+    num.className = 'lm-frac-num';
+    renderMathContent(num, node.num, { inScript: false });
+    const den = document.createElement('span');
+    den.className = 'lm-frac-den';
+    renderMathContent(den, node.den, { inScript: false });
+    frac.append(num, den);
+    parent.append(frac);
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  if (kind === 'op') {
+    const symText = String(node.symbol ?? node.text ?? '');
+    const isWord = !BIG_OP_SYMBOLS.has(symText) && /[A-Za-z]/.test(symText);
+    const hasLower = node.lower !== undefined && node.lower !== null && node.lower !== '';
+    const hasUpper = node.upper !== undefined && node.upper !== null && node.upper !== '';
+    const stacked = node.stacked !== undefined ? Boolean(node.stacked) : (hasLower || hasUpper);
+
+    const op = document.createElement('span');
+    op.className = 'lm-op';
+    if (node.display) op.classList.add('is-display');
+    if (isWord) op.classList.add('is-word');
+    if (stacked) op.classList.add('is-stacked');
+
+    const symEl = document.createElement('span');
+    symEl.className = 'lm-op-sym';
+    symEl.textContent = symText;
+
+    if (stacked) {
+      if (hasUpper) {
+        const up = document.createElement('span');
+        up.className = 'lm-op-upper';
+        renderMathContent(up, node.upper, { inScript: true });
+        op.append(up);
+      }
+      op.append(symEl);
+      if (hasLower) {
+        const lo = document.createElement('span');
+        lo.className = 'lm-op-lower';
+        renderMathContent(lo, node.lower, { inScript: true });
+        op.append(lo);
+      }
+    } else {
+      op.append(symEl);
+      if (hasUpper || hasLower) {
+        const lim = document.createElement('span');
+        lim.className = 'lm-op-limits';
+        if (hasUpper) {
+          const up = document.createElement('span');
+          up.className = 'lm-op-upper';
+          renderMathContent(up, node.upper, { inScript: true });
+          lim.append(up);
+        }
+        if (hasLower) {
+          const lo = document.createElement('span');
+          lo.className = 'lm-op-lower';
+          renderMathContent(lo, node.lower, { inScript: true });
+          lim.append(lo);
+        }
+        op.append(lim);
+      }
+    }
+    parent.append(op);
+    return;
+  }
+
+  if (kind === 'group' || Array.isArray(node.parts)) {
+    renderMathContent(parent, node.parts, { inScript });
+    appendScripts(parent, node.sub, node.sup);
+    return;
+  }
+
+  // Legacy plain `{ text, sub, sup, raw }` token
+  if (node.raw) {
+    parent.append(document.createTextNode(String(node.text ?? '')));
+  } else {
+    appendScriptedText(parent, String(node.text ?? ''), { inScript });
+  }
+  appendScripts(parent, node.sub, node.sup);
+}
+
 export class LiveMathsPanel {
   /**
    * @param {HTMLElement | null} containerEl
@@ -120,10 +558,14 @@ export class LiveMathsPanel {
 
   /**
    * Atomically re-render equations, active comparison table, and single-step breakdown.
+   * Accepts both legacy `{ text, tone, emph, sub, sup, linkId }` tokens and structured
+   * math tokens produced by `mathVar`, `mathSub`, `mathSup`, `mathSubSup`, `mathFrac`,
+   * `mathOp`, `mathNum`, `mathText`, and `mathGroup`.
+   *
    * @param {{
    *   badge?: string,
    *   subtitle?: string,
-   *   equations?: Array<{ label?: string, tokens: Array<{ text: string, tone?: 'teal'|'amber'|'danger'|'navy'|'muted', emph?: boolean, sub?: string, linkId?: string }> }>,
+   *   equations?: Array<{ label?: string, tokens: Array<any> }>,
    *   table?: { caption?: string, headers: Array<string|number>, rows: Array<Array<string|number>>, rowLinkIds?: Array<string|null>, activeRow?: number, note?: string },
    *   breakdown?: Array<{ tag: string, text: string, tone?: 'teal'|'amber'|'danger'|'navy', linkId?: string }>
    * }} [payload]
@@ -241,16 +683,15 @@ export class LiveMathsPanel {
     for (const token of eq.tokens || []) {
       const span = document.createElement('span');
       span.className = 'eq-term';
-      if (token.tone) span.dataset.tone = token.tone;
-      if (token.emph) span.classList.add('is-emph');
-      span.append(document.createTextNode(String(token.text ?? '')));
-      if (token.sub) {
-        const sub = document.createElement('sub');
-        sub.textContent = String(token.sub);
-        span.append(sub);
-      }
-      if (token.linkId) {
-        this.#wireLinkTarget(span, token.linkId);
+      if (token && typeof token === 'object') {
+        if (token.tone) span.dataset.tone = token.tone;
+        if (token.emph) span.classList.add('is-emph');
+        renderMathContent(span, token, { inScript: false });
+        if (token.linkId) {
+          this.#wireLinkTarget(span, token.linkId);
+        }
+      } else {
+        renderMathContent(span, token, { inScript: false });
       }
       line.append(span);
     }

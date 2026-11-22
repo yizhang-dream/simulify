@@ -1,0 +1,75 @@
+Simulify Offline Four-Tier Font Assets — Provenance & Licenses
+==============================================================
+
+All font files in this directory are bundled for 100% offline, zero-CDN
+rendering under open-source licenses (SIL OFL 1.1 and MIT).
+
+1. Newsreader (Display Editorial Serif — Latin)
+   Files:
+     - Newsreader-Variable.woff2 (wght 200..800, normal)
+     - Newsreader-Italic-Variable.woff2 (wght 200..800, italic)
+   Source: @fontsource-variable/newsreader@5.3.0
+           Upstream: https://github.com/productiontype/Newsreader
+   Copyright: Copyright 2020 The Newsreader Project Authors
+   License: SIL Open Font License, Version 1.1 (OFL-1.1)
+
+2. Noto Serif SC (Display Editorial Serif — CJK Subset)
+   Files:
+     - NotoSerifSC-Display.woff2 (3,816 glyphs: GB2312 Level-1 + STEM/repo CJK +
+       CJK punctuation & arrows; instantiated at wght=650; registered in CSS as
+       "Simulify Display SC")
+   Source: Google Noto Serif CJK / NotoSerifSC-VF v2.02
+           Upstream: https://github.com/notofonts/noto-cjk
+   Copyright: Copyright 2014-2024 Adobe & Google LLC
+   License: SIL Open Font License, Version 1.1 (OFL-1.1), no Reserved Font Name
+
+3. Inter (UI & Prose Sans — Latin + Greek Optical Variable)
+   Files:
+     - Inter-Variable.woff2 (opsz 14..32, wght 100..900, normal)
+     - Inter-Italic-Variable.woff2 (opsz 14..32, wght 100..900, italic)
+     - Inter-Greek-Variable.woff2 (opsz 14..32, wght 100..900, Greek normal)
+   Source: @fontsource-variable/inter@5.3.0
+           Upstream: https://github.com/rsms/inter
+   Copyright: Copyright 2016 The Inter Project Authors
+   License: SIL Open Font License, Version 1.1 (OFL-1.1)
+
+4. Noto Sans SC (UI & Prose Sans — CJK Variable Subset)
+   Files:
+     - NotoSansSC-Variable.woff2 (3,816 glyphs: GB2312 Level-1 + STEM/repo CJK +
+       CJK punctuation & symbols; variable axis wght 400..700; registered in CSS
+       as "Simulify Sans SC")
+   Source: Google Noto Sans CJK / NotoSansSC-VF v2.04
+           Upstream: https://github.com/notofonts/noto-cjk
+   Copyright: Copyright 2014-2024 Adobe & Google LLC
+   License: SIL Open Font License, Version 1.1 (OFL-1.1), no Reserved Font Name
+
+5. KaTeX Fonts (True Mathematical Typesetting)
+   Files:
+     - KaTeX_Main-Regular.woff2
+     - KaTeX_Main-Italic.woff2
+     - KaTeX_Main-Bold.woff2
+     - KaTeX_Math-Italic.woff2
+     - KaTeX_Size1-Regular.woff2
+     - KaTeX_Size2-Regular.woff2
+   Source: katex@0.16.22
+           Upstream: https://github.com/KaTeX/KaTeX
+   Copyright: Copyright (c) 2013-2020 Khan Academy and other contributors
+   License: MIT License
+
+6. JetBrains Mono (Instrument Readouts & Code Monospace)
+   Files:
+     - JetBrainsMono-Regular.woff2 (400)
+     - JetBrainsMono-Medium.woff2 (500)
+     - JetBrainsMono-SemiBold.woff2 (600)
+     - JetBrainsMono-Bold.woff2 (700)
+     - JetBrainsMono-Greek-Variable.woff2 (Greek wght 100..800)
+   Source: @fontsource/jetbrains-mono@5.3.0 &
+           @fontsource-variable/jetbrains-mono@5.3.0
+           Upstream: https://github.com/JetBrains/JetBrainsMono
+   Copyright: Copyright 2020 The JetBrains Mono Project Authors
+   License: SIL Open Font License, Version 1.1 (OFL-1.1)
+
+License Texts
+-------------
+- SIL Open Font License 1.1: https://openfontlicense.org/open-font-license-official-text/
+- MIT License: https://opensource.org/licenses/MIT
