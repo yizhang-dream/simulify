@@ -147,11 +147,21 @@ function buildLegacyAdapter(raw) {
           )
         ),
         callouts,
+        stage,
         renderNow: () => {
           if (typeof stage?.renderNow === 'function') {
             stage.renderNow();
           } else if (stage?.outline && stage?.scene && stage?.camera) {
             stage.outline.render(stage.scene, stage.camera);
+          }
+        },
+        renderNowAsync: async () => {
+          if (typeof stage?.renderNowAsync === 'function') {
+            await stage.renderNowAsync();
+          } else if (typeof stage?.renderNow === 'function') {
+            stage.renderNow();
+          } else if (stage?.outline && stage?.scene && stage?.camera) {
+            await stage.outline.renderAsync?.(stage.scene, stage.camera);
           }
         },
       };
@@ -217,7 +227,30 @@ export class StageExporter {
   constructor(options = {}) {
     this._explicitWorkbench = options.workbench || null;
     this.filenamePrefix = options.filenamePrefix || '';
+    this.lang = String(
+      options.lang ||
+      (typeof document !== 'undefined' && document.documentElement?.lang?.toLowerCase().startsWith('en') ? 'en' : 'zh')
+    ).toLowerCase().startsWith('en')
+      ? 'en'
+      : 'zh';
+    this._langListeners = new Set();
     this._busy = false;
+  }
+
+  /**
+   * Update exporter language ('zh' | 'en') and notify any attached export UI buttons/popovers.
+   */
+  setLang(lang) {
+    const next = String(lang || '').toLowerCase().startsWith('en') ? 'en' : 'zh';
+    this.lang = next;
+    for (const fn of this._langListeners) {
+      try {
+        fn(next);
+      } catch {
+        // ignore listener errors
+      }
+    }
+    return this.lang;
   }
 
   getWorkbench() {
@@ -651,6 +684,9 @@ const DEFAULT_LABELS = {
     btn: '导出',
     title: '导出 4D 视频 / 动图',
     format: '格式',
+    fmtGif: 'GIF (动图)',
+    fmtApng: 'APNG (无损动图)',
+    fmtPng: 'PNG (静帧)',
     scope: '时间范围',
     fullStory: '完整剧情 (全幕)',
     currentFrame: '当前帧',
@@ -665,11 +701,16 @@ const DEFAULT_LABELS = {
     cancel: '取消',
     close: '关闭',
     done: '已导出并下载',
+    cancelled: '已取消导出。',
+    failed: '导出失败。',
   },
   en: {
     btn: 'Export',
     title: 'Export 4D Video / GIF',
     format: 'Format',
+    fmtGif: 'GIF (Animated)',
+    fmtApng: 'APNG (Lossless)',
+    fmtPng: 'PNG (Still)',
     scope: 'Time Range',
     fullStory: 'Full 4D Story',
     currentFrame: 'Current Frame',
@@ -684,25 +725,40 @@ const DEFAULT_LABELS = {
     cancel: 'Cancel',
     close: 'Close',
     done: 'Exported & downloaded',
+    cancelled: 'Export cancelled.',
+    failed: 'Export failed.',
   },
 };
+
+function normalizeLang(lang) {
+  return String(lang || '').toLowerCase().startsWith('en') ? 'en' : 'zh';
+}
 
 /**
  * Mount a compact accessible Export button + floating popover into any toolbar/viewbar.
  * Automatically marked `data-export-role="chrome"` so it never appears in exported media.
+ * Supports responsive runtime language switching via `handle.setLang('en' | 'zh')` or `exporter.setLang(...)`.
  * @param {HTMLElement} containerEl
- * @param {{ exporter?: StageExporter, workbench?: any, filenamePrefix?: string, lang?: 'zh'|'en', labels?: Record<string,string>, onExported?: (res: any) => void }} [opts]
+ * @param {{ exporter?: StageExporter, workbench?: any, filenamePrefix?: string, lang?: 'zh'|'en', i18n?: { subscribe?: Function, getLang?: Function }, labels?: Record<string,string>, onExported?: (res: any) => void }} [opts]
  */
 export function mountExportButton(containerEl, opts = {}) {
   if (!containerEl) {
     throw new Error('mountExportButton requires a valid container element.');
   }
+  const initialLang = normalizeLang(
+    opts.lang ||
+    opts.i18n?.getLang?.() ||
+    (typeof document !== 'undefined' && document.documentElement?.lang?.toLowerCase().startsWith('en') ? 'en' : 'zh')
+  );
   const exporter = opts.exporter || new StageExporter({
     workbench: opts.workbench,
     filenamePrefix: opts.filenamePrefix,
+    lang: initialLang,
   });
-  const lang = opts.lang || (document.documentElement?.lang?.toLowerCase().startsWith('en') ? 'en' : 'zh');
-  const L = { ...(DEFAULT_LABELS[lang] || DEFAULT_LABELS.zh), ...(opts.labels || {}) };
+
+  let currentLang = initialLang;
+  let customLabels = opts.labels ? { ...opts.labels } : {};
+  let L = { ...(DEFAULT_LABELS[currentLang] || DEFAULT_LABELS.zh), ...customLabels };
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -711,7 +767,7 @@ export function mountExportButton(containerEl, opts = {}) {
   btn.setAttribute('aria-haspopup', 'dialog');
   btn.setAttribute('aria-expanded', 'false');
   btn.setAttribute('aria-label', L.title);
-  btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="15" height="16" rx="2"/><path d="m17 10 5-3v10l-5-3z"/></svg><span>${L.btn}</span>`;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="15" height="16" rx="2"/><path d="m17 10 5-3v10l-5-3z"/></svg><span class="export-trigger-label">${L.btn}</span>`;
   containerEl.append(btn);
 
   const popover = document.createElement('section');
@@ -723,22 +779,22 @@ export function mountExportButton(containerEl, opts = {}) {
 
   popover.innerHTML = `
     <div class="export-pop-head">
-      <strong>${L.title}</strong>
+      <strong data-export-label="title">${L.title}</strong>
       <button type="button" class="inspector-close export-close-btn" aria-label="${L.close}">×</button>
     </div>
     <div class="export-grid">
       <label class="export-field">
-        <span>${L.format}</span>
+        <span data-export-label="format">${L.format}</span>
         <select name="format">
           <option value="mp4">MP4 (H.264)</option>
           <option value="webm">WebM (VP9)</option>
-          <option value="gif">GIF (Animated)</option>
-          <option value="apng">APNG (Lossless)</option>
-          <option value="png">PNG (Still)</option>
+          <option value="gif">${L.fmtGif}</option>
+          <option value="apng">${L.fmtApng}</option>
+          <option value="png">${L.fmtPng}</option>
         </select>
       </label>
       <label class="export-field">
-        <span>${L.hud}</span>
+        <span data-export-label="hud">${L.hud}</span>
         <select name="hud">
           <option value="caption" selected>${L.hudCaption}</option>
           <option value="stage">${L.hudStage}</option>
@@ -746,11 +802,11 @@ export function mountExportButton(containerEl, opts = {}) {
         </select>
       </label>
       <label class="export-field export-field-wide">
-        <span>${L.scope}</span>
+        <span data-export-label="scope">${L.scope}</span>
         <select name="scope"></select>
       </label>
       <label class="export-field">
-        <span>${L.res}</span>
+        <span data-export-label="res">${L.res}</span>
         <select name="resolution">
           <option value="720p">1280×720</option>
           <option value="1080p">1920×1080</option>
@@ -758,7 +814,7 @@ export function mountExportButton(containerEl, opts = {}) {
         </select>
       </label>
       <label class="export-field">
-        <span>${L.fps}</span>
+        <span data-export-label="fps">${L.fps}</span>
         <select name="fps">
           <option value="15">15 fps</option>
           <option value="24">24 fps</option>
@@ -781,6 +837,14 @@ export function mountExportButton(containerEl, opts = {}) {
   const host = document.querySelector('.artboard-shell') || document.body;
   host.append(popover);
 
+  const btnLabelEl = btn.querySelector('.export-trigger-label') || btn.querySelector('span');
+  const titleEl = popover.querySelector('[data-export-label="title"]');
+  const formatLabelEl = popover.querySelector('[data-export-label="format"]');
+  const hudLabelEl = popover.querySelector('[data-export-label="hud"]');
+  const scopeLabelEl = popover.querySelector('[data-export-label="scope"]');
+  const resLabelEl = popover.querySelector('[data-export-label="res"]');
+  const fpsLabelEl = popover.querySelector('[data-export-label="fps"]');
+
   const fmtSel = popover.querySelector('select[name="format"]');
   const hudSel = popover.querySelector('select[name="hud"]');
   const scopeSel = popover.querySelector('select[name="scope"]');
@@ -796,7 +860,37 @@ export function mountExportButton(containerEl, opts = {}) {
 
   let abortCtrl = null;
 
+  const setOptionText = (selectEl, value, text) => {
+    const opt = selectEl?.querySelector(`option[value="${value}"]`);
+    if (opt) opt.textContent = text;
+  };
+
+  const applyLabels = () => {
+    btn.setAttribute('aria-label', L.title);
+    if (btnLabelEl) btnLabelEl.textContent = L.btn;
+    popover.setAttribute('aria-label', L.title);
+    if (titleEl) titleEl.textContent = L.title;
+    closeBtn?.setAttribute('aria-label', L.close);
+    if (formatLabelEl) formatLabelEl.textContent = L.format;
+    if (hudLabelEl) hudLabelEl.textContent = L.hud;
+    if (scopeLabelEl) scopeLabelEl.textContent = L.scope;
+    if (resLabelEl) resLabelEl.textContent = L.res;
+    if (fpsLabelEl) fpsLabelEl.textContent = L.fps;
+
+    setOptionText(fmtSel, 'gif', L.fmtGif);
+    setOptionText(fmtSel, 'apng', L.fmtApng);
+    setOptionText(fmtSel, 'png', L.fmtPng);
+    setOptionText(hudSel, 'caption', L.hudCaption);
+    setOptionText(hudSel, 'stage', L.hudStage);
+    setOptionText(hudSel, 'hud', L.hudFull);
+    setOptionText(resSel, 'current', L.resCurrent);
+
+    if (startBtn) startBtn.textContent = L.start;
+    if (cancelBtn) cancelBtn.textContent = L.cancel;
+  };
+
   const populateScopes = () => {
+    const prevValue = scopeSel.value;
     scopeSel.replaceChildren();
     const fullOpt = document.createElement('option');
     fullOpt.value = 'full';
@@ -819,7 +913,33 @@ export function mountExportButton(containerEl, opts = {}) {
     curOpt.value = 'current';
     curOpt.textContent = L.currentFrame;
     scopeSel.append(curOpt);
+
+    if (prevValue && Array.from(scopeSel.options || []).some((o) => o.value === prevValue)) {
+      scopeSel.value = prevValue;
+    }
   };
+
+  const setLang = (nextLang, nextLabels = null) => {
+    currentLang = normalizeLang(nextLang);
+    exporter.lang = currentLang;
+    if (nextLabels && typeof nextLabels === 'object') {
+      customLabels = { ...customLabels, ...nextLabels };
+    }
+    L = { ...(DEFAULT_LABELS[currentLang] || DEFAULT_LABELS.zh), ...customLabels };
+    applyLabels();
+    if (!popover.hidden || scopeSel.options?.length > 0) {
+      populateScopes();
+    }
+    return currentLang;
+  };
+
+  const onExporterLang = (nextLang) => {
+    if (nextLang !== currentLang) {
+      setLang(nextLang);
+    }
+  };
+  exporter._langListeners?.add(onExporterLang);
+  const unsubI18n = typeof opts.i18n?.subscribe === 'function' ? opts.i18n.subscribe((l) => setLang(l)) : null;
 
   fmtSel.addEventListener('change', () => {
     const f = fmtSel.value;
@@ -895,11 +1015,11 @@ export function mountExportButton(containerEl, opts = {}) {
       opts.onExported?.(result);
     } catch (err) {
       if (err?.name === 'AbortError') {
-        statusEl.textContent = lang === 'en' ? 'Export cancelled.' : '已取消导出。';
+        statusEl.textContent = L.cancelled;
       } else {
         noticeEl.textContent = String(err?.message || err);
         noticeEl.hidden = false;
-        statusEl.textContent = lang === 'en' ? 'Export failed.' : '导出失败。';
+        statusEl.textContent = L.failed;
       }
     } finally {
       abortCtrl = null;
@@ -914,8 +1034,11 @@ export function mountExportButton(containerEl, opts = {}) {
     exporter,
     open,
     close,
+    setLang,
     destroy() {
       abortCtrl?.abort();
+      exporter._langListeners?.delete(onExporterLang);
+      if (typeof unsubI18n === 'function') unsubI18n();
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('pointerdown', onDocClick);
       btn.remove();

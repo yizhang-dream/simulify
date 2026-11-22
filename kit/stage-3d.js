@@ -1,22 +1,55 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HtmlSurfaceManager, supportsHtmlInCanvas } from './html-surface.js';
-import { GROUND_LAYER, OutlinePass, SOLID_LAYER } from './outline-pass.js';
+import {
+  GROUND_LAYER,
+  OUTLINE_PRESETS,
+  OutlinePass,
+  SOLID_LAYER,
+  SURFACE_LAYER,
+} from './outline-pass.js';
 
-export { GROUND_LAYER, SOLID_LAYER };
+export { GROUND_LAYER, SOLID_LAYER, SURFACE_LAYER };
 
 const DEG = Math.PI / 180;
+const MAX_DPR = 3;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+const CUBOID_GEO_TYPES = new Set(['BoxGeometry', 'RoundedBoxGeometry', 'PlaneGeometry']);
+const CUBOID_KINDS = new Set(['box', 'cuboid', 'rounded-box', 'roundedbox', 'plane', 'slab']);
+const PRIMITIVE_GEO_TYPES = new Set([
+  'CylinderGeometry',
+  'SphereGeometry',
+  'ConeGeometry',
+  'RingGeometry',
+  'CircleGeometry',
+  'CapsuleGeometry',
+]);
+const PRIMITIVE_KINDS = new Set(['cylinder', 'sphere', 'cone', 'ring', 'circle', 'capsule']);
+const SCULPTED_GEO_TYPES = new Set([
+  'LatheGeometry',
+  'ExtrudeGeometry',
+  'TubeGeometry',
+  'TorusGeometry',
+  'TorusKnotGeometry',
+  'ShapeGeometry',
+  'PolyhedronGeometry',
+  'IcosahedronGeometry',
+  'OctahedronGeometry',
+  'DodecahedronGeometry',
+  'TetrahedronGeometry',
+  'BufferGeometry',
+]);
 
 const STUDIO_THEMES = {
   'paper-ink': {
     hemiSky: 0xfffaf3,
     hemiGround: 0xc2ae90,
-    hemiIntensity: 0.62,
-    keyColor: 0xfff6ea,
+    hemiIntensity: 0.64,
+    keyColor: 0xfff7ec,
     keyIntensity: 1.18,
     fillColor: 0xdfe8f2,
-    fillIntensity: 0.24,
+    fillIntensity: 0.25,
     shadowColor: 0x7a5532,
     shadowOpacity: 0.27,
     gridCenter: 0xc0b097,
@@ -24,7 +57,7 @@ const STUDIO_THEMES = {
     gridOpacity: 0.42,
     envIntensity: 0.38,
     inkColor: '#141a2c',
-    inkOpacity: 0.92,
+    inkOpacity: 0.86,
   },
   'dark-studio': {
     hemiSky: 0xdbeafe,
@@ -58,7 +91,7 @@ const STUDIO_THEMES = {
     gridOpacity: 0.4,
     envIntensity: 0.42,
     inkColor: '#142b2e',
-    inkOpacity: 0.88,
+    inkOpacity: 0.82,
   },
 };
 
@@ -77,15 +110,24 @@ function parseRequestedBackend(explicit) {
   return 'auto';
 }
 
+function resolveOutlinePreset(opt) {
+  if (opt === false || opt === 'none') return 'none';
+  if (opt === 'subtle') return 'subtle';
+  return 'crisp';
+}
+
 /**
  * Simulify v2 3D/4D Stage supporting:
  * - Automatic 3-tier backend: Hardware WebGPU -> WebGL2 (TSL) -> Graceful Fallback
  * - Full backward compatibility for v1 benches using `three.module.js` (`WebGLRenderer`)
- * - Orthographic & Perspective cameras, cutaway clipping planes, opt-in TSL/GLSL ink outlines
- * - Theme-aware lighting, shadows, and grid (`paper-ink`, `dark-studio`, `bio-cutaway`)
- * - Native HTML-in-Canvas surface manager (`stage.htmlSurfaces`) with Firefox/Safari fallback
- * - Deterministic manual/export contract (`setManualMode`, `renderNow`, `renderFrame`,
- *   `setCameraImmediate`, `setExportSize`, `restoreSize`)
+ * - 1:1 physical pixel backing-store via ResizeObserver `device-pixel-content-box` (DPR up to 3x)
+ * - Separated user/script camera ownership (`setCameraFromScript`, `isUserCameraLocked`, `unlockUserCamera`)
+ * - On-demand dirty-flag rendering (`requestRender`) eliminating 60fps idle GPU spin
+ * - Sharp texture helpers (`getMaxAnisotropy`, `configureSharpTexture`) & `getGeometryAudit()`
+ * - Crisp TSL/GLSL ink outlines (`'crisp' | 'subtle' | 'none'`) with un-tone-mapped `SURFACE_LAYER`
+ * - Native HTML-in-Canvas surface manager (`stage.htmlSurfaces`) with HiDPI fallback
+ * - Deterministic manual/export contract (`setManualMode`, `renderNow`, `renderNowAsync`,
+ *   `renderFrame`, `setCameraImmediate`, `setExportSize`, `restoreSize`)
  */
 export class IsometricStage {
   /**
@@ -111,7 +153,8 @@ export class IsometricStage {
     this.far = options.far ?? (this.cameraType === 'perspective' ? 260 : 240);
     this.baseSpan = options.baseSpan ?? 11.5;
     this.distance = options.distance ?? (this.cameraType === 'perspective' ? 16 : 90);
-    this.outlineEnabled = options.outline !== false;
+    this.outlinePreset = resolveOutlinePreset(options.outline);
+    this.outlineEnabled = this.outlinePreset !== 'none';
     this.themeName = detectThemeName(options.theme);
 
     this.defaultView = {
@@ -131,6 +174,7 @@ export class IsometricStage {
 
     this._savedOblique = null;
     this._topView = false;
+    this._userCameraLocked = false;
     this._fly = null;
     this._frameCallbacks = new Set();
     this._pickables = new Map();
@@ -141,21 +185,23 @@ export class IsometricStage {
     this._onViewChange = options.onViewChange ?? null;
     this._drag = null;
     this._orbitEnabled = options.orbitEnabled !== false;
+    this._cursorOverride = null;
     this._raf = 0;
+    this._dirty = true;
     this._lastFrameTime = null;
     this._manualMode = options.autoLoop === false;
     this._exportSize = null;
+    this._physSize = null;
     this._disposed = false;
     this._rendererReady = false;
-    this.size = { width: 800, height: 500, dpr: 1 };
+    this.size = { width: 800, height: 500, dpr: 1, physicalWidth: 800, physicalHeight: 500 };
     this.backendKind = 'pending';
     this.htmlInCanvasSupported = supportsHtmlInCanvas();
     this.gpuErrors = [];
 
     this.scene = new THREE.Scene();
     this.camera = this._createCamera();
-    this.camera.layers.enable(SOLID_LAYER);
-    this.camera.layers.enable(GROUND_LAYER);
+    this._enableCameraLayers(this.camera);
 
     this._raycaster = new THREE.Raycaster();
     this._ndc = new THREE.Vector2();
@@ -178,9 +224,7 @@ export class IsometricStage {
           });
 
     this._bindEvents();
-    this._resizeObserver =
-      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
-    this._resizeObserver?.observe(canvas);
+    this._initResizeObserver();
 
     this.renderer = null;
     this._envRT = null;
@@ -195,6 +239,49 @@ export class IsometricStage {
       this._initLegacyWebGLRenderer(options);
       this.ready = Promise.resolve(this);
     }
+  }
+
+  _enableCameraLayers(cam) {
+    cam.layers.enable(SOLID_LAYER);
+    cam.layers.enable(GROUND_LAYER);
+    cam.layers.enable(SURFACE_LAYER);
+  }
+
+  _initResizeObserver() {
+    this._supportsDpc =
+      typeof ResizeObserverEntry !== 'undefined' &&
+      'devicePixelContentBoxSize' in ResizeObserverEntry.prototype;
+
+    if (typeof ResizeObserver === 'undefined') {
+      this._resizeObserver = null;
+      return;
+    }
+
+    this._resizeObserver = new ResizeObserver((entries) => {
+      if (this._disposed) return;
+      for (const entry of entries) {
+        const dpc = entry.devicePixelContentBoxSize;
+        if (dpc && dpc.length > 0 && dpc[0].inlineSize > 0 && dpc[0].blockSize > 0) {
+          this._physSize = {
+            width: Math.round(dpc[0].inlineSize),
+            height: Math.round(dpc[0].blockSize),
+          };
+        } else {
+          this._physSize = null;
+        }
+      }
+      this.resize();
+    });
+
+    if (this._supportsDpc) {
+      try {
+        this._resizeObserver.observe(this.canvas, { box: 'device-pixel-content-box' });
+        return;
+      } catch {
+        this._supportsDpc = false;
+      }
+    }
+    this._resizeObserver.observe(this.canvas);
   }
 
   _createCamera() {
@@ -264,7 +351,7 @@ export class IsometricStage {
         this.htmlSurfaces.requestPaint();
       }
       if (!this._manualMode) {
-        this._startLoop();
+        this.requestRender();
       }
     } catch (err) {
       this._enterFallback(err);
@@ -287,7 +374,7 @@ export class IsometricStage {
       this._rendererReady = true;
       this.resize(true);
       if (!this._manualMode) {
-        this._startLoop();
+        this.requestRender();
       }
     } catch (err) {
       this._enterFallback(err);
@@ -302,8 +389,11 @@ export class IsometricStage {
       r.setClearColor(0x000000, 0);
     }
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = options.toneMappingExposure ?? 1.02;
+    // Khronos PBR Neutral preserves true warm-paper albedo & crisp contrast without ACES grey crush
+    r.toneMapping =
+      options.toneMapping ??
+      (THREE.NeutralToneMapping !== undefined ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping);
+    r.toneMappingExposure = options.toneMappingExposure ?? 1.0;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
     r.localClippingEnabled = Boolean(options.localClippingEnabled ?? true);
@@ -319,15 +409,148 @@ export class IsometricStage {
     }
 
     if (this.outlineEnabled) {
-      this.outline = new OutlinePass(r, {
-        lineColor: options.lineColor ?? theme.inkColor,
-        thickness: options.lineThickness ?? 1.25,
-        opacity: options.lineOpacity ?? theme.inkOpacity,
-        depthThreshold: options.depthThreshold ?? 0.32,
-        normalThreshold: options.normalThreshold ?? 0.22,
-        bloom: options.bloom ?? false,
-      });
+      this.outline = this._createOutlinePass(theme, options);
     }
+  }
+
+  _createOutlinePass(theme, options = this._options) {
+    return new OutlinePass(this.renderer, {
+      preset: this.outlinePreset,
+      lineColor: options.lineColor ?? theme.inkColor,
+      thickness: options.lineThickness,
+      opacity: options.lineOpacity ?? theme.inkOpacity,
+      depthThreshold: options.depthThreshold,
+      normalThreshold: options.normalThreshold,
+      bloom: options.bloom ?? false,
+    });
+  }
+
+  /**
+   * Maximum anisotropic texture filtering supported by the active GPU backend (capped at 16).
+   */
+  getMaxAnisotropy() {
+    let raw = 0;
+    try {
+      if (typeof this.renderer?.getMaxAnisotropy === 'function') {
+        raw = this.renderer.getMaxAnisotropy();
+      } else if (typeof this.renderer?.backend?.capabilities?.getMaxAnisotropy === 'function') {
+        raw = this.renderer.backend.capabilities.getMaxAnisotropy();
+      } else if (typeof this.renderer?.capabilities?.getMaxAnisotropy === 'function') {
+        raw = this.renderer.capabilities.getMaxAnisotropy();
+      } else if (!this.renderer) {
+        return 16;
+      }
+    } catch {
+      raw = 4;
+    }
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    return Math.max(1, Math.min(16, Math.round(raw)));
+  }
+
+  /**
+   * Configure any Texture / CanvasTexture for crisp oblique readability:
+   * max GPU anisotropy (up to 16x), SRGBColorSpace, and crisp trilinear mipmaps.
+   */
+  configureSharpTexture(tex, opts = {}) {
+    if (!tex) return tex;
+    tex.colorSpace = opts.colorSpace ?? THREE.SRGBColorSpace;
+    tex.anisotropy = Math.min(opts.anisotropy ?? 16, this.getMaxAnisotropy());
+    const genMips = opts.generateMipmaps !== false;
+    tex.generateMipmaps = genMips;
+    tex.minFilter = opts.minFilter ?? (genMips ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter);
+    tex.magFilter = opts.magFilter ?? THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  /**
+   * Switch outline quality preset at runtime: 'crisp' | 'subtle' | 'none'.
+   */
+  setOutlinePreset(preset) {
+    const next = resolveOutlinePreset(preset);
+    this.outlinePreset = next;
+    this.outlineEnabled = next !== 'none';
+    if (this.outlineEnabled && !this.outline && this.renderer) {
+      const theme = STUDIO_THEMES[this.themeName] || STUDIO_THEMES['paper-ink'];
+      this.outline = this._createOutlinePass(theme, this._options);
+      this.outline.setSize(
+        this.size.width,
+        this.size.height,
+        this.size.dpr,
+        this.size.physicalWidth,
+        this.size.physicalHeight
+      );
+    } else if (this.outline) {
+      this.outline.setPreset(next);
+    }
+    this.requestRender();
+    return this.outlinePreset;
+  }
+
+  /**
+   * Audit visible 3D scene geometry diversity (cuboid vs sculpted vs simple primitives).
+   * Used by Simulify's plugin-level visual/modeling oracle.
+   */
+  getGeometryAudit() {
+    let cuboidMeshes = 0;
+    let sculptedMeshes = 0;
+    let primitiveMeshes = 0;
+    let surfaceMeshes = 0;
+    const kinds = Object.create(null);
+
+    this.scene.traverseVisible((obj) => {
+      if (!obj || !obj.isMesh) return;
+      if (obj.userData?.simulifyInternal === true) return;
+
+      const explicitKind = obj.userData?.simulifyGeoKind || obj.geometry?.userData?.simulifyGeoKind || '';
+      const rawCtorName = obj.geometry?.constructor?.name || '';
+      const rawType = rawCtorName === 'RoundedBoxGeometry' ? 'RoundedBoxGeometry' : (obj.geometry?.type || 'BufferGeometry');
+      const kindKey = explicitKind ? String(explicitKind) : rawType;
+      const kindLower = kindKey.toLowerCase();
+
+      kinds[kindKey] = (kinds[kindKey] || 0) + 1;
+
+      if (kindLower === 'html-surface' || kindLower === 'htmlsurface') {
+        surfaceMeshes += 1;
+        return;
+      }
+
+      if (explicitKind) {
+        if (CUBOID_KINDS.has(kindLower)) {
+          cuboidMeshes += 1;
+        } else if (PRIMITIVE_KINDS.has(kindLower)) {
+          primitiveMeshes += 1;
+        } else {
+          sculptedMeshes += 1;
+        }
+        return;
+      }
+
+      if (CUBOID_GEO_TYPES.has(rawType)) {
+        cuboidMeshes += 1;
+      } else if (SCULPTED_GEO_TYPES.has(rawType)) {
+        sculptedMeshes += 1;
+      } else if (PRIMITIVE_GEO_TYPES.has(rawType)) {
+        primitiveMeshes += 1;
+      } else {
+        sculptedMeshes += 1;
+      }
+    });
+
+    const totalMeshes = cuboidMeshes + sculptedMeshes + primitiveMeshes;
+    const cuboidRatio = totalMeshes > 0 ? +(cuboidMeshes / totalMeshes).toFixed(4) : 0;
+    const sculptedRatio = totalMeshes > 0 ? +(sculptedMeshes / totalMeshes).toFixed(4) : 0;
+
+    return {
+      totalMeshes,
+      cuboidMeshes,
+      sculptedMeshes,
+      primitiveMeshes,
+      surfaceMeshes,
+      cuboidRatio,
+      sculptedRatio,
+      kinds: { ...kinds },
+    };
   }
 
   _enterFallback(error) {
@@ -391,6 +614,7 @@ export class IsometricStage {
     this._shadowPlane.layers.set(GROUND_LAYER);
     this._shadowPlane.renderOrder = -1;
     this._shadowPlane.visible = this._showGround;
+    this._shadowPlane.userData.simulifyInternal = true;
     this.scene.add(this._shadowPlane);
 
     this._grid = null;
@@ -409,6 +633,7 @@ export class IsometricStage {
     this._ringMesh.visible = false;
     this._ringMesh.layers.set(GROUND_LAYER);
     this._ringMesh.renderOrder = 5;
+    this._ringMesh.userData.simulifyInternal = true;
     this.scene.add(this._ringMesh);
   }
 
@@ -432,6 +657,7 @@ export class IsometricStage {
     grid.layers.set(GROUND_LAYER);
     grid.renderOrder = -2;
     grid.visible = this._showGrid;
+    grid.userData.simulifyInternal = true;
     this.scene.add(grid);
     this._grid = grid;
   }
@@ -457,6 +683,7 @@ export class IsometricStage {
     if (this.outline && this._options.lineColor === undefined) {
       this.outline.setInkColor(t.inkColor, this._options.lineOpacity ?? t.inkOpacity);
     }
+    this.requestRender();
   }
 
   /** Toggle camera orbit/pan/zoom input (e.g. while a 3D manipulator owns the drag). */
@@ -464,6 +691,14 @@ export class IsometricStage {
     this._orbitEnabled = Boolean(enabled);
     if (!this._orbitEnabled && this._drag) {
       this._drag = null;
+    }
+  }
+
+  /** Optional cursor lock for manipulators/brushes so hover picking never overwrites it. */
+  setCursorOverride(cursor) {
+    this._cursorOverride = cursor || null;
+    if (this.canvas) {
+      this.canvas.style.cursor = this._cursorOverride || (this._hoveredId ? 'pointer' : 'grab');
     }
   }
 
@@ -482,10 +717,10 @@ export class IsometricStage {
     this.near = this._options.near ?? (nextType === 'perspective' ? 0.2 : 1);
     this.far = this._options.far ?? (nextType === 'perspective' ? 260 : 240);
     this.camera = this._createCamera();
-    this.camera.layers.enable(SOLID_LAYER);
-    this.camera.layers.enable(GROUND_LAYER);
+    this._enableCameraLayers(this.camera);
     this._updateCamera();
     this._notifyViewChange();
+    this.requestRender();
   }
 
   /** Create a THREE.Plane for cutaway cross-section slicing on materials (`material.clippingPlanes`). */
@@ -498,6 +733,7 @@ export class IsometricStage {
     if (this.renderer) {
       this.renderer.clippingPlanes = Array.isArray(planes) ? planes : [];
     }
+    this.requestRender();
   }
 
   setHighlightRing(worldPos, radius = 0.85, color = '#149694') {
@@ -510,10 +746,14 @@ export class IsometricStage {
     this._ringMesh.scale.setScalar(radius / 0.85);
     this._ringMat.color.set(color);
     this._ringMesh.visible = true;
+    this.requestRender();
   }
 
   clearHighlightRing() {
-    this._ringMesh.visible = false;
+    if (this._ringMesh.visible) {
+      this._ringMesh.visible = false;
+      this.requestRender();
+    }
   }
 
   _bindEvents() {
@@ -551,6 +791,11 @@ export class IsometricStage {
         this._drag.lastY = e.clientY;
         this._drag.moved += Math.hypot(dx, dy);
 
+        // Lock camera ownership to user once an intentional drag begins (click-to-pick does not lock)
+        if (this._drag.moved >= 2) {
+          this._userCameraLocked = true;
+        }
+
         if (this._drag.mode === 'orbit') {
           this.view.azimuth -= dx * 0.0072;
           this.view.elevation = clamp(this.view.elevation + dy * 0.0068, 12 * DEG, 86 * DEG);
@@ -570,6 +815,7 @@ export class IsometricStage {
         }
         this._updateCamera();
         this._notifyViewChange();
+        this.requestRender();
         return;
       }
       this._updateHover(e.clientX, e.clientY);
@@ -591,6 +837,7 @@ export class IsometricStage {
         }
       }
       this._updateHover(e.clientX, e.clientY);
+      this.requestRender();
     };
 
     c.addEventListener('pointerup', endPointer);
@@ -605,10 +852,12 @@ export class IsometricStage {
         if (!this._orbitEnabled) return;
         e.preventDefault();
         this._fly = null;
+        this._userCameraLocked = true;
         const factor = Math.exp(-e.deltaY * 0.0011);
         this.view.zoom = clamp(this.view.zoom * factor, 0.5, 2.8);
         this._updateCamera();
         this._notifyViewChange();
+        this.requestRender();
       },
       { passive: false }
     );
@@ -621,7 +870,13 @@ export class IsometricStage {
 
   _setHover(hit, clientX, clientY) {
     const nextId = hit ? hit.id : null;
-    if (!this._drag) {
+    if (
+      !this._drag &&
+      this._orbitEnabled &&
+      !this._cursorOverride &&
+      this.canvas.dataset?.cursorLock !== 'true' &&
+      this.canvas.style.cursor !== 'crosshair'
+    ) {
       this.canvas.style.cursor = nextId ? 'pointer' : 'grab';
     }
     const changed = nextId !== this._hoveredId;
@@ -691,36 +946,82 @@ export class IsometricStage {
   }
 
   /**
-   * Resize renderer, outline pass, and camera. Respects locked export dimensions
-   * when `setExportSize(w, h, dpr)` is active.
+   * Resize renderer, outline pass, and camera with 1:1 physical pixel accuracy.
+   * Uses `device-pixel-content-box` when available (preventing Windows 125%/150%/200%
+   * fractional-DPR 1px off-by-one blur) and supports DPR up to 3x.
+   * Respects locked export dimensions when `setExportSize(w, h, dpr)` is active.
    */
   resize(force = false) {
     let width;
     let height;
     let dpr;
+    let physicalWidth;
+    let physicalHeight;
+
     if (this._exportSize) {
       ({ width, height, dpr } = this._exportSize);
+      physicalWidth = Math.max(2, Math.round(width * dpr));
+      physicalHeight = Math.max(2, Math.round(height * dpr));
     } else {
       const rect = this.canvas.getBoundingClientRect();
-      width = Math.max(200, Math.round(rect.width || this.canvas.width || 800));
-      height = Math.max(160, Math.round(rect.height || this.canvas.height || 500));
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const rawCssW = rect.width || this.canvas.clientWidth || this.canvas.width || 800;
+      const rawCssH = rect.height || this.canvas.clientHeight || this.canvas.height || 500;
+      width = Math.max(200, Math.round(rawCssW));
+      height = Math.max(160, Math.round(rawCssH));
+      const rawDpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+      const cappedDpr = Math.min(rawDpr, MAX_DPR);
+      const expectedPhysW = Math.max(2, Math.round(rawCssW * cappedDpr));
+      const expectedPhysH = Math.max(2, Math.round(rawCssH * cappedDpr));
+
+      if (this._physSize && this._physSize.width >= 2 && this._physSize.height >= 2) {
+        const capScale = rawDpr > MAX_DPR ? MAX_DPR / rawDpr : 1;
+        const dpcW = Math.max(2, Math.round(this._physSize.width * capScale));
+        const dpcH = Math.max(2, Math.round(this._physSize.height * capScale));
+        // Trust devicePixelContentBoxSize when aligned with devicePixelRatio (real 125%/150%/200% displays);
+        // fall back to exact Math.round(css * dpr) when emulated/headless DPC lags behind DPR.
+        if (Math.abs(dpcW - expectedPhysW) <= 4 && Math.abs(dpcH - expectedPhysH) <= 4) {
+          physicalWidth = dpcW;
+          physicalHeight = dpcH;
+        } else {
+          physicalWidth = expectedPhysW;
+          physicalHeight = expectedPhysH;
+        }
+        dpr = physicalWidth / Math.max(1, rawCssW);
+      } else {
+        physicalWidth = expectedPhysW;
+        physicalHeight = expectedPhysH;
+        dpr = cappedDpr;
+      }
     }
 
-    if (!force && width === this.size.width && height === this.size.height && dpr === this.size.dpr) return;
-    this.size = { width, height, dpr };
+    if (
+      !force &&
+      width === this.size.width &&
+      height === this.size.height &&
+      physicalWidth === this.size.physicalWidth &&
+      physicalHeight === this.size.physicalHeight &&
+      Math.abs(dpr - this.size.dpr) < 1e-4
+    ) {
+      return;
+    }
+
+    this.size = { width, height, dpr, physicalWidth, physicalHeight };
 
     if (this.renderer) {
-      this.renderer.setPixelRatio(dpr);
-      this.renderer.setSize(width, height, false);
+      // Set exact integer physical dimensions with pixelRatio=1 so Three.js Math.floor(w * dpr)
+      // NEVER drops 1 physical pixel on Windows 125% / 150% / 175% DPI scaling
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(physicalWidth, physicalHeight, false);
     }
     if (this.outline) {
-      this.outline.setSize(width, height, dpr);
+      this.outline.setSize(width, height, dpr, physicalWidth, physicalHeight);
     }
     this._updateCamera();
+    this.htmlSurfaces?.handleViewportResize?.();
     if (this.htmlSurfaces?.nativeEnabled) {
       this.htmlSurfaces.requestPaint();
     }
+    this.requestRender();
   }
 
   /**
@@ -785,12 +1086,41 @@ export class IsometricStage {
     this.htmlSurfaces?.updateGeometries(this.camera);
   }
 
+  /** Whether the user has manually taken over the camera via drag, wheel, or flyTo. */
+  isUserCameraLocked() {
+    return Boolean(this._userCameraLocked);
+  }
+
+  /** Release user camera lock so scripted choreography camera beats may resume. */
+  unlockUserCamera() {
+    this._userCameraLocked = false;
+    this.requestRender();
+  }
+
+  /**
+   * Scripted choreography camera placement: applies ONLY when the user has NOT
+   * manually taken over the camera. Never interrupts an active user drag or flyTo.
+   * @returns {boolean} True if applied, false if respected user lock.
+   */
+  setCameraFromScript(pose = {}) {
+    if (!pose || this._userCameraLocked) return false;
+    this._applyPoseImmediate(pose);
+    return true;
+  }
+
   /**
    * Instant deterministic camera placement (no wall-clock flyTo easing).
-   * Shared contract with ActorChoreographer cameraBeat() and deterministic exporters.
+   * Reserved for explicit reset, export mode, act-jump unlock, or direct overrides.
    */
-  setCameraImmediate(pose = {}) {
+  setCameraImmediate(pose = {}, opts = {}) {
     if (!pose) return;
+    if (opts && opts.unlock === true) {
+      this._userCameraLocked = false;
+    }
+    this._applyPoseImmediate(pose);
+  }
+
+  _applyPoseImmediate(pose) {
     this._fly = null;
     if (pose.azimuth !== undefined) this.view.azimuth = Number(pose.azimuth);
     else if (pose.azimuthDeg !== undefined) this.view.azimuth = Number(pose.azimuthDeg) * DEG;
@@ -817,9 +1147,15 @@ export class IsometricStage {
     this._topView = this.view.elevation >= 83 * DEG;
     this._updateCamera();
     this._notifyViewChange();
+    this.requestRender();
   }
 
-  flyTo(goal = {}, durationMs = 420) {
+  flyTo(goal = {}, durationMs = 420, opts = {}) {
+    const shouldLock = opts?.lockUser !== false && opts?.fromScript !== true;
+    if (shouldLock) {
+      this._userCameraLocked = true;
+    }
+
     const targetGoal = goal.target
       ? Array.isArray(goal.target)
         ? new THREE.Vector3(...goal.target)
@@ -831,7 +1167,7 @@ export class IsometricStage {
     const nextDist = goal.distance ?? this.view.distance;
 
     if (this.reducedMotion || this._manualMode || durationMs <= 0) {
-      this.setCameraImmediate({
+      this._applyPoseImmediate({
         azimuth: nextAz,
         elevation: nextEl,
         zoom: nextZoom,
@@ -855,6 +1191,7 @@ export class IsometricStage {
       toDist: nextDist,
       toTarget: targetGoal,
     };
+    this.requestRender();
   }
 
   /** Focus camera cleanly on a registered pickable object ("Zoom to it"). */
@@ -905,6 +1242,7 @@ export class IsometricStage {
   resetView() {
     this._topView = false;
     this._savedOblique = null;
+    this._userCameraLocked = false;
     this.flyTo(
       {
         azimuth: this.defaultView.azimuth,
@@ -913,7 +1251,8 @@ export class IsometricStage {
         distance: this.defaultView.distance,
         target: [this.defaultView.target.x, this.defaultView.target.y, this.defaultView.target.z],
       },
-      380
+      380,
+      { lockUser: false }
     );
     this._notifyViewChange();
   }
@@ -932,6 +1271,7 @@ export class IsometricStage {
       zoom: +this.view.zoom.toFixed(2),
       target: [+this.view.target.x.toFixed(3), +this.view.target.y.toFixed(3), +this.view.target.z.toFixed(3)],
       topView: this._topView,
+      userCameraLocked: this._userCameraLocked,
       cameraType: this.cameraType,
     };
   }
@@ -953,7 +1293,29 @@ export class IsometricStage {
 
   onFrame(fn) {
     this._frameCallbacks.add(fn);
+    this.requestRender();
     return () => this._frameCallbacks.delete(fn);
+  }
+
+  /**
+   * Mark the 3D stage dirty and schedule an on-demand animation frame.
+   * When paused/idle with no flyTo, drag, pulse ring, or frame callbacks,
+   * the GPU renders 0 idle frames instead of spinning at 60fps.
+   */
+  requestRender() {
+    this._dirty = true;
+    if (!this._disposed && !this._manualMode && this._rendererReady && !this._raf) {
+      this._scheduleTick();
+    }
+  }
+
+  _needsContinuousLoop() {
+    return Boolean(
+      this._fly ||
+      this._drag ||
+      this._frameCallbacks.size > 0 ||
+      (this._ringMesh?.visible && !this.reducedMotion)
+    );
   }
 
   /**
@@ -971,7 +1333,7 @@ export class IsometricStage {
         this._raf = 0;
       }
     } else if (this._rendererReady && !this._disposed) {
-      this._startLoop();
+      this.requestRender();
     }
   }
 
@@ -992,15 +1354,24 @@ export class IsometricStage {
     } else {
       this.renderer.render(this.scene, this.camera);
     }
+    this._dirty = false;
     return true;
   }
 
   /**
-   * Async render variant using Three.js renderAsync() while keeping the WebGPU
-   * swapchain texture live for immediate drawImage / toBlob / VideoFrame capture.
+   * Async render variant awaiting WebGPU init & pending HTML-in-Canvas paints, then
+   * submitting the frame synchronously so the WebGPU swapchain texture stays live
+   * for immediate `drawImage` / `toBlob` / `VideoFrame` capture.
    */
   async renderNowAsync() {
+    if (this._disposed) return false;
+    if (!this._rendererReady && this.ready) {
+      await this.ready;
+    }
     if (this._disposed || !this._rendererReady || !this.renderer) return false;
+    if (this.htmlSurfaces?.flushPaint) {
+      await this.htmlSurfaces.flushPaint();
+    }
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
     if (this.htmlSurfaces) {
@@ -1009,11 +1380,13 @@ export class IsometricStage {
     }
     if (this.outline && this.outlineEnabled) {
       await this.outline.renderAsync(this.scene, this.camera);
-    } else if (typeof this.renderer.renderAsync === 'function') {
-      await this.renderer.renderAsync(this.scene, this.camera);
     } else {
+      if (this.renderer._initialized === false && typeof this.renderer.init === 'function') {
+        await this.renderer.init();
+      }
       this.renderer.render(this.scene, this.camera);
     }
+    this._dirty = false;
     return true;
   }
 
@@ -1038,33 +1411,46 @@ export class IsometricStage {
       this.view.distance = this._fly.fromDist + (this._fly.toDist - this._fly.fromDist) * ease;
       this.view.target.lerpVectors(this._fly.fromTarget, this._fly.toTarget, ease);
       this._updateCamera();
+      this._dirty = true;
       if (t >= 1) {
         this._fly = null;
         this._notifyViewChange();
       }
     }
 
-    for (const fn of this._frameCallbacks) {
-      fn(nowMs, dt);
+    if (this._frameCallbacks.size > 0) {
+      for (const fn of this._frameCallbacks) {
+        fn(nowMs, dt);
+      }
+      this._dirty = true;
     }
+
     if (this._ringMesh.visible && !this.reducedMotion) {
       this._ringMat.opacity = 0.72 + 0.22 * Math.sin(nowMs * 0.007);
+      this._dirty = true;
     }
+
     return this.renderNow();
   }
 
-  _startLoop() {
+  _scheduleTick() {
     if (this._raf || this._disposed || this._manualMode) return;
-    this._lastFrameTime = performance.now();
-    const tick = (now) => {
-      if (this._disposed || this._manualMode) {
-        this._raf = 0;
-        return;
+    if (this._lastFrameTime === null) {
+      this._lastFrameTime = performance.now();
+    }
+    this._raf = requestAnimationFrame((now) => {
+      this._raf = 0;
+      if (this._disposed || this._manualMode) return;
+      if (this._dirty || this._needsContinuousLoop()) {
+        this.renderFrame(now);
       }
-      this.renderFrame(now);
-      this._raf = requestAnimationFrame(tick);
-    };
-    this._raf = requestAnimationFrame(tick);
+      if (this._dirty || this._needsContinuousLoop()) {
+        this._scheduleTick();
+      } else {
+        // Reset timestamp so the next on-demand wakeup has a clean dt
+        this._lastFrameTime = null;
+      }
+    });
   }
 
   dispose() {
