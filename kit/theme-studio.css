@@ -104,6 +104,28 @@
   color: var(--ink);
 }
 
+:root[data-theme="dark-studio"] .eq-line,
+:root[data-theme="dark-studio"] .lm-op-sym {
+  color: var(--navy);
+}
+
+:root[data-theme="dark-studio"] .lm-frac-num {
+  border-bottom-color: rgba(238, 243, 250, 0.72);
+}
+
+:root[data-theme="dark-studio"] .brand-title,
+:root[data-theme="dark-studio"] .hud-guide h2,
+:root[data-theme="dark-studio"] .display-title,
+:root[data-theme="dark-studio"] .act-title,
+:root[data-theme="dark-studio"] .export-caption-title {
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+:root[data-theme="dark-studio"] .export-caption-eq {
+  color: #5eead4;
+}
+
 :root[data-theme="dark-studio"] .live-table th {
   background: #20293b;
   color: var(--navy);
@@ -203,4 +225,20 @@
   background-image:
     radial-gradient(circle at 46% 42%, rgba(255, 255, 255, 0.78), rgba(225, 232, 229, 0.45) 68%),
     radial-gradient(#bfd0c9 1px, transparent 1px);
+}
+
+:root[data-theme="bio-cutaway"] .eq-block,
+:root[data-theme="bio-cutaway"] .live-table,
+:root[data-theme="bio-cutaway"] .breakdown-item,
+:root[data-theme="bio-cutaway"] .xy-svg,
+:root[data-theme="bio-cutaway"] .hyst-svg {
+  background: #fbfdfd;
+}
+
+:root[data-theme="bio-cutaway"] .eq-line,
+:root[data-theme="bio-cutaway"] .brand-title,
+:root[data-theme="bio-cutaway"] .hud-guide h2,
+:root[data-theme="bio-cutaway"] .display-title,
+:root[data-theme="bio-cutaway"] .act-title {
+  color: var(--navy);
 }
