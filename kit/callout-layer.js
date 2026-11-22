@@ -1,5 +1,12 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+const TONE_ACCENT = {
+  teal: '#149694',
+  amber: '#c96d24',
+  danger: '#b83b3b',
+  navy: '#18213d',
+};
+
 function overlapArea(a, b) {
   const w = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
   const h = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
@@ -81,7 +88,8 @@ export function resolveCalloutRects(rects, bounds, blockers = []) {
 /**
  * Projects 3D world anchors into 2D canvas coordinates each frame,
  * drawing dual-stroke crisp elbowed SVG leader lines paired with floating callout pills
- * that avoid HUD blockers and support per-step reveal (`afterStep`).
+ * that avoid HUD blockers, support per-step/choreographer reveal (`afterStep`, `opacity`),
+ * and cache layout snapshots (`getExportSnapshot()`) for Canvas2D video export fallback.
  */
 export class CalloutLayer {
   constructor(stage, svgEl, tagsEl) {
@@ -92,14 +100,28 @@ export class CalloutLayer {
     this.enabled = true;
     this.currentStep = Number.POSITIVE_INFINITY;
     this._blockersFn = null;
+    this._choreographer = null;
+    this._lastLayout = { width: 0, height: 0, items: [] };
+  }
+
+  /** Optional binding to an `ActorChoreographer` for pure-function-of-`t` callout opacity. */
+  setChoreographer(choreographer) {
+    this._choreographer = choreographer || null;
+    this.update();
   }
 
   setEnabled(enabled) {
     this.enabled = Boolean(enabled);
-    this.svg.style.display = this.enabled ? '' : 'none';
-    this.tagsEl.style.display = this.enabled ? '' : 'none';
+    if (this.svg?.style) this.svg.style.display = this.enabled ? '' : 'none';
+    if (this.tagsEl?.style) this.tagsEl.style.display = this.enabled ? '' : 'none';
     if (this.enabled) {
       this.update();
+    } else {
+      this._lastLayout = {
+        width: this.stage?.size?.width || 0,
+        height: this.stage?.size?.height || 0,
+        items: [],
+      };
     }
   }
 
@@ -184,6 +206,49 @@ export class CalloutLayer {
     this.items.clear();
     this.svg.replaceChildren();
     this.tagsEl.replaceChildren();
+    this._lastLayout = {
+      width: this.stage?.size?.width || 0,
+      height: this.stage?.size?.height || 0,
+      items: [],
+    };
+  }
+
+  /**
+   * Return the latest cached 2D callout layout snapshot for Canvas2D video/image export fallback.
+   * Shape: `{ width, height, items: [{ id, anchorX, anchorY, left, top, width, height, title, detail, accent, opacity, leaderPoints }] }`.
+   */
+  getExportSnapshot() {
+    if (!this.enabled) {
+      return {
+        width: this.stage?.size?.width || 0,
+        height: this.stage?.size?.height || 0,
+        items: [],
+      };
+    }
+    if (!this._lastLayout || (!this._lastLayout.width && this.stage?.size?.width)) {
+      this.update();
+    }
+    return {
+      width: this._lastLayout.width,
+      height: this._lastLayout.height,
+      items: this._lastLayout.items.map((it) => ({
+        ...it,
+        leaderPoints: it.leaderPoints.map((pt) => [...pt]),
+      })),
+    };
+  }
+
+  #resolveOpacity(id, item) {
+    let op = typeof item.opacity === 'function'
+      ? Number(item.opacity())
+      : item.opacity !== undefined
+        ? Number(item.opacity)
+        : 1;
+    if (!Number.isFinite(op)) op = 1;
+    if (this._choreographer && typeof this._choreographer.getCalloutOpacity === 'function') {
+      op *= this._choreographer.getCalloutOpacity(item.choreoId ?? id);
+    }
+    return Math.max(0, Math.min(1, op));
   }
 
   update() {
@@ -206,7 +271,9 @@ export class CalloutLayer {
     for (const [id, item] of this.items.entries()) {
       const stepOk = item.afterStep === undefined || this.currentStep >= item.afterStep;
       const userVis = typeof item.visible === 'function' ? item.visible() : item.visible !== false;
-      if (!stepOk || !userVis) {
+      const effOpacity = this.#resolveOpacity(id, item);
+
+      if (!stepOk || !userVis || effOpacity <= 0.01) {
         item.shadow.style.display = 'none';
         item.polyline.style.display = 'none';
         item.dot.style.display = 'none';
@@ -229,6 +296,12 @@ export class CalloutLayer {
       item.dot.style.display = '';
       item.tag.style.display = '';
 
+      const opStr = effOpacity < 0.999 ? effOpacity.toFixed(3) : '';
+      item.shadow.style.opacity = opStr;
+      item.polyline.style.opacity = opStr;
+      item.dot.style.opacity = opStr;
+      item.tag.style.opacity = opStr;
+
       const dx = (item.dx ?? 48) * scale;
       const dy = (item.dy ?? -48) * scale;
       const widthBox = item.tag.offsetWidth || 120;
@@ -238,15 +311,26 @@ export class CalloutLayer {
       const left = dx >= 0 ? rawX : rawX - widthBox;
       const top = rawY - heightBox / 2;
 
-      visibleEntries.push({ id, item, pt, dx, left, top, width: widthBox, height: heightBox });
+      visibleEntries.push({
+        id,
+        item,
+        pt,
+        dx,
+        left,
+        top,
+        width: widthBox,
+        height: heightBox,
+        opacity: effOpacity,
+      });
     }
 
     const blockers = this._blockersFn ? this._blockersFn() : [];
     const resolved = resolveCalloutRects(visibleEntries, bounds, blockers);
+    const snapshotItems = [];
 
     resolved.forEach((rect, idx) => {
       const entry = visibleEntries[idx];
-      const { item, pt, width: tagW, height: tagH } = entry;
+      const { id, item, pt, width: tagW, height: tagH, opacity } = entry;
       item.tag.style.transform = `translate3d(${Math.round(rect.left)}px, ${Math.round(rect.top)}px, 0)`;
 
       const elbowY = rect.top + tagH / 2;
@@ -258,6 +342,28 @@ export class CalloutLayer {
       item.dot.setAttribute('cy', pt.y.toFixed(1));
       item.shadow.setAttribute('points', pts);
       item.polyline.setAttribute('points', pts);
+
+      snapshotItems.push({
+        id,
+        anchorX: pt.x,
+        anchorY: pt.y,
+        left: rect.left,
+        top: rect.top,
+        width: tagW,
+        height: tagH,
+        title: item.label ?? '',
+        detail: item.sublabel ?? '',
+        tone: item.tone ?? '',
+        accent: item.accent ?? TONE_ACCENT[item.tone] ?? TONE_ACCENT.navy,
+        opacity,
+        leaderPoints: [
+          [pt.x, pt.y],
+          [kneeX, elbowY],
+          [attachX, elbowY],
+        ],
+      });
     });
+
+    this._lastLayout = { width, height, items: snapshotItems };
   }
 }

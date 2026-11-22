@@ -44,7 +44,8 @@ export class Spring {
       this.velocity = 0;
       return this.value;
     }
-    const h = Math.min(dt, 0.04);
+    const h = Math.min(Math.max(0, Number(dt) || 0), 0.04);
+    if (h <= 0) return this.value;
     const force = -this.stiffness * (this.value - this.target) - this.damping * this.velocity;
     this.velocity += (force / this.mass) * h;
     this.value += this.velocity * h;

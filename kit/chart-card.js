@@ -3,14 +3,17 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
  * Reusable collapsible floating telemetry / diagram card supporting:
  * - 'compare': side-by-side meters and live slot chips
- * - 'hysteresis': live SVG XY state loop with threshold guides
- * - 'xy': general multi-series XY coordinate plot with ghost baseline, threshold marks & live dot
+ * - 'hysteresis': live SVG XY state loop with threshold guides and flow arrows
+ * - 'xy': general multi-series XY coordinate plot with ghost baseline, threshold marks,
+ *   live dot, non-colliding Y-axis title/ticks, and smooth hover/click-to-scrub (`onScrub`).
  */
 export class ChartCard {
-  constructor(rootEl, { title = '实时图表', mode = 'compare', collapsed = false } = {}) {
+  constructor(rootEl, { title = '实时图表', mode = 'compare', collapsed = false, onScrub = null } = {}) {
     this.root = rootEl;
     this.mode = mode;
     this.collapsed = collapsed;
+    this._onScrub = typeof onScrub === 'function' ? onScrub : null;
+    this._scrubMeta = null;
 
     this.root.classList.add('chart-card');
     this.root.innerHTML = `
@@ -31,6 +34,10 @@ export class ChartCard {
     this.foldBtn.textContent = collapsed ? '展开' : '收起';
     this.bodyEl.hidden = collapsed;
     this.foldBtn.onclick = () => this.setCollapsed(!this.collapsed);
+  }
+
+  setOnScrub(fn) {
+    this._onScrub = typeof fn === 'function' ? fn : null;
   }
 
   setVisible(visible) {
@@ -159,7 +166,7 @@ export class ChartCard {
       svg.append(tx);
     }
 
-    // Ideal loop envelope faint underlay when hysteresis > 0
+    // Ideal loop envelope faint underlay + directional flow chevrons when hysteresis > 0
     if (thresholds.length === 2 && thresholds[1] > thresholds[0]) {
       const xLo = mapX(thresholds[0]);
       const xHi = mapX(thresholds[1]);
@@ -175,6 +182,22 @@ export class ChartCard {
       ghost.setAttribute('stroke-width', '1.2');
       ghost.setAttribute('stroke-dasharray', '2 2');
       svg.append(ghost);
+
+      const midX = (xLo + xHi) / 2;
+      const topChevron = document.createElementNS(SVG_NS, 'path');
+      topChevron.setAttribute('d', `M ${(midX - 3).toFixed(1)} ${(yOn - 3).toFixed(1)} L ${(midX + 2.5).toFixed(1)} ${yOn.toFixed(1)} L ${(midX - 3).toFixed(1)} ${(yOn + 3).toFixed(1)}`);
+      topChevron.setAttribute('fill', 'none');
+      topChevron.setAttribute('stroke', '#c96d24');
+      topChevron.setAttribute('stroke-width', '1.4');
+      topChevron.setAttribute('stroke-linecap', 'round');
+
+      const botChevron = document.createElementNS(SVG_NS, 'path');
+      botChevron.setAttribute('d', `M ${(midX + 3).toFixed(1)} ${(yOff - 3).toFixed(1)} L ${(midX - 2.5).toFixed(1)} ${yOff.toFixed(1)} L ${(midX + 3).toFixed(1)} ${(yOff + 3).toFixed(1)}`);
+      botChevron.setAttribute('fill', 'none');
+      botChevron.setAttribute('stroke', '#149694');
+      botChevron.setAttribute('stroke-width', '1.4');
+      botChevron.setAttribute('stroke-linecap', 'round');
+      svg.append(topChevron, botChevron);
     }
 
     // Live traversed path
@@ -206,8 +229,9 @@ export class ChartCard {
   }
 
   /**
-   * Render a general scientific XY plot with multi-series curves, theoretical ghost curve,
-   * critical threshold marks, and live operating point dot.
+   * Render a general scientific XY plot with multi-series curves, counterfactual ghost curve(s),
+   * critical threshold marks, live operating point dot, non-colliding Y-axis title/ticks,
+   * and optional interactive click/drag scrubbing (`onScrub(xNorm, value)`).
    */
   updateXY({
     badge = '',
@@ -219,23 +243,31 @@ export class ChartCard {
     yLabel = '',
     series = [],
     ghost = null,
+    ghosts = null,
     marks = [],
     dot = null,
+    scrubX = null,
+    onScrub = null,
     ariaLabel = '坐标曲线图',
   } = {}) {
     this.mode = 'xy';
     this.badgeEl.textContent = badge;
 
+    const scrubHandler = typeof onScrub === 'function' ? onScrub : this._onScrub;
+    const hasTopMark = marks.some((mk) => mk.axis === 'x' && mk.label);
+
     const W = 256;
-    const H = 122;
-    const padL = 32;
+    const H = 128;
+    const padL = 36;
     const padR = 12;
-    const padT = 14;
-    const padB = 24;
+    const padT = yLabel || hasTopMark ? 24 : 15;
+    const padB = xLabel ? 24 : 16;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
     const xSpan = Math.max(1e-6, xMax - xMin);
     const ySpan = Math.max(1e-6, yMax - yMin);
-    const mapX = (x) => padL + (Math.max(0, Math.min(1, (x - xMin) / xSpan))) * (W - padL - padR);
-    const mapY = (y) => (H - padB) - (Math.max(0, Math.min(1, (y - yMin) / ySpan))) * (H - padT - padB);
+    const mapX = (x) => padL + Math.max(0, Math.min(1, (x - xMin) / xSpan)) * plotW;
+    const mapY = (y) => (H - padB) - Math.max(0, Math.min(1, (y - yMin) / ySpan)) * plotH;
 
     const toneColor = {
       teal: 'var(--teal, #149694)',
@@ -249,8 +281,12 @@ export class ChartCard {
     svg.setAttribute('class', 'xy-svg');
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', ariaLabel);
+    if (scrubHandler) {
+      svg.style.cursor = 'ew-resize';
+      svg.style.touchAction = 'none';
+    }
 
-    // Subtle horizontal grid guides & Y bounds
+    // Subtle horizontal grid guides & Y bounds (kept cleanly inside left gutter x <= padL - 5)
     for (const frac of [0, 0.5, 1]) {
       const yVal = yMin + frac * (yMax - yMin);
       const yy = mapY(yVal);
@@ -264,8 +300,8 @@ export class ChartCard {
 
       if (frac !== 0.5) {
         const lbl = document.createElementNS(SVG_NS, 'text');
-        lbl.setAttribute('x', padL - 4);
-        lbl.setAttribute('y', (yy + 3).toFixed(1));
+        lbl.setAttribute('x', String(padL - 5));
+        lbl.setAttribute('y', (yy + 3.2).toFixed(1));
         lbl.setAttribute('text-anchor', 'end');
         lbl.setAttribute('class', 'xy-label');
         lbl.textContent = Number.isInteger(yVal) ? String(yVal) : yVal.toFixed(1);
@@ -289,8 +325,9 @@ export class ChartCard {
         svg.append(ln);
         if (mk.label) {
           const tx = document.createElementNS(SVG_NS, 'text');
-          tx.setAttribute('x', xx);
-          tx.setAttribute('y', padT - 3);
+          const clampedTx = Math.max(padL + (yLabel ? 46 : 8), Math.min(W - padR - 6, Number(xx)));
+          tx.setAttribute('x', clampedTx.toFixed(1));
+          tx.setAttribute('y', String(padT - 5));
           tx.setAttribute('text-anchor', 'middle');
           tx.setAttribute('class', 'xy-label');
           tx.setAttribute('fill', col);
@@ -306,7 +343,7 @@ export class ChartCard {
         svg.append(ln);
         if (mk.label) {
           const tx = document.createElementNS(SVG_NS, 'text');
-          tx.setAttribute('x', W - padR - 2);
+          tx.setAttribute('x', String(W - padR - 2));
           tx.setAttribute('y', (Number(yy) - 3).toFixed(1));
           tx.setAttribute('text-anchor', 'end');
           tx.setAttribute('class', 'xy-label');
@@ -317,13 +354,25 @@ export class ChartCard {
       }
     }
 
-    // Optional theoretical ghost baseline curve
-    if (ghost && Array.isArray(ghost.points) && ghost.points.length >= 2) {
+    // Optional counterfactual / theoretical ghost baseline curve(s)
+    const ghostList = [];
+    if (ghost && Array.isArray(ghost.points) && ghost.points.length >= 2) ghostList.push(ghost);
+    if (Array.isArray(ghosts)) {
+      for (const g of ghosts) {
+        if (g && Array.isArray(g.points) && g.points.length >= 2) ghostList.push(g);
+      }
+    }
+    for (const g of ghostList) {
       const gp = document.createElementNS(SVG_NS, 'polyline');
       gp.setAttribute('class', 'xy-ghost');
+      gp.setAttribute('fill', 'none');
+      gp.setAttribute('stroke', g.tone ? (toneColor[g.tone] || g.tone) : 'var(--muted, #656a73)');
+      gp.setAttribute('stroke-width', String(g.width ?? 1.55));
+      gp.setAttribute('stroke-dasharray', g.dash ?? '4 3');
+      gp.setAttribute('stroke-opacity', String(g.opacity ?? 0.62));
       gp.setAttribute(
         'points',
-        ghost.points.map((pt) => `${mapX(pt.x).toFixed(1)},${mapY(pt.y).toFixed(1)}`).join(' ')
+        g.points.map((pt) => `${mapX(pt.x).toFixed(1)},${mapY(pt.y).toFixed(1)}`).join(' ')
       );
       svg.append(gp);
     }
@@ -345,11 +394,11 @@ export class ChartCard {
       svg.append(poly);
     }
 
-    // Axis captions
+    // Axis captions — yLabel sits cleanly at x=padL above the plot top edge, never colliding with left ticks
     if (xLabel) {
       const xl = document.createElementNS(SVG_NS, 'text');
       xl.setAttribute('x', ((padL + W - padR) / 2).toFixed(1));
-      xl.setAttribute('y', H - 5);
+      xl.setAttribute('y', String(H - 5));
       xl.setAttribute('text-anchor', 'middle');
       xl.setAttribute('class', 'xy-label');
       xl.textContent = xLabel;
@@ -357,12 +406,31 @@ export class ChartCard {
     }
     if (yLabel) {
       const yl = document.createElementNS(SVG_NS, 'text');
-      yl.setAttribute('x', '6');
-      yl.setAttribute('y', padT - 3);
+      yl.setAttribute('x', String(padL));
+      yl.setAttribute('y', '11');
+      yl.setAttribute('text-anchor', 'start');
       yl.setAttribute('class', 'xy-label');
       yl.textContent = yLabel;
       svg.append(yl);
     }
+
+    // Optional scrub crosshair line
+    const crosshair = document.createElementNS(SVG_NS, 'line');
+    crosshair.setAttribute('y1', String(padT));
+    crosshair.setAttribute('y2', String(H - padB));
+    crosshair.setAttribute('stroke', 'var(--navy, #18213d)');
+    crosshair.setAttribute('stroke-width', '1.15');
+    crosshair.setAttribute('stroke-opacity', '0.55');
+    crosshair.setAttribute('stroke-dasharray', '2 2');
+    if (scrubX !== null && Number.isFinite(scrubX)) {
+      const sx = mapX(scrubX).toFixed(1);
+      crosshair.setAttribute('x1', sx);
+      crosshair.setAttribute('x2', sx);
+      crosshair.style.display = '';
+    } else {
+      crosshair.style.display = 'none';
+    }
+    svg.append(crosshair);
 
     // Live operating dot
     if (dot && Number.isFinite(dot.x) && Number.isFinite(dot.y)) {
@@ -374,6 +442,54 @@ export class ChartCard {
       c.setAttribute('stroke', 'var(--card, #fffaf2)');
       c.setAttribute('stroke-width', '2');
       svg.append(c);
+    }
+
+    if (scrubHandler) {
+      this._scrubMeta = { W, padL, plotW, xMin, xSpan };
+      let activePointerId = null;
+
+      const emitFromClientX = (clientX, meta) => {
+        const rect = svg.getBoundingClientRect();
+        if (!rect.width) return;
+        const svgX = ((clientX - rect.left) / rect.width) * W;
+        const xNorm = Math.max(0, Math.min(1, (svgX - padL) / plotW));
+        const val = xMin + xNorm * xSpan;
+        const clampedSvgX = padL + xNorm * plotW;
+        crosshair.setAttribute('x1', clampedSvgX.toFixed(1));
+        crosshair.setAttribute('x2', clampedSvgX.toFixed(1));
+        crosshair.style.display = '';
+        scrubHandler(xNorm, val, meta);
+      };
+
+      svg.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        activePointerId = e.pointerId;
+        svg.setPointerCapture?.(e.pointerId);
+        emitFromClientX(e.clientX, { dragging: true, type: 'down' });
+      });
+      svg.addEventListener('pointermove', (e) => {
+        if (activePointerId === e.pointerId) {
+          emitFromClientX(e.clientX, { dragging: true, type: 'drag' });
+        } else if (activePointerId === null) {
+          emitFromClientX(e.clientX, { dragging: false, type: 'hover' });
+        }
+      });
+      const finishDrag = (e) => {
+        if (activePointerId !== e.pointerId) return;
+        activePointerId = null;
+        try {
+          svg.releasePointerCapture?.(e.pointerId);
+        } catch {
+          // Ignore if already released
+        }
+      };
+      svg.addEventListener('pointerup', finishDrag);
+      svg.addEventListener('pointercancel', finishDrag);
+      svg.addEventListener('pointerleave', () => {
+        if (activePointerId === null && (scrubX === null || !Number.isFinite(scrubX))) {
+          crosshair.style.display = 'none';
+        }
+      });
     }
 
     this.bodyEl.replaceChildren(svg);

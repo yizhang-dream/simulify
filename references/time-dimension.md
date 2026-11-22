@@ -1,44 +1,67 @@
-# 时间维度（T1–T4）、问题链与整章知识承载规范
+# 时间维度（T1–T4）、渐进揭示法则（True 4D）与整章知识承载规范
 
-> **核心痛点**：三维空间是排他的——同一坐标同时只能存在一种形态。如果试图把一整章多节知识死塞进“物体稀少、固定机位、静止或单段重复”的 3D 桌面，既讲不透短时瞬态与长时演进，也会让场景单薄到撑不起教学厚度。
+> **核心第一定律（True 4D Progressive-Reveal Law）**：时间不是「换皮 PPT」的分页按钮，而是与三维空间等价的第四维因果坐标。**严禁在 `t = 0` 一口气把全部 3D 物件、对照轨、图表、代码框与公式面板全数倾倒上台（spatial-first dumping）**；必须从干净稀疏的 1–2 个核心载体起手，沿 **25–60 s 可连续双向拖动的全局时间轴**，仅在上一拍制造出真实因果冲突或认知问题时，才让新物件、子系统、幽灵对照与上下文面板顺势入场。
 
 ---
 
-## 1. T1–T4 时间演化范式（与原生真源正交）
+## 1. 严禁的反模式 vs True 4D 渐进编排
 
-依托 [`kit/timeline-director.js`](../kit/timeline-director.js)，按时间跨度选择对应范式：
+| 维度 | v1 伪 4D 反模式（门禁直接驳回） | Simulify v2 真 4D 标准 |
+|---|---|---|
+| **开场 `t = 0`** | 首帧铺满 3 套台面 + 4 角 HUD 塞满屏幕，或加载即调用 `director.showEnd()` 定格终态 | **稀疏起手（`<= 2` 个活跃角色，极简顶/底栏）**；从 `t = 0` 起步自然演化或由学习者轻拖展开 |
+| **物件与 HUD 登场** | 全部网格在构造函数中 `visible = true`，HUD 面板全静态常驻 | 用 [`ActorChoreographer`](../kit/choreography.js) 的 `enter` / `exit` / `focus` / `hudReveal` 按因果触发点逐个揭示与聚焦暗化 |
+| **时间推进机制** | `0.01s` 离散瞬移 + 空 `() => {}` 回调，叠加脱钩的 `performance.now()` 与双 `rAF` | 单一主时钟 [`SpacetimeClock`](../kit/spacetime.js) + [`SimulationTape`](../kit/spacetime.js) 连续可逆采样 `sampleAt(t)`，任意小数秒可无缝暂停/回拖 |
+| **反事实对照** | 调参后旧轨迹瞬间消失，全靠记忆回想差异 | `tape.captureGhost()` 在舞台与曲线上叠加半透明**反事实幽灵轨**（旧参数 vs 现参数同框对比） |
+| **镜头与运镜** | 切幕时靠 wall-clock `flyTo` 跳切，倒拖时间轴镜头不同步 | `choreographer.cameraBeat(t0, dur, pose)` 作为 `t` 的纯函数插值，倒搓与逐帧导片 100% 确定性复现 |
+
+---
+
+## 2. 必填《分拍角色与揭示台账》（Cast & Reveal Ledger）
+
+开工写场景代码前，必须列出按全局时间 `t` 推进的角色登场台账（覆盖 3D 物件、3D HTML 表面与上下文 HUD 面板）：
+
+| 拍次 / 时间窗 | 因果问题 / 触发冲突 | 新登场角色（`enter` / `hudReveal`） | 聚焦与暗化（`focus`） | 退出 / 变形（`exit` / morph） |
+|---|---|---|---|---|
+| **Beat 0 (`t = 0s`)** | 建立最简起点与核心对象 | `<= 2` 个核心角色（如空网格 + 单智能体 / 单双金属片） | 全景干净留白 | — |
+| **Beat 1 (`t = 4–12s`)** | 暴露第一层动力学或失灵反例 | 随现象自然浮现 1 个局部测量层（如单步备份波 / 噪声与抖动） | 聚光新因果链路，背景暗化至 `0.2` | — |
+| **Beat 2 (`t = 12–28s`)** | 为解决上拍瓶颈引入核心机制 | 新子系统（如 4-Q 剖面 / 永磁体 / 瓶颈路由）+ 对应 `hudReveal` 活公式或曲线 | 机位推近关键交互点 | 过渡性辅助标注淡出 |
+| **Beat 3 (`t = 28–50s`)** | 反事实分叉与极限边界检验 | 克隆对照幽灵轨（`captureGhost`）+ 开放舞台直接操纵（`kit/manipulator.js`） | 双轨对比全景 | — |
+
+---
+
+## 3. T1–T4 时间演化范式与 `kit/` 核心引擎
+
+依托 [`kit/spacetime.js`](../kit/spacetime.js)、[`kit/choreography.js`](../kit/choreography.js) 与 [`kit/timeline-director.js`](../kit/timeline-director.js) 按时间尺度装配：
 
 | 时间范式 | 物理与演进特征 | 核心引擎与机制 | 必备控件与镜头策略 |
 |---|---|---|---|
-| **T1 · 瞬态与高频周期** | ms–1s 闪烁、翻转、冲击、振荡 | `PhaseScrubber`（慢放拉伸 + 单帧 `freeze()` + 双向搓相位）+ `ChartCard` 留痕 | 倍率切换（`0.1× / 0.25× / 1×`）、冻结开关、相位滑杆 |
-| **T2 · 单段连续演变** | 数秒–数分，组件固定而状态累积/跨临界 | `AliveLoop` / `PhaseScrubber` + `ChartCard` 把时间摊平成 XY 轨迹 | 倍速切换、`jumpToSteady()` 直达稳态 |
-| **T3 · 长流程多阶段形变** | 数十步有序变换形态、连线或介质状态 | `TimelineDirector`（`Stage/Step/Tracks` + `reset + finish()` 确定性重建，跳过 `{ fx: true }`） | `.timeline-dock` 分幕按钮、无漂移向后 `seekTo()`、`showEnd()` 与 `onStageCamera` 切运镜 |
-| **T4 · 整章复杂演进与渐进装配** | **需要讲完一整章或跨多节耦合机制**（一上来全放会遮挡，只摆少件又太单薄） | **3–6 幕递进实验台**（基于 `TimelineDirector` 从简洁底盘逐幕累加对象、视图耦合与反例） | 每幕保留已有底座、只新增当前重点零件/对照路并切近景特写 |
+| **T1 · 瞬态与高频周期** | ms–1s 闪烁、翻转、冲击、振荡 | `SpacetimeClock`（`0.1× / 0.25× / 1×` 时间膨胀 + `stepFrame` 单帧步进）或 `PhaseScrubber` + `SimulationTape` | 倍率切换、单帧步进、图表点击搓时（[`ChartCard`](../kit/chart-card.js) `onScrub`） |
+| **T2 · 单段连续演变** | 数秒–数分，连续 ODE / 队列 / 采样收敛 | `SimulationTape.bake()` + `sampleAt(t)` 连续可逆采样 + `captureGhost()` 幽灵对照 | 全局可拖时间轴、反事实调参留痕、3D 相空间-时间螺旋 |
+| **T3 · 长流程多阶段形变** | 25–60 s 多拍因果演进与结构变形 | `SpacetimeClock` + `ActorChoreographer`（或 `TimelineDirector.seekGlobal(t)`）纯函数驱动入场/聚焦/运镜 | 统一底栏 `.timeline-dock`（含分拍书签刻度、全局连续拖动、倍速） |
+| **T4 · 整章复杂演进与渐进装配** | 跨越整章的多节耦合机制 | 4–6 拍递进揭示（基于 `SpacetimeClock` + `ActorChoreographer` + `carries`/`hook`/`relates` 问题链） | 每拍承接上拍底座、按因果增减对象与上下文面板，绝不 `t = 0` 全摊开 |
 
 ---
 
-## 2. 整章多幕知识承载法则 & 问题链（借鉴 `atlas-textbook`）
+## 4. `window.__simulify` v2 确定性契约与 4D 自动化门禁
 
-面对整章级课题，严禁做成只有 1–2 个孤立物件的静物台，应同时满足两条结构约束：
+所有 v2 实验台通过 `exposeTestHooks(clockOrDirector, { stage, callouts, choreographer, syncAll, falsify, ... })` 自动合成统一契约，打通浏览器端离线导出（`kit/stage-exporter.js`）、命令行影棚导片（`scripts/export_video.py`）与 [`scripts/verify_stage.py`](../scripts/verify_stage.py) 自动化验收：
 
-1. **分幕累加清单（Act 1 → Act N）**：每一幕必须明确写出**继承了前一幕什么底座**、**新加了什么三维对象或形式化维度**、**新讲清哪条定理或反例**，让知识与场景密度随幕同步生长。
-2. **问题链衔接（`carries` / `hook` / `relates`）**：
-   - 每个 `Stage` 支持声明 `carries`（承上：一句话接住上一幕留下的真问题）、`hook`（钩子：本幕结尾暴露出的瓶颈或下一幕待解冲突）与 `relates`（关联边：`uses` / `deepens` / `contrast` / `aside`）；
-   - 通过 `director.getState()` 直接同步到界面提示区，使长章节变成严丝合缝的因果链。
+- **统一寻址与导出**：
+  - `getTimelineInfo()` 返回全局时长与分幕/分拍起止区间；
+  - `enterExportMode({ hud, width, height, dpr, muteAudio })` / `exitExportMode()` 暂停内部 `rAF`、切换 `html[data-export]` 并锁定渲染尺寸；
+  - `seek(globalTimeSec)` 幂等、可逆地同步时钟、`ActorChoreographer.evaluate(t)`、相机 `stage.setCameraImmediate(pose)`、`syncAll()`、`CalloutLayer.update()` 与 `stage.renderNow()`；
+  - `getCaptureTargets()`、`getCaptionState()`、`getActiveActorCount(t)` 分别服务于 HTML-in-Canvas / Canvas2D 帧合成、字幕条与初始稀疏度校验。
+- **URL 深链**：`applyUrlState()` 统一响应 `?stage=&step=&t=&paused&end&thumb=1&export=stage|caption|hud&backend=webgpu|webgl2&lang=` 并置 `window.__ready = true`。
+- **v2 4D 门禁（`verify_stage.py`）**：
+  1. `initial-sparsity`：校验加载时停在起点附近（禁止默认 `showEnd()`），且 `getActiveActorCount(0) < getActiveActorCount(T)`；
+  2. `temporal-scrub-determinism`：实测 `seek(0.1T) → seek(0.5T) → seek(0.9T) → seek(0.5T)` 存在真实画面演进且倒拖精确复现；
+  3. `mandatory-falsify`：强制暴露可执行反例断言 `falsify()` 且 `passed === true`；
+  4. `visual-integrity`：校验画布非空白、代码/导学卡零横向截断（`scrollWidth <= clientWidth + 2`）、零控制台与 GPU 错误。
 
 ---
 
-## 3. 界面直觉文案去 AI 味规范
+## 5. 界面直觉文案去 AI 味规范
 
-无论在导学卡、问题链条还是空间标牌写提示语，一律执行简洁直觉约束：
 - **先具体动作与可见画面，后出现术语**：如「左槽刚命中滑回前端，右槽冷块正沿出槽退回」，不写定义腔废话；
-- **短句主动语态**：中文单句尽量 `<= 35–45` 字，删掉「进行了……」「值得注意的是」「本质上」「综上所述」「赋能」等 AI 腔；
-- **边界诚实、数字可复算**：不夸大无条件结论，如 1 ns 命中 vs 100 ns 缺页按实代入计算。
-
----
-
-## 4. `TimelineDirector` 与 URL 深链工程铁律
-
-- **全部状态复位归入 `onReset(ctx)`**：保证 `jumpStage()` 空降与向后拖 `seekTo(t)` 时彻底消除后序残余状态；
-- **区分结构轨道与 `fx: true`**：瞬间闪光、飘字脉冲标记 `{ fx: true }`，确保快进重建零耗时且终态干净；
-- **URL 深链与验收钩子**：挂载 `applyUrlState(director)` 与 `exposeTestHooks(director)`，统一响应 `?stage=&step=&t=&paused&end&thumb=1` 并置 `window.__ready = true`，一键打通自动化截图验收与静态缩略图烘焙。
+- **短句主动语态**：中文单句尽量 `<= 35–45` 字，禁用「进行了……」「值得注意的是」「本质上」「综上所述」「赋能」等 AI 腔；
+- **边界诚实、数字可复算**：界面上的每一个长度条、曲线坐标与代入数字必须 1:1 来自真实引擎计算，严禁硬编码假进度条或假数值。

@@ -2,23 +2,51 @@
  * Collapsible formal mathematical substitution & truth/transition table panel.
  * Synchronizes equations, live-substituted variables, active lookup rows,
  * and single-step causal traces directly from a single solve() ground truth.
+ *
+ * v2 Upgrades:
+ * - Bidirectional `LinkBus` hover/select/focus on formula tokens (`token.linkId` / `data-link-id`),
+ *   table rows, and breakdown items.
+ * - Optional compact `surfaceMode: true` so the panel's root element (`getElement()`)
+ *   can be mounted directly onto `HtmlSurfaceManager` in 3D space (while seamlessly
+ *   rendering as standard DOM on fallback).
  */
 export class LiveMathsPanel {
   /**
-   * @param {HTMLElement} containerEl
-   * @param {{ title?: string, subtitle?: string, collapsed?: boolean }} [options]
+   * @param {HTMLElement | null} containerEl
+   * @param {{
+   *   title?: string,
+   *   subtitle?: string,
+   *   collapsed?: boolean,
+   *   linkBus?: import('./link-bus.js').LinkBus | null,
+   *   surfaceMode?: boolean,
+   * }} [options]
    */
-  constructor(containerEl, { title = '活公式与推导', subtitle = '', collapsed = false } = {}) {
-    if (!containerEl) {
-      throw new Error('LiveMathsPanel requires a valid container element.');
+  constructor(
+    containerEl,
+    { title = '活公式与推导', subtitle = '', collapsed = false, linkBus = null, surfaceMode = false } = {}
+  ) {
+    if (!containerEl && !surfaceMode) {
+      throw new Error('LiveMathsPanel requires a valid container element (or surfaceMode: true).');
     }
-    this.container = containerEl;
-    this.detailsEl = document.createElement('details');
-    this.detailsEl.className = 'live-maths-panel';
-    this.detailsEl.open = !collapsed;
+    this.container = containerEl || null;
+    this.linkBus = linkBus || null;
+    this.surfaceMode = Boolean(surfaceMode);
+    this._unsubs = [];
+    this._linkedEls = [];
 
-    this.summaryEl = document.createElement('summary');
-    this.summaryEl.className = 'live-maths-summary';
+    if (this.surfaceMode) {
+      this.detailsEl = document.createElement('div');
+      this.detailsEl.className = 'live-maths-panel is-surface-mode';
+      this.detailsEl.dataset.surfaceMode = 'true';
+      this.summaryEl = document.createElement('header');
+      this.summaryEl.className = 'live-maths-summary';
+    } else {
+      this.detailsEl = document.createElement('details');
+      this.detailsEl.className = 'live-maths-panel';
+      this.detailsEl.open = !collapsed;
+      this.summaryEl = document.createElement('summary');
+      this.summaryEl.className = 'live-maths-summary';
+    }
 
     const titleWrap = document.createElement('span');
     titleWrap.className = 'live-maths-heading';
@@ -44,7 +72,32 @@ export class LiveMathsPanel {
     this.bodyEl.className = 'live-maths-body';
 
     this.detailsEl.append(this.summaryEl, this.bodyEl);
-    this.container.append(this.detailsEl);
+    if (this.container) {
+      this.container.append(this.detailsEl);
+    }
+
+    if (this.linkBus) {
+      this.bindLinkBus(this.linkBus);
+    }
+  }
+
+  /** Return root DOM element (for mounting on `HtmlSurfaceManager` or `ActorChoreographer`). */
+  getElement() {
+    return this.detailsEl;
+  }
+
+  /** Attach or swap a `LinkBus` for bidirectional hover/select highlighting. */
+  bindLinkBus(linkBus) {
+    this.#clearLinkSubs();
+    this.linkBus = linkBus || null;
+    if (!this.linkBus) return;
+    if (typeof this.linkBus.onHover === 'function') {
+      this._unsubs.push(this.linkBus.onHover((id) => this.#syncLinkedState(id, this.linkBus?.selectedId ?? null)));
+    }
+    if (typeof this.linkBus.onSelect === 'function') {
+      this._unsubs.push(this.linkBus.onSelect((id) => this.#syncLinkedState(this.linkBus?.hoveredId ?? null, id)));
+    }
+    this.#syncLinkedState(this.linkBus.hoveredId ?? null, this.linkBus.selectedId ?? null);
   }
 
   /**
@@ -56,11 +109,13 @@ export class LiveMathsPanel {
   }
 
   /**
-   * Expand or collapse the details drawer.
+   * Expand or collapse the details drawer (no-op in surfaceMode where body stays open).
    * @param {boolean} open
    */
   setOpen(open) {
-    this.detailsEl.open = Boolean(open);
+    if (!this.surfaceMode) {
+      this.detailsEl.open = Boolean(open);
+    }
   }
 
   /**
@@ -68,9 +123,9 @@ export class LiveMathsPanel {
    * @param {{
    *   badge?: string,
    *   subtitle?: string,
-   *   equations?: Array<{ label?: string, tokens: Array<{ text: string, tone?: 'teal'|'amber'|'danger'|'navy'|'muted', emph?: boolean, sub?: string }> }>,
-   *   table?: { caption?: string, headers: Array<string|number>, rows: Array<Array<string|number>>, activeRow?: number, note?: string },
-   *   breakdown?: Array<{ tag: string, text: string, tone?: 'teal'|'amber'|'danger'|'navy' }>
+   *   equations?: Array<{ label?: string, tokens: Array<{ text: string, tone?: 'teal'|'amber'|'danger'|'navy'|'muted', emph?: boolean, sub?: string, linkId?: string }> }>,
+   *   table?: { caption?: string, headers: Array<string|number>, rows: Array<Array<string|number>>, rowLinkIds?: Array<string|null>, activeRow?: number, note?: string },
+   *   breakdown?: Array<{ tag: string, text: string, tone?: 'teal'|'amber'|'danger'|'navy', linkId?: string }>
    * }} [payload]
    */
   update({ badge, subtitle, equations = [], table = null, breakdown = [] } = {}) {
@@ -83,6 +138,7 @@ export class LiveMathsPanel {
       this.badgeEl.hidden = !badge;
     }
 
+    this._linkedEls = [];
     const fragment = document.createDocumentFragment();
 
     if (equations.length > 0) {
@@ -108,11 +164,65 @@ export class LiveMathsPanel {
     }
 
     this.bodyEl.replaceChildren(fragment);
+    if (this.linkBus) {
+      this.#syncLinkedState(this.linkBus.hoveredId ?? null, this.linkBus.selectedId ?? null);
+    }
   }
 
-  /** Remove panel DOM nodes. */
+  /** Remove panel DOM nodes and LinkBus listeners. */
   destroy() {
+    this.#clearLinkSubs();
+    this._linkedEls = [];
     this.detailsEl.remove();
+  }
+
+  #clearLinkSubs() {
+    for (const unsub of this._unsubs) {
+      try {
+        unsub();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    this._unsubs = [];
+  }
+
+  #wireLinkTarget(el, linkId) {
+    if (!linkId) return;
+    const id = String(linkId);
+    el.dataset.linkId = id;
+    el.tabIndex = 0;
+    el.style.cursor = 'pointer';
+    this._linkedEls.push(el);
+
+    el.addEventListener('pointerenter', () => this.linkBus?.hover(id, 'live-maths'));
+    el.addEventListener('pointerleave', () => {
+      if (this.linkBus?.hoveredId === id) this.linkBus.clearHover('live-maths');
+    });
+    el.addEventListener('focus', () => this.linkBus?.hover(id, 'live-maths'));
+    el.addEventListener('blur', () => {
+      if (this.linkBus?.hoveredId === id) this.linkBus.clearHover('live-maths');
+    });
+    el.addEventListener('click', () => this.linkBus?.select(id, 'live-maths'));
+    el.addEventListener('dblclick', () => this.linkBus?.focus(id, 'live-maths'));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        this.linkBus?.select(id, 'live-maths');
+      }
+    });
+  }
+
+  #syncLinkedState(hoveredId, selectedId) {
+    for (const el of this._linkedEls) {
+      const id = el.dataset.linkId;
+      const hot = hoveredId !== null && hoveredId === id;
+      const sel = selectedId !== null && selectedId === id;
+      if (hot) el.dataset.linkedHot = 'true';
+      else delete el.dataset.linkedHot;
+      if (sel) el.dataset.linkedSelected = 'true';
+      else delete el.dataset.linkedSelected;
+    }
   }
 
   #buildEquationBlock(eq) {
@@ -138,6 +248,9 @@ export class LiveMathsPanel {
         const sub = document.createElement('sub');
         sub.textContent = String(token.sub);
         span.append(sub);
+      }
+      if (token.linkId) {
+        this.#wireLinkTarget(span, token.linkId);
       }
       line.append(span);
     }
@@ -177,6 +290,10 @@ export class LiveMathsPanel {
         tr.classList.add('is-active');
         tr.setAttribute('aria-current', 'true');
       }
+      const rowLink = table.rowLinkIds?.[rowIdx];
+      if (rowLink) {
+        this.#wireLinkTarget(tr, rowLink);
+      }
       for (const cell of cells) {
         const td = document.createElement('td');
         td.textContent = String(cell);
@@ -201,6 +318,9 @@ export class LiveMathsPanel {
     const li = document.createElement('li');
     li.className = 'breakdown-item';
     if (item.tone) li.dataset.tone = item.tone;
+    if (item.linkId) {
+      this.#wireLinkTarget(li, item.linkId);
+    }
 
     const tag = document.createElement('span');
     tag.className = 'breakdown-tag';
