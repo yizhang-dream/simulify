@@ -27,24 +27,24 @@
       </div>
 
       <div class="ribbon-controls">
-        <button type="button" id="btn-paint-cliff" class="brush-toggle" aria-pressed="false" title="开启后可在 3D 网格上直接涂画或擦除悬崖（也可按住 Alt 拖拽）">
+        <button type="button" id="btn-paint-cliff" class="brush-toggle hud-reveal" data-hud-hidden="true" hidden aria-pressed="false" title="开启后可在 3D 网格上直接涂画或擦除悬崖（也可按住 Alt 拖拽）">
           <span aria-hidden="true">🖌</span>
           <span id="lbl-paint-cliff">涂画悬崖</span>
         </button>
         <button type="button" id="btn-reset-cliff" class="brush-reset-btn" hidden>重置悬崖</button>
 
         <div class="param-pills">
-          <div class="param-pill">
+          <div class="param-pill hud-reveal" id="pill-eps" data-hud-hidden="true" hidden>
             <span>ε=<strong id="val-eps">0.10</strong></span>
             <button type="button" id="eps-dec" aria-label="减小 ε">-</button>
             <button type="button" id="eps-inc" aria-label="增大 ε">+</button>
           </div>
-          <div class="param-pill">
+          <div class="param-pill hud-reveal" id="pill-alpha" data-hud-hidden="true" hidden>
             <span>α=<strong id="val-alpha">0.50</strong></span>
             <button type="button" id="alpha-dec" aria-label="减小 α">-</button>
             <button type="button" id="alpha-inc" aria-label="增大 α">+</button>
           </div>
-          <div class="param-pill">
+          <div class="param-pill hud-reveal" id="pill-n" data-hud-hidden="true" hidden>
             <span>n=<strong id="val-n">4</strong></span>
             <button type="button" id="n-dec" aria-label="减小 n-step">-</button>
             <button type="button" id="n-inc" aria-label="增大 n-step">+</button>
@@ -97,7 +97,7 @@
         <div class="unified-tabs" id="unified-tabs" role="group" aria-label="切换 TD 目标算法">
           <button type="button" class="unified-tab" data-method="td0" aria-pressed="false">TD(0) · V(S')</button>
           <button type="button" class="unified-tab" data-method="sarsa" aria-pressed="false">Sarsa · Q(S',A')</button>
-          <button type="button" class="unified-tab" data-method="nstep" aria-pressed="false">n-step · G_{t:t+n}</button>
+          <button type="button" class="unified-tab" data-method="nstep" aria-pressed="false">n-step · G<sub>t:t+n</sub></button>
           <button type="button" class="unified-tab" data-method="qlearn" aria-pressed="true">Q-learn · max Q</button>
         </div>
         <div class="unified-note" id="unified-note"></div>

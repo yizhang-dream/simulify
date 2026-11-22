@@ -241,7 +241,7 @@ export const RL_BEATS = [
     start: 30.0,
     end: 38.0,
     shortTitle: { zh: '5. 策略分叉', en: '5. Policy Fork' },
-    title: { zh: '第 5 幕 · 崖边策略分叉：Sarsa 绕行 vs Q 贴崖', en: 'Beat 5 · Policy Fork: Sarsa vs Q-Learning' },
+    title: { zh: '第 5 幕 · 崖边分叉：Sarsa vs Q', en: 'Beat 5 · Policy Fork: Sarsa vs Q-Learning' },
     cue: {
       zh: '实心青线是 Sarsa 安全绕行，半透琥珀虚影是 Q-learning 贴崖最短路；点任意格移动分叉点。',
       en: 'Solid teal Sarsa detours safely while translucent amber Q hugs the cliff. Click any tile to fork.',
