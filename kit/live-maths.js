@@ -1162,7 +1162,10 @@ export class LiveMathsPanel {
   bindLinkBus(linkBus) {
     this.#clearLinkSubs();
     this.linkBus = linkBus || null;
-    if (!this.linkBus) return;
+    if (!this.linkBus) {
+      this.#syncLinkedState(null, null);
+      return;
+    }
     if (typeof this.linkBus.onHover === 'function') {
       this._unsubs.push(this.linkBus.onHover((id) => this.#syncLinkedState(id, this.linkBus?.selectedId ?? null)));
     }

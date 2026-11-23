@@ -103,19 +103,29 @@ export function resolveCalloutRects(rects, bounds, blockers = []) {
  * and cache layout snapshots (`getExportSnapshot()`) for Canvas2D video export fallback.
  */
 export class CalloutLayer {
-  constructor(stage, svgEl, tagsEl, { style = 'pill', quietMode = false, linkBus = null } = {}) {
+  constructor(
+    stage,
+    svgEl,
+    tagsEl,
+    { style = 'pill', quietMode = false, linkBus = null, compactBreakpoint = 480, compactMode = 'bar' } = {}
+  ) {
     this.stage = stage;
     this.svg = svgEl;
     this.tagsEl = tagsEl;
     this.defaultStyle = style === 'editorial' ? 'editorial' : 'pill';
     this.quietMode = Boolean(quietMode);
     this.linkBus = linkBus || null;
+    this.compactBreakpoint = Math.max(0, Number(compactBreakpoint ?? 480));
+    this.compactMode = compactMode === 'scale' ? 'scale' : 'bar';
     this._linkUnsubs = [];
     this.items = new Map();
     this.enabled = true;
     this.currentStep = Number.POSITIVE_INFINITY;
     this._blockersFn = null;
     this._choreographer = null;
+    this._compactBarEl = null;
+    this._compactSelectedId = null;
+    this._compactActive = false;
     this._lastLayout = { width: 0, height: 0, items: [] };
     if (this.linkBus) this.setLinkBus(this.linkBus);
   }
@@ -263,11 +273,40 @@ export class CalloutLayer {
     this.items.clear();
     this.svg.replaceChildren();
     this.tagsEl.replaceChildren();
+    this._compactBarEl = null;
+    this._compactSelectedId = null;
+    this._compactActive = false;
     this._lastLayout = {
       width: this.stage?.size?.width || 0,
       height: this.stage?.size?.height || 0,
       items: [],
     };
+  }
+
+  #ensureCompactBar() {
+    if (this._compactBarEl) return this._compactBarEl;
+    const bar = document.createElement('div');
+    bar.className = 'callout-compact-bar';
+    bar.setAttribute('role', 'region');
+    bar.setAttribute('aria-label', '结构标注');
+    const chips = document.createElement('div');
+    chips.className = 'callout-compact-chips';
+    chips.setAttribute('role', 'tablist');
+    const detail = document.createElement('div');
+    detail.className = 'callout-compact-detail';
+    bar.append(chips, detail);
+    bar._chipsEl = chips;
+    bar._detailEl = detail;
+    this.tagsEl.append(bar);
+    this._compactBarEl = bar;
+    return bar;
+  }
+
+  #hideCompactBar() {
+    this._compactActive = false;
+    if (this._compactBarEl?.style) {
+      this._compactBarEl.style.display = 'none';
+    }
   }
 
   /**
@@ -314,6 +353,100 @@ export class CalloutLayer {
     if (!width || !height) return;
 
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    const useCompactBar = this.compactMode === 'bar' && this.compactBreakpoint > 0 && width <= this.compactBreakpoint;
+    if (useCompactBar) {
+      const activeItems = [];
+      for (const [id, item] of this.items.entries()) {
+        item.shadow.style.display = 'none';
+        item.polyline.style.display = 'none';
+        item.dot.style.display = 'none';
+        item.tag.style.display = 'none';
+
+        const stepOk = item.afterStep === undefined || this.currentStep >= item.afterStep;
+        const userVis = typeof item.visible === 'function' ? item.visible() : item.visible !== false;
+        const effOpacity = this.#resolveOpacity(id, item);
+        if (!stepOk || !userVis || effOpacity <= 0.01) continue;
+        activeItems.push({ id, item, opacity: effOpacity });
+      }
+
+      if (activeItems.length === 0) {
+        this.#hideCompactBar();
+        this._lastLayout = { width, height, compact: true, items: [] };
+        return;
+      }
+
+      this._compactActive = true;
+      const bar = this.#ensureCompactBar();
+      bar.style.display = '';
+
+      // Sync active selection from LinkBus if present, else preserve previous or pick pinned/first
+      let selectedEntry = null;
+      if (this.linkBus?.selectedId) {
+        selectedEntry = activeItems.find(
+          ({ id, item }) => String(item.linkId ?? id) === String(this.linkBus.selectedId)
+        ) || null;
+      }
+      if (!selectedEntry && this._compactSelectedId !== null) {
+        selectedEntry = activeItems.find(({ id }) => id === this._compactSelectedId) || null;
+      }
+      if (!selectedEntry) {
+        selectedEntry = activeItems.find(({ item }) => item.pinned) || activeItems[0];
+      }
+      this._compactSelectedId = selectedEntry.id;
+
+      const chipEls = activeItems.map(({ id, item }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'callout-compact-chip';
+        btn.dataset.calloutId = String(id);
+        if (item.tone) btn.dataset.tone = item.tone;
+        const isSelected = id === selectedEntry.id;
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        setCalloutText(btn, item.label ?? String(id));
+        btn.addEventListener('click', () => {
+          this._compactSelectedId = id;
+          const linkKey = item.linkId ? String(item.linkId) : String(id);
+          this.linkBus?.select?.(linkKey, 'callout');
+          this.update();
+        });
+        return btn;
+      });
+      bar._chipsEl.replaceChildren(...chipEls);
+
+      const selItem = selectedEntry.item;
+      const detailLabel = document.createElement('strong');
+      setCalloutText(detailLabel, selItem.label ?? '');
+      const detailSub = document.createElement('span');
+      setCalloutText(detailSub, selItem.sublabel ?? '');
+      bar._detailEl.replaceChildren(detailLabel, detailSub);
+      if (selItem.tone) bar._detailEl.dataset.tone = selItem.tone;
+      else delete bar._detailEl.dataset.tone;
+
+      this._lastLayout = {
+        width,
+        height,
+        compact: true,
+        activeId: selectedEntry.id,
+        items: activeItems.map(({ id, item, opacity }) => ({
+          id,
+          anchorX: 0,
+          anchorY: 0,
+          left: 0,
+          top: height,
+          width: 0,
+          height: 0,
+          title: item.label ?? '',
+          detail: item.sublabel ?? '',
+          tone: item.tone ?? '',
+          accent: item.accent ?? TONE_ACCENT[item.tone] ?? TONE_ACCENT.navy,
+          opacity,
+          leaderPoints: [],
+        })),
+      };
+      return;
+    }
+
+    this.#hideCompactBar();
     const compact = width < 640;
     const scale = compact ? 0.68 : 1;
     const bounds = {

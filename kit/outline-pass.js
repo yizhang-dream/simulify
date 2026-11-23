@@ -6,21 +6,31 @@ export const SURFACE_LAYER = 2;
 export const GLASS_LAYER = 3;
 
 export const OUTLINE_PRESETS = Object.freeze({
+  primer: Object.freeze({
+    enabled: true,
+    thickness: 1.3,
+    opacityScale: 1.0,
+    depthThreshold: 0.28,
+    normalThreshold: 0.42,
+    creaseWeight: 0.45,
+    outerWeight: 0.42,
+    aoStrength: 0.22,
+  }),
   crisp: Object.freeze({
     enabled: true,
-    thickness: 0.9,
+    thickness: 1.15,
     opacityScale: 1.0,
-    depthThreshold: 0.34,
-    normalThreshold: 0.26,
-    aoStrength: 0.24,
+    depthThreshold: 0.28,
+    normalThreshold: 0.28,
+    aoStrength: 0.22,
   }),
   subtle: Object.freeze({
     enabled: true,
-    thickness: 0.72,
+    thickness: 0.88,
     opacityScale: 0.56,
-    depthThreshold: 0.42,
-    normalThreshold: 0.34,
-    aoStrength: 0.16,
+    depthThreshold: 0.36,
+    normalThreshold: 0.36,
+    aoStrength: 0.14,
   }),
   none: Object.freeze({
     enabled: false,
@@ -34,9 +44,74 @@ export const OUTLINE_PRESETS = Object.freeze({
 
 function resolvePresetName(preset) {
   if (preset === false || preset === 'none') return 'none';
-  if (preset === 'subtle') return 'subtle';
+  if (preset === 'primer' || preset === 'subtle') return preset;
   return 'crisp';
 }
+
+function readInheritedUserData(object, key) {
+  let cur = object;
+  for (let i = 0; i < 4 && cur; i += 1) {
+    if (cur.userData && cur.userData[key] !== undefined) {
+      return cur.userData[key];
+    }
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Pack per-mesh ink controls into a single HalfFloat channel (exact resolution ~1/256):
+ * - base [0..1]: `ink` strength (default 1.0; 0 suppresses strokes while preserving depth occlusion)
+ * - +2.0 flag: `inkThin` (scales edge kernel reach by 0.55x for thin wires/rods/stems)
+ * - +4.0 flag: `inkNormals === 'none' || inkNormals === false` (silhouette/ID only, suppresses internal normal creases)
+ */
+function encodeInkMeta(object) {
+  const rawInk = readInheritedUserData(object, 'ink');
+  const ink = rawInk !== undefined ? Math.max(0, Math.min(1, Number(rawInk) || 0)) : 1.0;
+  const thin = Boolean(readInheritedUserData(object, 'inkThin'));
+  const rawNormals = readInheritedUserData(object, 'inkNormals');
+  const noNormals = rawNormals === 'none' || rawNormals === false;
+  return ink + (thin ? 2.0 : 0.0) + (noNormals ? 4.0 : 0.0);
+}
+
+const GBUFFER_VERTEX = /* glsl */ `
+  varying vec3 vNormalView;
+  varying vec3 vPosView;
+  void main() {
+    vec3 transformedNormal = normal;
+    vec4 mvPos = vec4(position, 1.0);
+    #ifdef USE_INSTANCING
+      mvPos = instanceMatrix * mvPos;
+      transformedNormal = mat3(instanceMatrix) * transformedNormal;
+    #endif
+    mvPos = modelViewMatrix * mvPos;
+    vPosView = mvPos.xyz;
+    vNormalView = normalize(normalMatrix * transformedNormal);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+const GBUFFER_FRAGMENT = /* glsl */ `
+  #ifdef GL_OES_standard_derivatives
+    #extension GL_OES_standard_derivatives : enable
+  #endif
+  uniform float uObjectId;
+  uniform float uInkPacked;
+  uniform float uFlatFlag;
+  varying vec3 vNormalView;
+  varying vec3 vPosView;
+
+  void main() {
+    vec3 n = normalize(vNormalView);
+    if (uFlatFlag > 0.5) {
+      vec3 fn = cross(dFdx(vPosView), dFdy(vPosView));
+      float len = length(fn);
+      if (len > 1e-6) n = fn / len;
+    }
+    if (!gl_FrontFacing) n = -n;
+    gl_FragColor = vec4(n.xy * 0.5 + 0.5, uInkPacked, uObjectId);
+  }
+`;
 
 const OUTLINE_VERTEX = /* glsl */ `
   varying vec2 vUv;
@@ -57,6 +132,8 @@ const OUTLINE_FRAGMENT = /* glsl */ `
   uniform float cameraFar;
   uniform float depthThreshold;
   uniform float normalThreshold;
+  uniform float creaseWeight;
+  uniform float outerWeight;
   uniform vec3 lineColor;
   uniform float lineOpacity;
   uniform float focusDim;
@@ -71,35 +148,76 @@ const OUTLINE_FRAGMENT = /* glsl */ `
     return (cameraNear * cameraFar) / max(cameraFar - d * (cameraFar - cameraNear), 1e-4);
   }
 
-  float edgePair(vec2 uv, vec2 off, float d0, vec4 n0, float bwdWeight, float weightScale) {
-    vec4 na = texture2D(tNormal, uv + off);
-    vec4 nb = texture2D(tNormal, uv - off);
-    float da = depthAt(uv + off);
-    float db = depthAt(uv - off);
+  vec3 decodeNormal(vec2 rg) {
+    vec2 xy = rg * 2.0 - 1.0;
+    float z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
+    return vec3(xy, z);
+  }
 
-    // Outer 1px silhouette on background pixel; subtle AA / HiDPI thickness on interior pixel
-    float outerSil = max(max(0.0, na.a - n0.a), max(0.0, nb.a - n0.a));
-    float innerSil = max(max(0.0, n0.a - na.a), max(0.0, n0.a - nb.a)) * bwdWeight;
-    float edge = max(outerSil, innerSil);
+  void decodeMeta(float b, out float inkStr, out float isThin, out float noNormals) {
+    noNormals = step(3.5, b);
+    float b1 = b - noNormals * 4.0;
+    isThin = step(1.5, b1);
+    inkStr = clamp(b1 - isThin * 2.0, 0.0, 1.0);
+  }
 
-    if (n0.a > 0.5) {
-      // Second-derivative depth step detection (rejects smooth sloped surfaces)
-      float lap = abs(da + db - 2.0 * d0);
-      float stepA = (na.a > 0.5) ? abs(da - d0) : 0.0;
-      float stepB = (nb.a > 0.5) ? abs(db - d0) : 0.0;
-      float dEdgeA = smoothstep(depthThreshold, depthThreshold * 2.0, min(lap, stepA * 2.0));
-      float dEdgeB = smoothstep(depthThreshold, depthThreshold * 2.0, min(lap, stepB * 2.0)) * bwdWeight;
-      edge = max(edge, max(dEdgeA, dEdgeB));
+  // Evaluate 8-direction circular ring (cos(i*pi/4), sin(i*pi/4)) with nearer-side silhouette ownership
+  float sampleRing(vec2 uv, vec2 radius, vec4 n0, float d0, vec3 cNorm, float cInk, float cNoNorm) {
+    const float DIAG = 0.70710678;
+    vec2 dirs[8];
+    dirs[0] = vec2(1.0, 0.0);
+    dirs[1] = vec2(-1.0, 0.0);
+    dirs[2] = vec2(0.0, 1.0);
+    dirs[3] = vec2(0.0, -1.0);
+    dirs[4] = vec2(DIAG, DIAG);
+    dirs[5] = vec2(-DIAG, DIAG);
+    dirs[6] = vec2(DIAG, -DIAG);
+    dirs[7] = vec2(-DIAG, -DIAG);
 
-      // Normal crease detection along mechanical bevels and sharp ridges
-      vec3 c = n0.xyz * 2.0 - 1.0;
-      float ca = (na.a > 0.5) ? 1.0 - dot(c, na.xyz * 2.0 - 1.0) : 0.0;
-      float cb = (nb.a > 0.5) ? 1.0 - dot(c, nb.xyz * 2.0 - 1.0) : 0.0;
-      float nEdgeA = 0.88 * smoothstep(normalThreshold, normalThreshold * 2.1, ca);
-      float nEdgeB = 0.88 * smoothstep(normalThreshold, normalThreshold * 2.1, cb) * bwdWeight;
-      edge = max(edge, max(nEdgeA, nEdgeB));
+    float cSolid = step(0.5, n0.a);
+    float silAccum = 0.0;
+    float creaseMax = 0.0;
+    float depthMax = 0.0;
+
+    for (int i = 0; i < 8; i++) {
+      vec2 nuv = uv + dirs[i] * radius;
+      vec4 ns = texture2D(tNormal, nuv);
+      float dn = depthAt(nuv);
+      float nSolid = step(0.5, ns.a);
+      float nInk, nThin, nNoNorm;
+      decodeMeta(ns.b, nInk, nThin, nNoNorm);
+
+      if (cSolid > 0.5) {
+        // Nearer-side silhouette & inter-part seam ownership (drawn INSIDE the nearer object, zero background bleed)
+        float otherObj = step(0.5, abs(ns.a - n0.a));
+        float neighborBg = 1.0 - nSolid;
+        float centerNearer = step(-0.002, dn - d0);
+        if (otherObj > 0.5 && (neighborBg > 0.5 || centerNearer > 0.5)) {
+          silAccum += 1.0;
+        } else if (nSolid > 0.5 && otherObj < 0.5) {
+          // Same-object depth discontinuity (self-occlusion)
+          float dd = dn - d0;
+          if (dd > 0.0) {
+            float dOpp = depthAt(uv - dirs[i] * radius);
+            float lap = abs(dn + dOpp - 2.0 * d0);
+            float dEdge = smoothstep(depthThreshold, depthThreshold * 2.0, min(lap, dd * 2.0));
+            depthMax = max(depthMax, dEdge);
+          }
+          // Same-object normal crease (respecting userData.inkNormals = 'none')
+          if (cNoNorm < 0.5 && nNoNorm < 0.5) {
+            vec3 nn = decodeNormal(ns.rg);
+            float ndiff = 1.0 - dot(cNorm, nn);
+            float nEdge = creaseWeight * smoothstep(normalThreshold, normalThreshold * 2.1, ndiff);
+            creaseMax = max(creaseMax, nEdge);
+          }
+        }
+      }
     }
-    return edge * weightScale;
+
+    // Smooth subpixel silhouette coverage across the 8 circular taps
+    float silEdge = smoothstep(0.0, 2.2, silAccum);
+    float edge = max(silEdge, max(depthMax, creaseMax));
+    return edge * cInk;
   }
 
   void main() {
@@ -107,24 +225,27 @@ const OUTLINE_FRAGMENT = /* glsl */ `
     vec4 n0 = texture2D(tNormal, vUv);
     float d0 = depthAt(vUv);
 
+    float cInk, cThin, cNoNorm;
+    decodeMeta(n0.b, cInk, cThin, cNoNorm);
+    vec3 cNorm = decodeNormal(n0.rg);
+
     float e = 0.0;
     if (thickness > 0.01 && lineOpacity > 0.001) {
-      float stepPx = clamp(floor(thickness * 0.5 + 0.5), 1.0, 2.0);
-      float bwdWeight = clamp((thickness - 0.8) / 0.85, 0.22, 1.0);
-      vec2 o = texel * stepPx;
+      float reachScale = cThin > 0.5 ? 0.55 : 1.0;
+      float basePx = clamp(thickness * reachScale, 0.55, 2.8);
+      vec2 r1 = texel * basePx;
+      vec2 r2 = r1 * 1.5;
 
-      e = max(e, edgePair(vUv, vec2(o.x, 0.0), d0, n0, bwdWeight, 1.0));
-      e = max(e, edgePair(vUv, vec2(0.0, o.y), d0, n0, bwdWeight, 1.0));
-      e = max(e, edgePair(vUv, vec2(o.x, o.y), d0, n0, bwdWeight, 0.78));
-      e = max(e, edgePair(vUv, vec2(o.x, -o.y), d0, n0, bwdWeight, 0.78));
-      e = clamp(e * lineOpacity, 0.0, 1.0);
+      // Primary 8-direction circular ring + soft feathered outer AA ring
+      float e1 = sampleRing(vUv, r1, n0, d0, cNorm, cInk, cNoNorm);
+      float e2 = sampleRing(vUv, r2, n0, d0, cNorm, cInk, cNoNorm);
+      e = clamp(max(e1, e2 * outerWeight) * lineOpacity, 0.0, 1.0);
     }
 
     // Unpremultiply linear color target, apply zero-extra-pass screen-space crease AO & focus vignette
     float a = clamp(col.a, 0.0, 1.0);
     vec3 rgb = a > 1e-4 ? col.rgb / a : vec3(0.0);
     if (aoStrength > 0.001 && n0.a > 0.5) {
-      vec3 cn = n0.xyz * 2.0 - 1.0;
       vec2 aoOff = texel * 3.0;
       float occ = 0.0;
       vec2 dirs[4];
@@ -138,7 +259,7 @@ const OUTLINE_FRAGMENT = /* glsl */ `
           float dn = depthAt(vUv + dirs[i]);
           float dd = d0 - dn;
           float nearMask = smoothstep(0.02, 0.28, dd) * (1.0 - smoothstep(0.55, 1.35, dd));
-          float crease = smoothstep(0.04, 0.48, 1.0 - dot(cn, nn.xyz * 2.0 - 1.0));
+          float crease = smoothstep(0.04, 0.48, 1.0 - dot(cNorm, decodeNormal(nn.rg)));
           occ += nearMask * crease;
         }
       }
@@ -192,15 +313,16 @@ function cloneCameraShell(camera) {
 }
 
 /**
- * Dual-backend technical ink outline post-processing pass:
- * - On Three.js WebGPURenderer (WebGPU + WebGL2 fallback): unified TSL RenderPipeline with:
- *   1. Nearest-filtered Layer 0 normal+depth solidPass (zero bilinear pre-blur)
- *   2. Exact 1-ring ~0.85–1.0px crisp engineering ink (no 1.5x fuzzy halo)
- *   3. Separated tone-mapping (`outputColorTransform = false`): tone mapping runs ONLY on
- *      lit 3D colorPass (SOLID_LAYER + GROUND_LAYER), NEVER crushing ink strokes or
- *      `SURFACE_LAYER` (HTML-in-Canvas 3D panels) with double ACES compression
- *   4. Proper premultiplied-alpha handling matching WebGPU/WebGL canvas compositing
- * - On legacy WebGLRenderer (v1 benches using three.module.js): aligned crisp GLSL 3-pass fallback.
+ * Dual-backend Next-Gen Primer technical ink outline pass (Simulify v3.1):
+ * - Object-ID + per-mesh metadata packing (`userData.ink` 0..1, `userData.inkThin`,
+ *   `userData.inkNormals = 'none'`, `userData.inkFlat`, `userData.inkGroupId`) in HalfFloat RGBA
+ * - 8-direction circular kernel (`cos(i*pi/4), sin(i*pi/4)`) with nearer-side silhouette
+ *   ownership (crisp internal seams between touching parts, zero outward background bleed)
+ * - Soft feathered 2nd AA ring (`1.5x` @ `0.35`) preserving 4x MSAA visual crispness
+ * - Separated tone-mapping (`outputColorTransform = false`): tone mapping runs ONLY on
+ *   lit 3D colorPass (`SOLID_LAYER + GROUND_LAYER + GLASS_LAYER`), never crushing ink strokes
+ *   or `SURFACE_LAYER` (HTML-in-Canvas 3D panels)
+ * - Full parity across Three.js r187 WebGPURenderer (TSL) and legacy WebGLRenderer (GLSL).
  */
 export class OutlinePass {
   constructor(renderer, options = {}) {
@@ -209,7 +331,7 @@ export class OutlinePass {
     const presetCfg = OUTLINE_PRESETS[this.preset];
 
     this.enabled = presetCfg.enabled;
-    this._baseOpacity = options.opacity ?? 0.86;
+    this._baseOpacity = options.opacity ?? 0.84;
     this._explicitThickness = options.thickness !== undefined ? options.thickness : null;
     this._explicitDepthThreshold = options.depthThreshold !== undefined ? options.depthThreshold : null;
     this._explicitNormalThreshold = options.normalThreshold !== undefined ? options.normalThreshold : null;
@@ -220,10 +342,17 @@ export class OutlinePass {
     this.opacity = this._baseOpacity * presetCfg.opacityScale;
     this.depthThreshold = this._explicitDepthThreshold ?? presetCfg.depthThreshold;
     this.normalThreshold = this._explicitNormalThreshold ?? presetCfg.normalThreshold;
-    this.lineColor = new THREE.Color(options.lineColor ?? '#141a2c');
+    this.creaseWeight = presetCfg.creaseWeight ?? 0.86;
+    this.outerWeight = presetCfg.outerWeight ?? 0.35;
+    this.lineColor = new THREE.Color(options.lineColor ?? '#1f160f');
     this.focusDim = options.focusDim ?? 0;
     this._explicitAO = options.aoStrength !== undefined ? Number(options.aoStrength) : null;
     this.aoStrength = this._explicitAO !== null ? this._explicitAO : presetCfg.aoStrength;
+
+    // Frame-stable object-ID registry (exact integers 1..2040 in HalfFloat)
+    this._objectIdMap = new WeakMap();
+    this._groupIdMap = new Map();
+    this._nextObjectId = 1;
 
     this.isTSL = Boolean(renderer?.isWebGPURenderer && THREE.RenderPipeline && THREE.TSL);
 
@@ -240,6 +369,27 @@ export class OutlinePass {
     } else {
       this._initLegacyGLSL(options);
     }
+  }
+
+  _resolveObjectId(object) {
+    if (!object) return 1;
+    const groupKey = readInheritedUserData(object, 'inkGroupId');
+    if (groupKey !== undefined && groupKey !== null) {
+      let gid = this._groupIdMap.get(groupKey);
+      if (gid === undefined) {
+        gid = this._nextObjectId;
+        this._nextObjectId = this._nextObjectId >= 2040 ? 1 : this._nextObjectId + 1;
+        this._groupIdMap.set(groupKey, gid);
+      }
+      return gid;
+    }
+    let id = this._objectIdMap.get(object);
+    if (id === undefined) {
+      id = this._nextObjectId;
+      this._nextObjectId = this._nextObjectId >= 2040 ? 1 : this._nextObjectId + 1;
+      this._objectIdMap.set(object, id);
+    }
+    return id;
   }
 
   _initTSLState(options) {
@@ -279,6 +429,8 @@ export class OutlinePass {
     this._uFar = TSL.uniform(240.0);
     this._uDepthThreshold = TSL.uniform(this.depthThreshold);
     this._uNormalThreshold = TSL.uniform(this.normalThreshold);
+    this._uCreaseWeight = TSL.uniform(this.creaseWeight);
+    this._uOuterWeight = TSL.uniform(this.outerWeight);
     this._uLineColor = TSL.uniform(this.lineColor.clone());
     this._uLineOpacity = TSL.uniform(this.enabled ? this.opacity : 0);
     this._uFocusDim = TSL.uniform(this.focusDim);
@@ -298,6 +450,8 @@ export class OutlinePass {
       pass,
       mrt,
       normalView,
+      normalFlat,
+      uniform,
       Fn,
       vec2,
       vec3,
@@ -306,12 +460,13 @@ export class OutlinePass {
       screenUV,
       viewportSize,
       smoothstep,
+      step,
+      sqrt,
       abs,
       dot,
       max,
       min,
       clamp,
-      floor,
       mix,
       length,
       select,
@@ -338,17 +493,19 @@ export class OutlinePass {
     camera.layers.enable(GLASS_LAYER);
 
     // Force PassNodes to refresh on every explicit pipeline.render() (NodeUpdateType.RENDER),
-    // not once per browser rAF (NodeUpdateType.FRAME), so same-frame onpaint + renderNowAsync()
-    // and back-to-back deterministic export seeks never composite stale surfacePass/colorPass frames.
+    // not once per browser rAF (NodeUpdateType.FRAME), so deterministic seeks never composite stale passes.
     const renderUpdateType = THREE.NodeUpdateType?.RENDER ?? 'render';
 
-    // 1. Lit 3D scene pass (SOLID_LAYER + GROUND_LAYER + GLASS_LAYER, keeps renderer MSAA + stencil for cutaway caps)
+    // 1. Lit 3D scene pass (SOLID_LAYER + GROUND_LAYER + GLASS_LAYER, inherits 4x MSAA + stencil for cutaway caps)
     const colorPass = pass(scene, this._colorCamera, {
       stencilBuffer: true,
     });
     colorPass.updateBeforeType = renderUpdateType;
 
-    // 2. Non-MSAA nearest-filtered normal+depth pass (SOLID_LAYER only) — zero bilinear pre-blur!
+    // 2. Non-MSAA nearest-filtered G-buffer pass (SOLID_LAYER only) packing:
+    //    R,G = view-space normal.xy * 0.5 + 0.5 (supports userData.inkFlat via normalFlat)
+    //    B   = inkStrength [0..1] + (inkThin ? 2 : 0) + (inkNormals==='none' ? 4 : 0)
+    //    A   = per-object integer ID [1..2040] (0 on background)
     const solidPass = pass(scene, this._solidCamera, {
       samples: 0,
       minFilter: THREE.NearestFilter,
@@ -356,7 +513,21 @@ export class OutlinePass {
       generateMipmaps: false,
     });
     solidPass.updateBeforeType = renderUpdateType;
-    solidPass.setMRT(mrt({ output: vec4(normalView.mul(0.5).add(0.5), float(1.0)) }));
+
+    const uObjId = uniform(1.0).onObjectUpdate(({ object }) => this._resolveObjectId(object));
+    const uInkPacked = uniform(1.0).onObjectUpdate(({ object }) => encodeInkMeta(object));
+    const uFlatFlag = uniform(0.0).onObjectUpdate(({ object }) =>
+      readInheritedUserData(object, 'inkFlat') ? 1.0 : 0.0
+    );
+    const activeNormal = normalFlat
+      ? select(uFlatFlag.greaterThan(0.5), normalFlat, normalView)
+      : normalView;
+
+    solidPass.setMRT(
+      mrt({
+        output: vec4(activeNormal.xy.mul(0.5).add(0.5), uInkPacked, uObjId),
+      })
+    );
     if (solidPass.renderTarget?.texture) {
       solidPass.renderTarget.texture.minFilter = THREE.NearestFilter;
       solidPass.renderTarget.texture.magFilter = THREE.NearestFilter;
@@ -398,6 +569,8 @@ export class OutlinePass {
     const uFar = this._uFar;
     const uDepthThreshold = this._uDepthThreshold;
     const uNormalThreshold = this._uNormalThreshold;
+    const uCreaseWeight = this._uCreaseWeight;
+    const uOuterWeight = this._uOuterWeight;
     const uLineColor = this._uLineColor;
     const uLineOpacity = this._uLineOpacity;
     const uFocusDim = this._uFocusDim;
@@ -421,6 +594,18 @@ export class OutlinePass {
       dofNode.updateBeforeType = renderUpdateType;
     }
 
+    const DIAG = 0.70710678;
+    const CIRCULAR_DIRS = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [DIAG, DIAG],
+      [-DIAG, DIAG],
+      [DIAG, -DIAG],
+      [-DIAG, -DIAG],
+    ];
+
     const composite = Fn(() => {
       const texel = vec2(1.0).div(viewportSize);
       const rawCol = colorNode.sample(screenUV);
@@ -437,58 +622,96 @@ export class OutlinePass {
         return select(uIsOrtho.greaterThan(0.5), orthoZ, perspZ);
       };
 
-      const d0 = depthAt(screenUV);
-
-      // Exact integer physical texel step (1px for DPR 1..2.5) + smooth width AA weight
-      const stepPx = clamp(floor(uThickness.mul(0.5).add(0.5)), 1.0, 2.0);
-      const bwdWeight = clamp(uThickness.sub(0.8).div(0.85), 0.22, 1.0);
-      const o = texel.mul(stepPx);
-
-      const edgePair = (off, weightScale) => {
-        const uvA = screenUV.add(off);
-        const uvB = screenUV.sub(off);
-        const na = normalNode.sample(uvA);
-        const nb = normalNode.sample(uvB);
-        const da = depthAt(uvA);
-        const db = depthAt(uvB);
-
-        // Crisp 1px outer silhouette + width-controlled inner AA pixel
-        const outerSil = max(max(float(0.0), na.a.sub(n0.a)), max(float(0.0), nb.a.sub(n0.a)));
-        const innerSil = max(max(float(0.0), n0.a.sub(na.a)), max(float(0.0), n0.a.sub(nb.a))).mul(bwdWeight);
-        const sil = max(outerSil, innerSil);
-
-        // Second-derivative depth step detection (rejects smooth angled terrain/tiles)
-        const lap = abs(da.add(db).sub(d0.mul(2.0)));
-        const stepA = select(na.a.greaterThan(0.5), abs(da.sub(d0)), float(0.0));
-        const stepB = select(nb.a.greaterThan(0.5), abs(db.sub(d0)), float(0.0));
-        const dEdgeA = smoothstep(uDepthThreshold, uDepthThreshold.mul(2.0), min(lap, stepA.mul(2.0)));
-        const dEdgeB = smoothstep(uDepthThreshold, uDepthThreshold.mul(2.0), min(lap, stepB.mul(2.0))).mul(bwdWeight);
-        const dEdge = max(dEdgeA, dEdgeB);
-
-        // Normal crease detection along mechanical bevels and ridges
-        const c = n0.xyz.mul(2.0).sub(1.0);
-        const ca = select(na.a.greaterThan(0.5), float(1.0).sub(dot(c, na.xyz.mul(2.0).sub(1.0))), float(0.0));
-        const cb = select(nb.a.greaterThan(0.5), float(1.0).sub(dot(c, nb.xyz.mul(2.0).sub(1.0))), float(0.0));
-        const nEdgeA = smoothstep(uNormalThreshold, uNormalThreshold.mul(2.1), ca).mul(0.88);
-        const nEdgeB = smoothstep(uNormalThreshold, uNormalThreshold.mul(2.1), cb).mul(0.88).mul(bwdWeight);
-        const nEdge = max(nEdgeA, nEdgeB);
-
-        const interior = select(n0.a.greaterThan(0.5), max(dEdge, nEdge), float(0.0));
-        return max(sil, interior).mul(weightScale);
+      const decodeNormal = (rg) => {
+        const xy = rg.mul(2.0).sub(1.0);
+        const z = sqrt(max(float(0.0), float(1.0).sub(dot(xy, xy))));
+        return vec3(xy.x, xy.y, z);
       };
 
-      // Single crisp ring (no 1.5x wide grey halo!)
-      const eRaw = max(
-        max(edgePair(vec2(o.x, 0.0), 1.0), edgePair(vec2(0.0, o.y), 1.0)),
-        max(edgePair(vec2(o.x, o.y), 0.78), edgePair(vec2(o.x, o.y.negate()), 0.78))
-      );
+      const decodeMeta = (bVal) => {
+        const noNormals = step(float(3.5), bVal);
+        const b1 = bVal.sub(noNormals.mul(4.0));
+        const isThin = step(float(1.5), b1);
+        const inkStr = clamp(b1.sub(isThin.mul(2.0)), 0.0, 1.0);
+        return { inkStr, isThin, noNormals };
+      };
+
+      const d0 = depthAt(screenUV);
+      const cMeta = decodeMeta(n0.b);
+      const cNorm = decodeNormal(n0.rg);
+      const cSolid = n0.a.greaterThan(0.5);
+
+      // 8-direction circular kernel with nearer-side silhouette/ID ownership + smooth coverage
+      const sampleRing = (radius) => {
+        let silAccum = float(0.0);
+        let depthMax = float(0.0);
+        let creaseMax = float(0.0);
+
+        for (let i = 0; i < CIRCULAR_DIRS.length; i += 1) {
+          const [dx, dy] = CIRCULAR_DIRS[i];
+          const off = vec2(radius.x.mul(dx), radius.y.mul(dy));
+          const nuv = screenUV.add(off);
+          const ns = normalNode.sample(nuv);
+          const dn = depthAt(nuv);
+          const nSolid = ns.a.greaterThan(0.5);
+          const nMeta = decodeMeta(ns.b);
+          const otherObj = abs(ns.a.sub(n0.a)).greaterThan(0.5);
+
+          // Nearer-side silhouette & touching-part seam ownership (zero outward bleed)
+          const centerNearer = dn.sub(d0).greaterThanEqual(-0.002);
+          const silHit = select(
+            cSolid.and(otherObj).and(nSolid.not().or(centerNearer)),
+            float(1.0),
+            float(0.0)
+          );
+          silAccum = silAccum.add(silHit);
+
+          // Same-object depth discontinuity (second-derivative Laplacian rejects smooth slopes)
+          const sameSolid = cSolid.and(nSolid).and(otherObj.not());
+          const dd = max(float(0.0), dn.sub(d0));
+          const dOpp = depthAt(screenUV.sub(off));
+          const lap = abs(dn.add(dOpp).sub(d0.mul(2.0)));
+          const dEdge = select(
+            sameSolid.and(dd.greaterThan(0.0)),
+            smoothstep(uDepthThreshold, uDepthThreshold.mul(2.0), min(lap, dd.mul(2.0))),
+            float(0.0)
+          );
+          depthMax = max(depthMax, dEdge);
+
+          // Same-object normal crease (respecting userData.inkNormals = 'none')
+          const allowNormals = sameSolid
+            .and(cMeta.noNormals.lessThan(0.5))
+            .and(nMeta.noNormals.lessThan(0.5));
+          const nn = decodeNormal(ns.rg);
+          const ndiff = float(1.0).sub(dot(cNorm, nn));
+          const nEdge = select(
+            allowNormals,
+            smoothstep(uNormalThreshold, uNormalThreshold.mul(2.1), ndiff).mul(uCreaseWeight),
+            float(0.0)
+          );
+          creaseMax = max(creaseMax, nEdge);
+        }
+
+        const silEdge = smoothstep(float(0.0), float(2.2), silAccum);
+        return max(silEdge, max(depthMax, creaseMax)).mul(cMeta.inkStr);
+      };
+
+      const reachScale = select(cMeta.isThin.greaterThan(0.5), float(0.55), float(1.0));
+      const basePx = clamp(uThickness.mul(reachScale), 0.55, 2.8);
+      const r1 = texel.mul(basePx);
+      const r2 = r1.mul(1.5);
+
+      // Primary circular ring + soft feathered outer AA ring
+      const e1 = sampleRing(r1);
+      const e2 = sampleRing(r2);
+      const eRaw = max(e1, e2.mul(uOuterWeight));
       const e = select(
         uThickness.greaterThan(0.01),
         clamp(eRaw.mul(uLineOpacity), 0.0, 1.0),
         float(0.0)
       );
 
-      // Properly unpremultiply linear HDR colorPass before tone mapping (fixes double-alpha darkening!)
+      // Properly unpremultiply linear HDR colorPass before tone mapping
       const a = clamp(rawCol.a, 0.0, 1.0);
       const colLinearStraight = select(a.greaterThan(1e-4), colPreBase.div(a), vec3(0.0));
 
@@ -498,15 +721,14 @@ export class OutlinePass {
           ? tslToneMapping(activeToneMapping, uExposure, vec4(colLinearStraight, float(1.0))).rgb
           : colLinearStraight;
 
-      // Zero-extra-pass Screen-Space Crease Ambient Occlusion (darkens concave mechanical seams, zero silhouette halo)
+      // Zero-extra-pass Screen-Space Crease Ambient Occlusion (darkens concave mechanical seams)
       const aoTap = (off) => {
         const uvN = screenUV.add(off);
         const nn = normalNode.sample(uvN);
         const dn = depthAt(uvN);
         const dd = d0.sub(dn);
         const nearMask = smoothstep(0.02, 0.28, dd).mul(float(1.0).sub(smoothstep(0.55, 1.35, dd)));
-        const cn = n0.xyz.mul(2.0).sub(1.0);
-        const crease = smoothstep(0.04, 0.48, float(1.0).sub(dot(cn, nn.xyz.mul(2.0).sub(1.0))));
+        const crease = smoothstep(0.04, 0.48, float(1.0).sub(dot(cNorm, decodeNormal(nn.rg))));
         return select(nn.a.greaterThan(0.5), nearMask.mul(crease), float(0.0));
       };
       const aoOff = texel.mul(3.0);
@@ -515,7 +737,7 @@ export class OutlinePass {
         .add(aoTap(vec2(aoOff.x, aoOff.y.negate())))
         .add(aoTap(vec2(aoOff.x.negate(), aoOff.y.negate())));
       const aoFactor = select(
-        n0.a.greaterThan(0.5).and(uAoStrength.greaterThan(0.001)),
+        cSolid.and(uAoStrength.greaterThan(0.001)),
         float(1.0).sub(clamp(aoRaw.mul(0.25).mul(uAoStrength), 0.0, 0.34)),
         float(1.0)
       );
@@ -534,7 +756,7 @@ export class OutlinePass {
       // Composite un-tone-mapped 3D HTML-in-Canvas surfaces with accurate 3D solid depth occlusion
       const surfCol = surfaceNode.sample(screenUV);
       const surfDepthRaw = surfaceDepthNode.sample(screenUV).r;
-      const surfOccluded = n0.a.greaterThan(0.5).and(surfDepthRaw.greaterThan(solidDepthRaw.add(1e-4)));
+      const surfOccluded = cSolid.and(surfDepthRaw.greaterThan(solidDepthRaw.add(1e-4)));
       const sA = select(surfOccluded, float(0.0), clamp(surfCol.a, 0.0, 1.0));
       const sPre = select(surfOccluded, vec3(0.0), surfCol.rgb);
 
@@ -677,7 +899,25 @@ export class OutlinePass {
       depthTexture,
     });
 
-    this.normalMaterial = new THREE.MeshNormalMaterial();
+    const self = this;
+    this.normalMaterial = new THREE.ShaderMaterial({
+      vertexShader: GBUFFER_VERTEX,
+      fragmentShader: GBUFFER_FRAGMENT,
+      uniforms: {
+        uObjectId: { value: 1.0 },
+        uInkPacked: { value: 1.0 },
+        uFlatFlag: { value: 0.0 },
+      },
+      side: THREE.FrontSide,
+      extensions: { derivatives: true },
+    });
+    this.normalMaterial.onBeforeRender = function onBeforeRender(_renderer, _scene, _camera, _geo, object) {
+      this.uniforms.uObjectId.value = self._resolveObjectId(object);
+      this.uniforms.uInkPacked.value = encodeInkMeta(object);
+      this.uniforms.uFlatFlag.value = readInheritedUserData(object, 'inkFlat') ? 1.0 : 0.0;
+      this.uniformsNeedUpdate = true;
+    };
+
     this.material = new THREE.ShaderMaterial({
       vertexShader: OUTLINE_VERTEX,
       fragmentShader: OUTLINE_FRAGMENT,
@@ -692,6 +932,8 @@ export class OutlinePass {
         cameraFar: { value: 240.0 },
         depthThreshold: { value: this.depthThreshold },
         normalThreshold: { value: this.normalThreshold },
+        creaseWeight: { value: this.creaseWeight },
+        outerWeight: { value: this.outerWeight },
         lineColor: { value: this.lineColor.clone() },
         lineOpacity: { value: this.enabled ? this.opacity : 0 },
         focusDim: { value: this.focusDim },
@@ -712,7 +954,7 @@ export class OutlinePass {
   }
 
   /**
-   * Switch outline quality preset at runtime: 'crisp' | 'subtle' | 'none'.
+   * Switch outline quality preset at runtime: 'primer' | 'crisp' | 'subtle' | 'none'.
    */
   setPreset(preset) {
     this.preset = resolvePresetName(preset);
@@ -722,16 +964,22 @@ export class OutlinePass {
     this.opacity = this._baseOpacity * cfg.opacityScale;
     this.depthThreshold = this._explicitDepthThreshold !== null && cfg.enabled ? this._explicitDepthThreshold : cfg.depthThreshold;
     this.normalThreshold = this._explicitNormalThreshold !== null && cfg.enabled ? this._explicitNormalThreshold : cfg.normalThreshold;
+    this.creaseWeight = cfg.creaseWeight ?? 0.86;
+    this.outerWeight = cfg.outerWeight ?? 0.35;
     this.aoStrength = this._explicitAO !== null && cfg.enabled ? this._explicitAO : cfg.aoStrength;
 
     if (this.isTSL) {
       this._uDepthThreshold.value = this.depthThreshold;
       this._uNormalThreshold.value = this.normalThreshold;
+      this._uCreaseWeight.value = this.creaseWeight;
+      this._uOuterWeight.value = this.outerWeight;
       this._uLineOpacity.value = this.enabled ? this.opacity : 0;
       this._uAoStrength.value = this.enabled ? this.aoStrength : 0;
     } else if (this.material) {
       this.material.uniforms.depthThreshold.value = this.depthThreshold;
       this.material.uniforms.normalThreshold.value = this.normalThreshold;
+      this.material.uniforms.creaseWeight.value = this.creaseWeight;
+      this.material.uniforms.outerWeight.value = this.outerWeight;
       this.material.uniforms.lineOpacity.value = this.enabled ? this.opacity : 0;
       if (this.material.uniforms.aoStrength) {
         this.material.uniforms.aoStrength.value = this.enabled ? this.aoStrength : 0;
@@ -792,6 +1040,10 @@ export class OutlinePass {
   }
 
   render(scene, camera) {
+    if (!this.enabled) {
+      this.renderer.render(scene, camera);
+      return;
+    }
     if (this.isTSL) {
       this._prepareTSLFrame(scene, camera);
       this._pipeline.render();
@@ -808,7 +1060,7 @@ export class OutlinePass {
     this.material.uniforms.cameraFar.value = camera.far;
     renderer.setClearColor(0x000000, 0);
 
-    // Pass 1: Normals + Depth of Layer 0 solid objects only
+    // Pass 1: Object-ID + Normals + Ink metadata + Depth of Layer 0 solid objects only
     camera.layers.set(SOLID_LAYER);
     const prevOverride = scene.overrideMaterial;
     scene.overrideMaterial = this.normalMaterial;
@@ -834,6 +1086,13 @@ export class OutlinePass {
   }
 
   async renderAsync(scene, camera) {
+    if (!this.enabled) {
+      if (this.renderer && this.renderer._initialized === false && typeof this.renderer.init === 'function') {
+        await this.renderer.init();
+      }
+      this.renderer.render(scene, camera);
+      return;
+    }
     if (this.isTSL) {
       if (this.renderer && this.renderer._initialized === false && typeof this.renderer.init === 'function') {
         await this.renderer.init();

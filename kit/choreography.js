@@ -118,6 +118,94 @@ function styleTransform(style, u, restPos, restScale, opts = {}) {
   return { pos, scale };
 }
 
+function readExplodeOffset(raw) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return [0, raw, 0];
+  }
+  if (Array.isArray(raw) && raw.length >= 3) {
+    return [Number(raw[0]) || 0, Number(raw[1]) || 0, Number(raw[2]) || 0];
+  }
+  if (raw && typeof raw === 'object' && ('x' in raw || 'y' in raw || 'z' in raw)) {
+    return [Number(raw.x) || 0, Number(raw.y) || 0, Number(raw.z) || 0];
+  }
+  return null;
+}
+
+/**
+ * Collect declarative exploded-view parts under `root` tagged with
+ * `userData.explodeOffset` (or `userData.explode`) and optional `userData.explodeStage` (or `userData.stage`).
+ * Caches each part's initial rest position once on `userData._simulifyExplodeRestPos` so repeated
+ * interactive calls never accumulate drift.
+ */
+export function collectExplodeParts(root) {
+  const parts = [];
+  if (!root || typeof root.traverse !== 'function') return parts;
+  root.traverse((obj) => {
+    if (!obj || obj.userData?.simulifyInternal === true) return;
+    const rawOffset = obj.userData?.explodeOffset ?? obj.userData?.explode;
+    if (rawOffset === undefined || rawOffset === null || rawOffset === false) return;
+    const offset = readExplodeOffset(rawOffset);
+    if (!offset) return;
+    if (!obj.userData._simulifyExplodeRestPos) {
+      obj.userData._simulifyExplodeRestPos = readVec3(obj.position);
+    }
+    const stageVal = Math.max(0, Number(obj.userData?.explodeStage ?? obj.userData?.stage ?? 0) || 0);
+    parts.push({
+      object: obj,
+      restPos: [...obj.userData._simulifyExplodeRestPos],
+      offset,
+      stage: stageVal,
+    });
+  });
+  parts.sort((a, b) => a.stage - b.stage);
+  return parts;
+}
+
+/**
+ * Pure-function staggered exploded-view placement for either an `Object3D` root (auto-collecting
+ * declarative `userData.explodeOffset`/`explodeStage`) or an explicit parts array.
+ */
+export function applyExplodeFactor(
+  partsOrRoot,
+  factor,
+  { stageStagger = 0.22, ease = easeInOutCubic } = {}
+) {
+  const parts = Array.isArray(partsOrRoot)
+    ? partsOrRoot.map((p) => ({
+        object: p.object,
+        restPos: p.restPos ? readVec3(p.restPos) : readVec3(p.object?.position),
+        offset: readVec3(p.offset, [0, 1, 0]),
+        stage: Math.max(0, Number(p.stage ?? p.object?.userData?.explodeStage ?? p.object?.userData?.stage ?? 0) || 0),
+      }))
+    : collectExplodeParts(partsOrRoot);
+
+  if (parts.length === 0) return parts;
+  const uGlobal = clamp01(factor);
+  const stagger = Math.max(0, Number(stageStagger) || 0);
+  let maxStage = 0;
+  for (const p of parts) {
+    if (p.stage > maxStage) maxStage = p.stage;
+  }
+
+  for (const p of parts) {
+    if (!p.object?.position?.set) continue;
+    let localU = uGlobal;
+    if (maxStage > 0 && stagger > 0) {
+      const totalDelay = Math.min(0.75, maxStage * stagger);
+      const slotDur = Math.max(0.05, 1 - totalDelay);
+      const start = (p.stage / maxStage) * totalDelay;
+      localU = clamp01((uGlobal - start) / slotDur);
+    }
+    const w = typeof ease === 'function' ? ease(localU) : localU;
+    p.object.position.set(
+      p.restPos[0] + p.offset[0] * w,
+      p.restPos[1] + p.offset[1] * w,
+      p.restPos[2] + p.offset[2] * w
+    );
+  }
+  return parts;
+}
+
 /**
  * Pure-function-of-`t` choreography engine for progressive temporal storytelling.
  */
@@ -328,20 +416,27 @@ export class ActorChoreographer {
   /**
    * Schedule a pure-function mechanical Exploded-View expansion over `[t0, t0 + dur]`
    * (optionally re-assembling at `holdUntil`).
-   * Each entry in `parts` is `{ object, offset: [dx, dy, dz], restPos?: [x, y, z] }`.
+   * Accepts either an explicit array of `{ object, offset: [dx, dy, dz], restPos?: [x, y, z], stage?: number }`
+   * OR a Three.js `Object3D` root whose descendants declare `userData.explodeOffset` / `explodeStage`.
    */
   explodeGroup(
     id,
-    parts,
+    partsOrRoot,
     t0,
     dur = 1.2,
-    { ease = easeInOutCubic, from = 0, to = 1, holdUntil = Infinity, collapseDur = 1.0 } = {}
+    { ease = easeInOutCubic, from = 0, to = 1, holdUntil = Infinity, collapseDur = 1.0, stageStagger = undefined } = {}
   ) {
-    const normalized = (Array.isArray(parts) ? parts : []).map((p) => ({
-      object: p.object,
-      restPos: p.restPos ? readVec3(p.restPos) : readVec3(p.object?.position),
-      offset: readVec3(p.offset, [0, 1, 0]),
-    }));
+    const isArray = Array.isArray(partsOrRoot);
+    const normalized = isArray
+      ? partsOrRoot.map((p) => ({
+          object: p.object,
+          restPos: p.restPos ? readVec3(p.restPos) : readVec3(p.object?.position),
+          offset: readVec3(p.offset, [0, 1, 0]),
+          stage: Math.max(0, Number(p.stage ?? p.object?.userData?.explodeStage ?? p.object?.userData?.stage ?? 0) || 0),
+        }))
+      : collectExplodeParts(partsOrRoot);
+    const hasStages = normalized.some((p) => p.stage > 0);
+    const resolvedStagger = stageStagger !== undefined ? Math.max(0, Number(stageStagger) || 0) : (hasStages ? 0.22 : 0);
     const start = Math.max(0, Number(t0) || 0);
     const length = Math.max(0, Number(dur) || 0);
     this._explodeBeats.push({
@@ -353,6 +448,7 @@ export class ActorChoreographer {
       to: Number(to ?? 1),
       holdUntil: Number.isFinite(holdUntil) ? holdUntil : Infinity,
       collapseDur: Math.max(0, Number(collapseDur) || 0),
+      stageStagger: resolvedStagger,
       ease: typeof ease === 'function' ? ease : easeInOutCubic,
     });
     return this;
@@ -665,22 +761,29 @@ export class ActorChoreographer {
 
   #applyExplodeBeats(t) {
     for (const beat of this._explodeBeats) {
-      let factor = beat.from;
+      let rawFactor = beat.from;
+      let easedFactor = beat.from;
       if (t >= beat.t0) {
-        const u = beat.dur > 0 ? beat.ease(clamp01((t - beat.t0) / beat.dur)) : 1;
-        factor = lerp(beat.from, beat.to, u);
+        const rawU = beat.dur > 0 ? clamp01((t - beat.t0) / beat.dur) : 1;
+        rawFactor = lerp(beat.from, beat.to, rawU);
+        easedFactor = lerp(beat.from, beat.to, beat.ease(rawU));
         if (t >= beat.holdUntil) {
-          const back = beat.collapseDur > 0 ? beat.ease(clamp01((t - beat.holdUntil) / beat.collapseDur)) : 1;
-          factor = lerp(beat.to, beat.from, back);
+          const rawBack = beat.collapseDur > 0 ? clamp01((t - beat.holdUntil) / beat.collapseDur) : 1;
+          rawFactor = lerp(beat.to, beat.from, rawBack);
+          easedFactor = lerp(beat.to, beat.from, beat.ease(rawBack));
         }
       }
-      for (const p of beat.parts) {
-        if (!p.object?.position?.set) continue;
-        p.object.position.set(
-          p.restPos[0] + p.offset[0] * factor,
-          p.restPos[1] + p.offset[1] * factor,
-          p.restPos[2] + p.offset[2] * factor
-        );
+      if (beat.stageStagger > 0) {
+        applyExplodeFactor(beat.parts, rawFactor, { stageStagger: beat.stageStagger, ease: beat.ease });
+      } else {
+        for (const p of beat.parts) {
+          if (!p.object?.position?.set) continue;
+          p.object.position.set(
+            p.restPos[0] + p.offset[0] * easedFactor,
+            p.restPos[1] + p.offset[1] * easedFactor,
+            p.restPos[2] + p.offset[2] * easedFactor
+          );
+        }
       }
     }
   }

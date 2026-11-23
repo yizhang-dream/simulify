@@ -29,87 +29,186 @@ export const SCULPT_GEO_KINDS = Object.freeze([
 ]);
 
 export const SCULPT_MATERIAL_PRESETS = Object.freeze({
+  // Matte dielectrics (zero plastic roughness-map slash, selective IBL = false)
   ceramic: {
-    physical: false,
+    physical: true,
+    reflective: false,
     color: 0xf4eee2,
     darkColor: 0xd4dce8,
-    roughness: 0.36,
-    metalness: 0.04,
-    envMapIntensity: 0.85,
+    roughness: 0.8,
+    metalness: 0.0,
+    specularIntensity: 0.22,
+    diffuseRoughness: 0.45,
+    envMapIntensity: 0.08,
+  },
+  clay: {
+    physical: true,
+    reflective: false,
+    color: 0xe6cdb2,
+    darkColor: 0xc2a88c,
+    roughness: 0.88,
+    metalness: 0.0,
+    specularIntensity: 0.16,
+    diffuseRoughness: 0.6,
+    sheen: 0.14,
+    sheenRoughness: 0.85,
+    envMapIntensity: 0.04,
   },
   travertine: {
-    physical: false,
+    physical: true,
+    reflective: false,
     color: 0xe6dccb,
     darkColor: 0x475569,
-    roughness: 0.78,
-    metalness: 0.02,
-    envMapIntensity: 0.55,
-  },
-  brass: {
-    physical: false,
-    color: 0xc99c4e,
-    darkColor: 0xd9ad5b,
-    roughness: 0.28,
-    metalness: 0.86,
-    envMapIntensity: 1.15,
-  },
-  anodized: {
-    physical: false,
-    color: 0x2b3956,
-    darkColor: 0x3b4d70,
-    roughness: 0.36,
-    metalness: 0.62,
-    envMapIntensity: 0.95,
-  },
-  copper: {
-    physical: false,
-    color: 0xc86d42,
-    darkColor: 0xd97d50,
-    roughness: 0.3,
-    metalness: 0.84,
-    envMapIntensity: 1.1,
+    roughness: 0.88,
+    metalness: 0.0,
+    specularIntensity: 0.15,
+    diffuseRoughness: 0.65,
+    envMapIntensity: 0.05,
   },
   obsidian: {
-    physical: false,
-    color: 0x242836,
-    darkColor: 0x181c28,
-    roughness: 0.62,
-    metalness: 0.18,
-    envMapIntensity: 0.7,
+    physical: true,
+    reflective: false,
+    color: 0x262b38,
+    darkColor: 0x1a1f2c,
+    roughness: 0.8,
+    metalness: 0.0,
+    specularIntensity: 0.24,
+    diffuseRoughness: 0.5,
+    envMapIntensity: 0.1,
   },
-  steel: {
-    physical: false,
-    color: 0x8f99a8,
-    darkColor: 0x9aa6b8,
-    roughness: 0.3,
-    metalness: 0.82,
+  rubber: {
+    physical: true,
+    reflective: false,
+    color: 0x2a2e35,
+    darkColor: 0x1f242c,
+    roughness: 0.9,
+    metalness: 0.0,
+    specularIntensity: 0.14,
+    diffuseRoughness: 0.7,
+    envMapIntensity: 0.02,
+  },
+  // Enamel & painted lacquers (glossy clearcoat dielectric, reflective = true)
+  enamel: {
+    physical: true,
+    reflective: true,
+    color: 0x1e6f78,
+    darkColor: 0x25969e,
+    roughness: 0.36,
+    metalness: 0.0,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.12,
+    specularIntensity: 0.85,
+    envMapIntensity: 0.92,
+  },
+  painted: {
+    physical: true,
+    reflective: true,
+    color: 0xc96d24,
+    darkColor: 0xd97d36,
+    roughness: 0.42,
+    metalness: 0.0,
+    clearcoat: 0.78,
+    clearcoatRoughness: 0.16,
+    specularIntensity: 0.75,
+    envMapIntensity: 0.88,
+  },
+  // Real machined metals (high metalness 0.72-0.92, crisp anisotropic highlights, reflective = true)
+  brass: {
+    physical: true,
+    reflective: true,
+    color: 0xd2a34e,
+    darkColor: 0xdeb05c,
+    roughness: 0.24,
+    metalness: 0.9,
+    anisotropy: 0.55,
+    envMapIntensity: 1.22,
+  },
+  anodized: {
+    physical: true,
+    reflective: true,
+    color: 0x2e3f60,
+    darkColor: 0x3e5278,
+    roughness: 0.32,
+    metalness: 0.8,
+    clearcoat: 0.15,
+    clearcoatRoughness: 0.24,
     envMapIntensity: 1.05,
   },
+  copper: {
+    physical: true,
+    reflective: true,
+    color: 0xd07144,
+    darkColor: 0xde8052,
+    roughness: 0.26,
+    metalness: 0.88,
+    anisotropy: 0.55,
+    envMapIntensity: 1.18,
+  },
+  steel: {
+    physical: true,
+    reflective: true,
+    color: 0x9aa4b4,
+    darkColor: 0xa6b2c4,
+    roughness: 0.24,
+    metalness: 0.92,
+    anisotropy: 0.55,
+    envMapIntensity: 1.15,
+  },
+  satinSteel: {
+    physical: true,
+    reflective: true,
+    color: 0xb0bac4,
+    darkColor: 0xb7c0ca,
+    roughness: 0.33,
+    metalness: 0.83,
+    envMapIntensity: 1.12,
+  },
+  satinBrass: {
+    physical: true,
+    reflective: true,
+    color: 0xc58d39,
+    darkColor: 0xdeb05c,
+    roughness: 0.34,
+    metalness: 0.82,
+    envMapIntensity: 0.68,
+  },
+  castIron: {
+    physical: true,
+    reflective: true,
+    color: 0x363b44,
+    darkColor: 0x2d323b,
+    roughness: 0.52,
+    metalness: 0.72,
+    envMapIntensity: 0.95,
+  },
+  // Optical glass & emissive accent
   glass: {
     physical: true,
+    reflective: true,
     color: 0xe8f6f8,
     darkColor: 0xc8eef6,
-    roughness: 0.08,
-    metalness: 0.04,
+    roughness: 0.06,
+    metalness: 0.0,
     transparent: true,
     opacity: 0.34,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
+    clearcoatRoughness: 0.05,
     ior: 1.48,
     reflectivity: 0.92,
     depthWrite: false,
-    envMapIntensity: 1.35,
+    envMapIntensity: 1.32,
   },
   frostedGlass: {
     physical: true,
+    reflective: true,
     color: 0xedf4f6,
     darkColor: 0xb8d4de,
-    roughness: 0.36,
-    metalness: 0.04,
+    roughness: 0.34,
+    metalness: 0.0,
     transparent: true,
     opacity: 0.56,
     clearcoat: 0.55,
-    clearcoatRoughness: 0.32,
+    clearcoatRoughness: 0.3,
     ior: 1.45,
     reflectivity: 0.72,
     depthWrite: false,
@@ -117,13 +216,14 @@ export const SCULPT_MATERIAL_PRESETS = Object.freeze({
   },
   ember: {
     physical: false,
+    reflective: false,
     color: 0xe25624,
     darkColor: 0xf4632c,
     emissive: 0xff6a28,
-    emissiveIntensity: 0.88,
-    roughness: 0.38,
-    metalness: 0.14,
-    envMapIntensity: 0.7,
+    emissiveIntensity: 0.85,
+    roughness: 0.42,
+    metalness: 0.0,
+    envMapIntensity: 0.35,
   },
 });
 
@@ -249,58 +349,68 @@ function resolveMaterial(opts, defaultPreset, extraOverrides = null) {
 // ============================================================================
 
 const DARK_THEMES = new Set(['dark-studio', 'blueprint', 'obsidian-gallery']);
+// Only brushed machined metals opt into high-res (512^2, anisotropy=8) normalized micro-maps by default.
+// Matte dielectrics (ceramic, clay, travertine, obsidian, rubber) NEVER auto-inject roughnessMaps.
 const PRESET_MICRO_TEX = Object.freeze({
-  brass: { kind: 'brushed', bumpScale: 0.012, repeat: [2, 2] },
-  steel: { kind: 'brushed', bumpScale: 0.01, repeat: [2, 2] },
-  copper: { kind: 'brushed', bumpScale: 0.012, repeat: [2, 2] },
-  travertine: { kind: 'grain', bumpScale: 0.022, repeat: [3, 3] },
-  obsidian: { kind: 'grain', bumpScale: 0.016, repeat: [3, 3] },
-  anodized: { kind: 'anodized', bumpScale: 0.008, repeat: [4, 4] },
-  ceramic: { kind: 'anodized', bumpScale: 0.004, repeat: [3, 3] },
+  brass: { kind: 'brushed', bumpScale: 0.0045, repeat: [2, 2] },
+  steel: { kind: 'brushed', bumpScale: 0.004, repeat: [2, 2] },
+  copper: { kind: 'brushed', bumpScale: 0.0045, repeat: [2, 2] },
+  satinSteel: { kind: 'satin-brushed', bumpScale: 0, repeat: [2, 2] },
+  satinBrass: { kind: 'satin-brushed', bumpScale: 0, repeat: [2, 2] },
 });
 
 const _microTexCache = new Map();
 
 /**
  * Generate a cached, deterministic, seamless procedural DataTexture for PBR micro-surface detail
- * (`roughnessMap` / `bumpMap`). Zero DOM/CDN dependencies — works identically in WebGPU, WebGL2, and Node.
+ * (`roughnessMap` / `bumpMap`), normalized around `~0.95` (`[0.86, 1.0]`) so multiplying against
+ * `material.roughness` preserves calibrated physical roughness instead of slashing matte values.
+ * Zero DOM/CDN dependencies — works identically in WebGPU, WebGL2, and Node.
  *
- * @param {'brushed'|'grain'|'anodized'|'hatch45'|'grid-pcb'} kind
- * @param {{ size?: number, seed?: number }} [opts]
+ * @param {'brushed'|'satin-brushed'|'grain'|'anodized'|'hatch45'|'grid-pcb'} kind
+ * @param {{ size?: number, seed?: number, anisotropy?: number, repeat?: [number, number] }} [opts]
  * @returns {THREE.DataTexture}
  */
-export function createProceduralSurfaceMaps(kind = 'grain', { size = 128, seed = 73 } = {}) {
-  const key = `${kind}:${size}:${seed}`;
+export function createProceduralSurfaceMaps(
+  kind = 'grain',
+  { size = 512, seed = 73, anisotropy = 8, repeat = [2, 2] } = {}
+) {
+  const rx = Array.isArray(repeat) ? Number(repeat[0]) || 1 : 1;
+  const ry = Array.isArray(repeat) ? Number(repeat[1]) || 1 : 1;
+  const n = Math.max(64, Math.min(1024, Math.round(size)));
+  const aniso = Math.max(1, Math.min(16, Math.round(anisotropy)));
+  const key = `${kind}:${n}:${seed}:${aniso}:${rx}x${ry}`;
   if (_microTexCache.has(key)) {
     return _microTexCache.get(key);
   }
-  const n = Math.max(32, Math.min(256, Math.round(size)));
   const data = new Uint8Array(n * n * 4);
 
   for (let y = 0; y < n; y += 1) {
     const v = y / n;
     for (let x = 0; x < n; x += 1) {
       const u = x / n;
-      let val = 0.5;
-      if (kind === 'brushed') {
-        const streak = valueNoise2(u * 3.0, v * 58.0, seed) * 0.65 + valueNoise2(u * 8.0, v * 116.0, seed + 17) * 0.35;
-        val = 0.38 + streak * 0.44;
+      let val = 0.95;
+      if (kind === 'brushed' || kind === 'satin-brushed') {
+        const streak =
+          valueNoise2(u * 4.0, v * 96.0, seed) * 0.65 +
+          valueNoise2(u * 10.0, v * 192.0, seed + 17) * 0.35;
+        val = kind === 'satin-brushed' ? 0.97 + streak * 0.03 : 0.87 + streak * 0.13;
       } else if (kind === 'anodized') {
         const fine = hash2(x, y, seed + 31);
-        const macro = fbm2(u * 12, v * 12, seed + 5, 2);
-        val = 0.42 + fine * 0.24 + macro * 0.22;
+        const macro = fbm2(u * 16, v * 16, seed + 5, 2);
+        val = 0.88 + fine * 0.06 + macro * 0.06;
       } else if (kind === 'hatch45') {
-        const diag = (x + y) % 12;
-        val = diag < 2 ? 0.22 : 0.88;
+        const diag = (x + y) % 16;
+        val = diag < 2 ? 0.82 : 0.98;
       } else if (kind === 'grid-pcb') {
-        const gx = x % 16;
-        const gy = y % 16;
-        val = gx === 0 || gy === 0 ? 0.28 : 0.78 + hash2(x, y, seed) * 0.08;
+        const gx = x % 24;
+        const gy = y % 24;
+        val = gx === 0 || gy === 0 ? 0.84 : 0.95 + hash2(x, y, seed) * 0.04;
       } else {
-        // 'grain': porous stone / travertine / plaster micro-detail
-        const coarse = fbm2(u * 14, v * 14, seed, 3);
+        // 'grain': subtle mineral micro-variation normalized near 1.0
+        const coarse = fbm2(u * 18, v * 18, seed, 3);
         const pit = hash2(x, y, seed + 19);
-        val = 0.34 + coarse * 0.46 + (pit > 0.92 ? -0.18 : pit * 0.14);
+        val = 0.87 + coarse * 0.1 + (pit > 0.94 ? -0.05 : pit * 0.03);
       }
       const byte = Math.max(0, Math.min(255, Math.round(val * 255)));
       const idx = (y * n + x) * 4;
@@ -314,6 +424,8 @@ export function createProceduralSurfaceMaps(kind = 'grain', { size = 128, seed =
   const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(rx, ry);
+  tex.anisotropy = aniso;
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
@@ -323,32 +435,52 @@ export function createProceduralSurfaceMaps(kind = 'grain', { size = 128, seed =
 }
 
 /**
- * Create a physically lit PBR material (`MeshStandardMaterial` or `MeshPhysicalMaterial`)
- * tuned across all 6 Simulify studio themes with automatic procedural micro-surface textures
- * (`brushed`, `grain`, `anodized`) for tactile realism instead of flat plastic surfaces.
+ * Create a role-separated physically lit PBR material (`MeshPhysicalMaterial` / `MeshStandardMaterial`)
+ * tuned across all 6 Simulify studio themes:
+ * - Matte dielectrics (`ceramic`, `clay`, `travertine`, `obsidian`, `rubber`): true matte roughness 0.80–0.90,
+ *   low F0 `specularIntensity`, `userData.reflective = false`, zero plasticizing `DataTexture` injection.
+ * - Lacquers (`enamel`, `painted`): dielectric albedo + crisp physical `clearcoat`, `userData.reflective = true`.
+ * - Machined metals (`steel`, `brass`, `copper`, `anodized`, `castIron`): high metalness (0.72–0.92),
+ *   physical `anisotropy`, `userData.reflective = true`, and optional 512² 8×-anisotropic brushed micro-maps.
  *
- * @param {'ceramic'|'travertine'|'brass'|'anodized'|'copper'|'obsidian'|'steel'|'glass'|'frostedGlass'|'ember'} [preset='ceramic']
+ * @param {'ceramic'|'clay'|'travertine'|'obsidian'|'rubber'|'enamel'|'painted'|'brass'|'anodized'|'copper'|'steel'|'castIron'|'glass'|'frostedGlass'|'ember'} [preset='ceramic']
  * @param {Record<string, any>} [overrides]
  */
 export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
   const spec = SCULPT_MATERIAL_PRESETS[preset] || SCULPT_MATERIAL_PRESETS.ceramic;
-  const { theme: explicitTheme, microTexture = true, ...restOverrides } = overrides || {};
+  const {
+    theme: explicitTheme,
+    microTexture,
+    microTextureKind,
+    microTextureRepeat,
+    reflective: explicitReflective,
+    ...restOverrides
+  } = overrides || {};
   const theme = detectActiveTheme(explicitTheme);
   const isDark = DARK_THEMES.has(theme);
 
   const baseColor = isDark && spec.darkColor !== undefined ? spec.darkColor : spec.color;
+  const defaultEnvIntensity = isDark ? spec.envMapIntensity * 1.15 : spec.envMapIntensity;
   const params = {
     color: restOverrides.vertexColors ? 0xffffff : baseColor,
     roughness: spec.roughness,
     metalness: spec.metalness,
-    envMapIntensity: isDark ? spec.envMapIntensity * 1.18 : spec.envMapIntensity,
+    envMapIntensity: defaultEnvIntensity,
   };
 
-  if (microTexture && preset in PRESET_MICRO_TEX && !restOverrides.bumpMap && !restOverrides.roughnessMap) {
-    const mt = PRESET_MICRO_TEX[preset];
-    const map = createProceduralSurfaceMaps(mt.kind);
-    params.bumpMap = map;
-    params.bumpScale = mt.bumpScale;
+  // Brushed machined metals opt into normalized 512^2 anisotropy=8 micro-maps by default;
+  // matte dielectrics only attach micro-maps if explicitly requested via `microTexture: true`.
+  const presetMicro = PRESET_MICRO_TEX[preset] || null;
+  const wantMicro = microTexture !== undefined ? Boolean(microTexture) : Boolean(presetMicro);
+  if (wantMicro && !restOverrides.bumpMap && !restOverrides.roughnessMap) {
+    const kind = microTextureKind || presetMicro?.kind || 'grain';
+    const repeat = microTextureRepeat || presetMicro?.repeat || [2, 2];
+    const map = createProceduralSurfaceMaps(kind, { size: 512, anisotropy: 8, repeat });
+    const bumpScale = restOverrides.bumpScale ?? presetMicro?.bumpScale ?? 0.004;
+    if (bumpScale !== 0) {
+      params.bumpMap = map;
+      params.bumpScale = bumpScale;
+    }
     params.roughnessMap = map;
   }
 
@@ -363,6 +495,11 @@ export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
   if (spec.physical) {
     if (spec.clearcoat !== undefined) params.clearcoat = spec.clearcoat;
     if (spec.clearcoatRoughness !== undefined) params.clearcoatRoughness = spec.clearcoatRoughness;
+    if (spec.specularIntensity !== undefined) params.specularIntensity = spec.specularIntensity;
+    if (spec.diffuseRoughness !== undefined) params.diffuseRoughness = spec.diffuseRoughness;
+    if (spec.anisotropy !== undefined) params.anisotropy = spec.anisotropy;
+    if (spec.sheen !== undefined) params.sheen = spec.sheen;
+    if (spec.sheenRoughness !== undefined) params.sheenRoughness = spec.sheenRoughness;
     if (spec.ior !== undefined) params.ior = spec.ior;
     if (spec.reflectivity !== undefined) params.reflectivity = spec.reflectivity;
   }
@@ -376,6 +513,9 @@ export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
   const usePhysical =
     spec.physical ||
     params.clearcoat !== undefined ||
+    params.specularIntensity !== undefined ||
+    params.diffuseRoughness !== undefined ||
+    params.anisotropy !== undefined ||
     params.transmission !== undefined ||
     params.ior !== undefined ||
     params.iridescence !== undefined ||
@@ -385,7 +525,18 @@ export function createSculptMaterial(preset = 'ceramic', overrides = {}) {
     ? new THREE.MeshPhysicalMaterial(params)
     : new THREE.MeshStandardMaterial(params);
 
-  mat.userData = { ...(mat.userData || {}), simulifyPreset: preset, simulifyTheme: theme };
+  const isReflective =
+    explicitReflective !== undefined
+      ? Boolean(explicitReflective)
+      : Boolean(spec.reflective || (params.metalness ?? 0) >= 0.5 || (params.clearcoat ?? 0) >= 0.35);
+
+  mat.userData = {
+    ...(mat.userData || {}),
+    simulifyPreset: preset,
+    simulifyTheme: theme,
+    reflective: isReflective,
+    simulifyEnvIntensity: params.envMapIntensity,
+  };
   return mat;
 }
 
@@ -432,8 +583,42 @@ export function createXRayMaterial({
 // ============================================================================
 
 /**
+ * Round profile corners with tangent quadratic arcs. The setback is capped at
+ * 45% of each adjacent edge so neighboring fillets cannot overlap.
+ * Pass a repeated first point to round a closed loop, including its seam.
+ *
+ * @param {Array<[number, number]|THREE.Vector2>} profile
+ * @param {number} setback Distance along each edge before the corner
+ * @param {number} [segments] Samples per corner arc
+ * @returns {THREE.Vector2[]}
+ */
+export function filletProfile(profile, setback, segments = 4) {
+  const points = toVec2Array(profile);
+  if (!(setback > 0) || points.length < 3) return points;
+  const closed = points[0].equals(points.at(-1));
+  if (closed) points.pop();
+  if (points.length < 3) return toVec2Array(profile);
+
+  const divisions = Math.max(2, Math.round(segments));
+  const rounded = points.flatMap((point, index) => {
+    if (!closed && (index === 0 || index === points.length - 1)) return [point];
+    const prev = points[(index + points.length - 1) % points.length];
+    const next = points[(index + 1) % points.length];
+    const before = point.distanceTo(prev);
+    const after = point.distanceTo(next);
+    const trim = Math.min(setback, before * 0.45, after * 0.45);
+    if (trim === 0) return [point];
+    const start = point.clone().lerp(prev, trim / before);
+    const end = point.clone().lerp(next, trim / after);
+    return new THREE.QuadraticBezierCurve(start, point, end).getPoints(divisions);
+  });
+  if (closed) rounded.push(rounded[0].clone());
+  return rounded;
+}
+
+/**
  * Revolve a 2D `[radius, y]` profile around the Y axis into a precision turned solid.
- * Supports optional Catmull-Rom spline smoothing and clean bottom/top axis caps.
+ * Supports Catmull-Rom smoothing, bounded corner fillets and axis caps.
  *
  * @param {Array<[number, number]|THREE.Vector2>} profile
  * @param {Record<string, any>} [opts]
@@ -445,13 +630,17 @@ export function createLathedSolid(profile, opts = {}) {
     phiLength = Math.PI * 2,
     smooth = false,
     smoothDivisions = 48,
+    profileFillet = 0,
+    profileFilletSegments = 4,
     closed = false,
     preset = 'brass',
   } = opts;
 
   let pts = toVec2Array(profile).map((v) => new THREE.Vector2(Math.max(0, v.x), v.y));
 
-  if (smooth && pts.length >= 3) {
+  if (profileFillet > 0) {
+    pts = filletProfile(pts, profileFillet, profileFilletSegments);
+  } else if (smooth && pts.length >= 3) {
     const spline = new THREE.SplineCurve(pts);
     pts = spline.getPoints(Math.max(12, Math.round(smoothDivisions)));
     for (const p of pts) p.x = Math.max(0, p.x);
@@ -1137,6 +1326,10 @@ export function createBevelledProfile(shapeOrPts, opts = {}) {
  *   boreRadius?: number,
  *   spokes?: number,
  *   bevel?: number,
+ *   bevelSize?: number,
+ *   bevelSegments?: number,
+ *   curveSegments?: number,
+ *   toothFillet?: number,
  *   hub?: boolean,
  *   orient?: 'xy'|'xz',
  *   preset?: string,
@@ -1158,6 +1351,10 @@ export function createGearWheel(opts = {}) {
     boreRadius = 0.13,
     spokes = 5,
     bevel = 0.016,
+    bevelSize = bevel * 0.85,
+    bevelSegments = 2,
+    curveSegments = 16,
+    toothFillet = 0,
     hub = true,
     orient = 'xy',
     preset = 'brass',
@@ -1175,7 +1372,7 @@ export function createGearWheel(opts = {}) {
   const pressureRad = (Math.max(5, Math.min(35, Number(pressureAngleDeg) || 20)) * Math.PI) / 180;
   const taperFrac = Math.min(0.14, Math.tan(pressureRad) * (td / Math.max(0.05, rp * step)) * 0.35);
 
-  const shape = new THREE.Shape();
+  const toothProfile = [];
   for (let i = 0; i < z; i += 1) {
     const a0 = i * step;
     const aRootL = a0 + step * (0.14 - taperFrac * 0.35);
@@ -1185,20 +1382,19 @@ export function createGearWheel(opts = {}) {
     const aPitchR = a0 + step * 0.62;
     const aRootR = a0 + step * (0.72 + taperFrac * 0.35);
 
-    const pts = [
+    toothProfile.push(
       [Math.cos(aRootL) * rRoot, Math.sin(aRootL) * rRoot],
       [Math.cos(aPitchL) * rp, Math.sin(aPitchL) * rp],
       [Math.cos(aTipL) * rTip, Math.sin(aTipL) * rTip],
       [Math.cos(aTipR) * rTip, Math.sin(aTipR) * rTip],
       [Math.cos(aPitchR) * rp, Math.sin(aPitchR) * rp],
       [Math.cos(aRootR) * rRoot, Math.sin(aRootR) * rRoot],
-    ];
-    if (i === 0) shape.moveTo(pts[0][0], pts[0][1]);
-    else shape.lineTo(pts[0][0], pts[0][1]);
-    for (let k = 1; k < pts.length; k += 1) {
-      shape.lineTo(pts[k][0], pts[k][1]);
-    }
+    );
   }
+  const toothOutline = toothFillet > 0
+    ? filletProfile([...toothProfile, toothProfile[0]], toothFillet, 3)
+    : toVec2Array(toothProfile);
+  const shape = new THREE.Shape(toothOutline);
   shape.closePath();
 
   const boreR = Math.max(0, Math.min(rRoot * 0.65, Number(boreRadius) || 0));
@@ -1229,9 +1425,9 @@ export function createGearWheel(opts = {}) {
     depth: thickness,
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
-    bevelSize: bevel * 0.85,
-    bevelSegments: 2,
-    curveSegments: 16,
+    bevelSize,
+    bevelSegments,
+    curveSegments,
     center: true,
     orient,
     preset,
@@ -1926,7 +2122,14 @@ export function createHeightfieldSurface(opts = {}) {
   const mat = resolveMaterial(opts, preset, {
     vertexColors: useColors,
     roughness: 0.44,
-    metalness: 0.05,
+    metalness: 0.0,
+    clearcoat: 0.24,
+    clearcoatRoughness: 0.3,
+    specularIntensity: 0.48,
+    emissiveIntensity: 0,
+    microTexture: false,
+    reflective: true,
+    envMapIntensity: 0.65,
     side: skirt ? THREE.FrontSide : THREE.DoubleSide,
   });
 
@@ -2300,6 +2503,15 @@ export function createParametricSurface(uSegs = 32, vSegs = 32, evalFn, opts = {
 
   const mat = resolveMaterial(opts, preset, {
     vertexColors: useColors,
+    roughness: 0.44,
+    metalness: 0.0,
+    clearcoat: 0.24,
+    clearcoatRoughness: 0.3,
+    specularIntensity: 0.48,
+    emissiveIntensity: 0,
+    microTexture: false,
+    reflective: true,
+    envMapIntensity: 0.65,
     side: doubleSided ? THREE.DoubleSide : THREE.FrontSide,
   });
 

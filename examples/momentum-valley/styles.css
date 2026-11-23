@@ -1,0 +1,135 @@
+:root {
+  --momentum: #c25e00;
+  --sgd: #0072b2;
+  --ghost: #7e3af2;
+}
+
+html[data-theme="dark-studio"],
+html[data-theme="obsidian-gallery"],
+html[data-theme="blueprint"] {
+  --momentum: #ffb16b;
+  --sgd: #8edcff;
+  --ghost: #e0b4ff;
+}
+
+.hud-top-left { gap: 7px; }
+.hud-top-left h1 {
+  margin: 0;
+  font: 600 clamp(1.65rem, 3.1vw, 2.55rem)/1.18 var(--font-display);
+  color: var(--navy);
+}
+
+.brand-sub { margin: 0; color: var(--muted); font-size: 13px; }
+.gallery-link { color: var(--muted); font-size: 12px; text-underline-offset: 3px; }
+.gallery-link:hover { color: var(--navy); }
+
+.track-key { display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 5px; font: 12px var(--font-mono); }
+.track-key span { display: inline-flex; align-items: center; gap: 6px; }
+.track-key span::before { content: ""; width: 22px; border-top: 2px solid currentColor; }
+.key-momentum { color: var(--momentum); }
+.key-sgd { color: var(--sgd); }
+.track-key .key-sgd::before { border-top-style: dashed; }
+
+.hud-guide {
+  width: 278px;
+  padding: 11px;
+  gap: 8px;
+}
+
+.presets { display: flex; gap: 4px; }
+.presets button, #ghost {
+  min-height: 30px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--navy);
+  font: 600 12px var(--font-sans);
+  cursor: pointer;
+}
+
+.presets button { flex: 1; white-space: nowrap; }
+.presets button[aria-pressed="true"], #ghost[aria-pressed="true"] { border-color: var(--sgd); }
+button:hover { filter: brightness(1.15); }
+
+.controls { display: grid; gap: 3px; }
+.controls label {
+  display: grid;
+  grid-template-columns: 65px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 7px;
+  min-height: 25px;
+  font-size: 12px;
+}
+.controls input { width: 100%; min-width: 0; margin: 0; accent-color: var(--sgd); cursor: ew-resize; }
+.controls output { text-align: right; color: var(--navy); font: 12px var(--font-mono); }
+.start-coordinates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  font-size: 12px;
+}
+.start-coordinates label { display: grid; gap: 3px; min-width: 0; }
+.start-coordinates input {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--navy);
+  font: 12px var(--font-mono);
+}
+.ghost-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+#ghost[aria-pressed="true"] { border-color: var(--ghost); color: var(--ghost); }
+.stability { margin: 0; color: var(--muted); font-size: 12px; }
+.stability[data-unstable="true"] { color: var(--momentum); }
+
+#maths .live-maths-panel { box-shadow: none; }
+#maths .live-maths-summary { padding: 5px 6px; }
+#maths .live-maths-summary::after { content: "+"; color: var(--muted); }
+#maths details[open] .live-maths-summary::after { content: "−"; }
+#maths .live-maths-body { padding: 5px 6px; }
+#maths .eq-list { gap: 0; }
+#maths .eq-block { padding: 2px 0; border: 0; background: transparent; font-size: 13px; }
+#maths .eq-line > * { max-width: 100%; }
+/* KaTeX uses a zero-width glyph here to position stacked math. Keep the box. */
+#maths .katex .vlist-s { visibility: hidden; }
+
+#chart {
+  width: 245px;
+  --cat1: var(--sgd);
+  --cat2: var(--momentum);
+  --cat4: var(--ghost);
+}
+#chart .chart-head { margin-bottom: 5px; }
+#transport { width: min(496px, calc(100% - 520px)); }
+#transport .timeline-dock { width: 100%; }
+#views .view-cube-btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .artboard-shell > .stage-pane {
+    position: relative;
+    inset: auto;
+    height: clamp(275px, 48dvh, 440px);
+    width: 100%;
+  }
+  .artboard-shell #views { order: 3; }
+  .artboard-shell #transport { order: 4; width: 100%; }
+  .artboard-shell .hud-guide { order: 5; width: 100%; }
+  .artboard-shell #chart { order: 6; width: 100%; }
+}
+
+html[data-export="stage"] .artboard-shell,
+html[data-thumb="1"] .artboard-shell {
+  display: block;
+  height: 100dvh;
+  padding: 0;
+}
+
+html[data-export="stage"] .artboard-shell > .stage-pane,
+html[data-thumb="1"] .artboard-shell > .stage-pane {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}

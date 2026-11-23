@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as nodeModule from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { AliveLoop } from '../kit/agency-loop.js';
 import { CalloutLayer, resolveCalloutRects } from '../kit/callout-layer.js';
 import { ChartCard } from '../kit/chart-card.js';
-import { ActorChoreographer } from '../kit/choreography.js';
+import { ActorChoreographer, applyExplodeFactor, collectExplodeParts } from '../kit/choreography.js';
 import {
   areFontsReady,
   canvasFont,
@@ -18,6 +20,7 @@ import {
   waitForFonts,
 } from '../kit/fonts.js';
 import { LinkBus } from '../kit/link-bus.js';
+import { bisectRoot, createSimModel, formatUnit, integrateRK4, rk4Step } from '../kit/model-core.js';
 import {
   LiveMathsPanel,
   mathAccent,
@@ -46,19 +49,16 @@ import {
   LAYOUT_ARCHETYPES,
   mountScaleBar,
   mountViewCube,
-  ScrollyBridge,
   THEME_PRESETS,
   toggleZenMode,
   WipeCompareController,
 } from '../kit/layout-shell.js';
-import { SvgFlowStage } from '../kit/stage-2d.js';
 import {
   defaultInterpolateState,
   SimulationTape,
   SpacetimeClock,
 } from '../kit/spacetime.js';
 import { Spring } from '../kit/spring.js';
-import { StageExporter, mountExportButton } from '../kit/stage-exporter.js';
 import {
   applyUrlState,
   easeLinear,
@@ -67,17 +67,13 @@ import {
   parseUrlState,
   PhaseScrubber,
   TimelineDirector,
+  VALID_PROFILES,
 } from '../kit/timeline-director.js';
-import { ApngSession, crc32, muxApngWithStats } from '../kit/export/apng-muxer.js';
-import { supportsHtmlInCanvasCompositor } from '../kit/export/compositor.js';
-import { encodeGifWithStats, GifEncoderSession } from '../kit/export/gif-encoder.js';
-import { Mp4Muxer } from '../kit/export/mp4-muxer.js';
-import { WebmMuxer } from '../kit/export/webm-muxer.js';
-import { createI18n } from '../shell/i18n.js';
-import { createMemoryStorage, MasteryStore } from '../shell/storage-adapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), '..');
+const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+const expectedProfiles = ['mechanical-3d', 'field-math', 'sandbox-direct'];
 
 // Minimal pure-JS DOM harness scoped strictly inside `withMockDocument(fn)` for Node tests
 function createMockElement(tagName, ns = null) {
@@ -156,6 +152,9 @@ function createMockElement(tagName, ns = null) {
     removeEventListener(type, fn) {
       listeners.get(type)?.delete(fn);
     },
+    listenerCount(type) {
+      return listeners.get(type)?.size ?? 0;
+    },
     dispatchEvent(type, ev = {}) {
       for (const fn of listeners.get(type) || []) fn(ev);
     },
@@ -199,51 +198,8 @@ function withMockDocument(fn) {
   }
 }
 
-// Helper to build a minimal valid PNG Uint8Array for APNG tests
-function buildSyntheticPng(width, height, idatPayload) {
-  const sig = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const makeChunk = (type, data) => {
-    const out = new Uint8Array(12 + data.byteLength);
-    const dv = new DataView(out.buffer);
-    dv.setUint32(0, data.byteLength, false);
-    for (let i = 0; i < 4; i += 1) out[4 + i] = type.charCodeAt(i);
-    out.set(data, 8);
-    dv.setUint32(8 + data.byteLength, crc32(out, 4, 8 + data.byteLength), false);
-    return out;
-  };
-  const ihdr = new Uint8Array(13);
-  const iv = new DataView(ihdr.buffer);
-  iv.setUint32(0, width, false);
-  iv.setUint32(4, height, false);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
-  const parts = [sig, makeChunk('IHDR', ihdr), makeChunk('IDAT', idatPayload), makeChunk('IEND', new Uint8Array(0))];
-  const total = parts.reduce((acc, p) => acc + p.byteLength, 0);
-  const merged = new Uint8Array(total);
-  let off = 0;
-  for (const p of parts) {
-    merged.set(p, off);
-    off += p.byteLength;
-  }
-  return merged;
-}
-
-function indexOfBytes(haystack, needle) {
-  outer: for (let i = 0; i <= haystack.length - needle.length; i += 1) {
-    for (let j = 0; j < needle.length; j += 1) {
-      if (haystack[i + j] !== needle[j]) continue outer;
-    }
-    return i;
-  }
-  return -1;
-}
-
-function asciiBytes(str) {
-  return Uint8Array.from(str, (ch) => ch.charCodeAt(0) & 0xff);
-}
-
 // ============================================================================
-// 1. Verify all active JS syntax across kit/, primitives/, shell/, examples/, tests/
+// 1. Verify all active JS syntax across kit/, primitives/, examples/, tests/
 //    (skipping vendor, node_modules, and archive)
 // ============================================================================
 function walkJs(dir) {
@@ -260,7 +216,6 @@ function walkJs(dir) {
 const jsFiles = [
   ...walkJs(path.join(ROOT, 'kit')),
   ...walkJs(path.join(ROOT, 'primitives')),
-  ...walkJs(path.join(ROOT, 'shell')),
   ...walkJs(path.join(ROOT, 'examples')),
   ...walkJs(path.join(ROOT, 'tests')),
 ];
@@ -299,6 +254,30 @@ assert.equal(
   pluginJson.version,
   'package.json and plugin.json versions must match'
 );
+const majorMinor = pluginJson.version.split('.').slice(0, 2).join('.');
+assert.equal(majorMinor, '3.1', 'Current release minor version must be 3.1');
+for (const relPath of [
+  'INSTALL.md',
+  'index.html',
+  'examples/index.html',
+  'SKILL.md',
+  'README.md',
+  'README.zh-CN.md',
+  'references/topic-fit.md',
+]) {
+  const text = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+  const isRedirect = relPath === 'examples/index.html' && /http-equiv\s*=\s*["']refresh["']|location\.replace\(/i.test(text);
+  assert.ok(
+    !/Simulify\s+v?3\.0\b/i.test(text) && !/\bv3\.0\b/.test(text),
+    `${relPath} must not contain stale 3.0 version strings`
+  );
+  if (!isRedirect) {
+    assert.ok(
+      new RegExp(`\\bv?${majorMinor.replace('.', '\\.')}\\b`).test(text),
+      `${relPath} must reference current version ${majorMinor}`
+    );
+  }
+}
 assert.ok(
   fs.existsSync(path.join(ROOT, 'examples', 'shared', 'vendor', 'three', 'addons', 'utils', 'BufferGeometryUtils.js')),
   'examples/shared/vendor/three/addons/utils/BufferGeometryUtils.js must exist'
@@ -328,10 +307,16 @@ for (const md of mdFiles) {
   }
 }
 
-assert.ok(
-  skillText.includes('Orthographic Three-View Blueprint') && skillText.includes('DIMENSIONS'),
-  'SKILL.md must enforce the Concept Draft + Orthographic Three-View Blueprint workflow'
-);
+assert.match(skillText, /^## Step 0\b/m, 'SKILL.md must describe Step 0 grounding');
+assert.ok(skillText.includes('references/grounding-discovery.md'), 'SKILL.md must link to the grounding workflow');
+assert.ok(skillText.includes('references/engine-contract.md'), 'SKILL.md must link to the engine contract');
+assert.ok(skillText.split(/\r?\n/).some((line) => (
+  line.includes('`mechanical-3d`') && line.includes('`DIMENSIONS`')
+  && /orthographic Front\s*\/\s*Side\s*\/\s*Top/i.test(line)
+)), 'SKILL.md must require a dimensioned orthographic blueprint for mechanical-3d');
+for (const profile of expectedProfiles) {
+  assert.ok(skillText.includes(`\`${profile}\``), `SKILL.md must cover the ${profile} profile`);
+}
 
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'thumbs-manifest.json'), 'utf8'));
 assert.ok(Array.isArray(manifest), 'thumbs-manifest.json must be a JSON array');
@@ -353,8 +338,11 @@ assert.equal(bus.hover('bay-0', '3d'), true);
 assert.equal(bus.hover('bay-0', '3d'), false, 'Duplicate hover must deduplicate');
 assert.equal(bus.focus('bay-0', 'ui'), true);
 assert.equal(bus.getState().selectedId, 'bay-0');
+assert.equal(bus.select('bay-0', 'ui'), false, 'Focus must already have published selection');
 assert.equal(bus.clearHover('3d'), true);
-assert.equal(events.length, 3);
+assert.deepEqual(events, [
+  ['hover', 'bay-0', '3d'], ['select', 'bay-0', 'ui'], ['focus', 'bay-0', 'ui'], ['hover', null, '3d'],
+]);
 console.log('[OK] LinkBus deduplication and focus behavior verified');
 
 // ============================================================================
@@ -764,7 +752,7 @@ const dir = new TimelineDirector({
   ],
 });
 
-const urlParsed = parseUrlState('?stage=act-2&t=0.5&paused&lang=en&export=caption&backend=webgpu');
+const urlParsed = parseUrlState('?stage=act-2&t=0.5&paused&lang=en&export=caption&backend=webgpu&skin=obsidian-gallery');
 assert.equal(urlParsed.stage, 'act-2');
 assert.equal(urlParsed.t, 0.5);
 assert.equal(urlParsed.paused, true);
@@ -772,6 +760,8 @@ assert.equal(urlParsed.lang, 'en');
 assert.equal(urlParsed.exportMode, 'caption');
 assert.equal(urlParsed.export, 'caption');
 assert.equal(urlParsed.backend, 'webgpu');
+assert.equal(urlParsed.skin, 'obsidian-gallery');
+assert.equal(parseUrlState('?stage=act-1').skin, null);
 assert.equal(parseUrlState('?export=stage').exportMode, 'stage');
 assert.equal(parseUrlState('?export=hud').exportMode, 'hud');
 assert.equal(parseUrlState('?export=1').exportMode, 'caption');
@@ -828,6 +818,8 @@ const stubStage = {
 const hooks = exposeTestHooks(dir, { stage: stubStage, choreographer: choreo });
 assert.equal(globalThis.__ready, true);
 assert.equal(hooks.version, 2);
+assert.equal(hooks.profile, 'mechanical-3d');
+assert.equal(hooks.getProfile(), 'mechanical-3d');
 for (const fnName of [
   'getTimelineInfo',
   'enterExportMode',
@@ -853,6 +845,22 @@ assert.equal(hooks.getCaptionState().stageTitle, 'Act 2');
 assert.ok(renderCount >= 1);
 hooks.exitExportMode();
 assert.equal(manualFlag, false);
+
+assert.deepEqual(VALID_PROFILES, expectedProfiles);
+assert.ok(Object.isFrozen(VALID_PROFILES));
+const grounding = { sources: ['source-a'] };
+for (const profile of expectedProfiles) {
+  const profileHooks = exposeTestHooks(dir, { profile, grounding, stage: stubStage, version: 2 });
+  assert.equal(globalThis.__simulify, profileHooks);
+  assert.equal(profileHooks.profile, profile);
+  assert.equal(profileHooks.getProfile(), profile);
+  assert.equal(profileHooks.grounding, grounding);
+}
+const legacyHooks = exposeTestHooks(dir);
+assert.equal(legacyHooks.version, 1);
+assert.equal(legacyHooks.profile, null);
+assert.equal(legacyHooks.getProfile(), null);
+assert.equal(exposeTestHooks(dir, { stage: stubStage, profile: 'invalid' }).getProfile(), 'mechanical-3d');
 delete globalThis.__simulify;
 delete globalThis.__ready;
 
@@ -871,6 +879,8 @@ const syncClock = new SpacetimeClock({
 });
 const syncChoreo = new ActorChoreographer();
 syncChoreo.register('base', makeMock3dActor(), { kind: '3d', initiallyVisible: true });
+const seekTimes = [];
+syncClock.subscribe(({ t }) => seekTimes.push(['clock', t]));
 const syncStage = {
   setManualMode() {},
   unlockUserCamera() {},
@@ -880,19 +890,46 @@ const syncStage = {
 const clockHooks = exposeTestHooks(syncClock, {
   stage: syncStage,
   choreographer: syncChoreo,
+  onSeek: (t) => seekTimes.push(['seek', t]),
   syncAll: (t) => {
+    seekTimes.push(['sync', t]);
     clockHookSyncCount += 1;
     syncChoreo.evaluate(t, { apply: true, stage: syncStage });
   },
 });
 const evalBefore = syncChoreo._evalCount;
-clockHooks.seek(6.0);
+clockHooks.seek(16);
+assert.deepEqual(seekTimes.slice(-3), [['clock', 10], ['seek', 10], ['sync', 10]]);
 assert.equal(clockHookSyncCount, 1, 'exposeTestHooks.seek must invoke syncAll strictly once');
 assert.equal(clockHookOnSeekCount, 0, 'exposeTestHooks.seek must suppress redundant clock onSeek when syncAll exists');
 assert.equal(syncChoreo._evalCount - evalBefore, 1, 'choreographer.evaluate must run strictly once per seek');
 assert.equal(clockHookRenderCount, 1, 'stage.renderNow must run strictly once per seek');
 assert.equal(clockHooks.getGeometryAudit().sculptedMeshes, 3);
 assert.equal(clockHooks.getFontAudit().supported, false);
+
+const singleFalsify = () => ({ passed: true, assertions: [{ name: 'baseline', passed: true }] });
+const configHooks = exposeTestHooks({
+  clock: syncClock, director: dir, stage: syncStage, profile: 'field-math', falsify: singleFalsify,
+});
+assert.equal(configHooks.version, 3);
+assert.equal(configHooks.getProfile(), 'field-math');
+assert.equal(configHooks.clock, syncClock);
+assert.equal(configHooks.director, dir);
+assert.equal(configHooks.stage, syncStage);
+assert.equal(configHooks.falsify, singleFalsify);
+assert.equal(configHooks.seek(3).t, 3);
+assert.equal(syncClock.t, 3);
+assert.equal(exposeTestHooks({ version: 2, clock: syncClock }).profile, 'mechanical-3d');
+assert.equal(exposeTestHooks({ profile: 'narrative-3d', stage: { profile: 'field-math' } }).profile, 'mechanical-3d');
+assert.equal(exposeTestHooks({ stage: { profile: 'field-math' } }).profile, 'field-math');
+assert.equal(exposeTestHooks({ director: dir }).seek(1.25).globalTime, 1.25);
+const choreographed = [];
+const boundedHooks = exposeTestHooks({
+  clock: syncClock, choreographer: { evaluate: (t) => choreographed.push(t) },
+});
+assert.equal(boundedHooks.seek(100).t, 10);
+assert.equal(boundedHooks.seek(-100).t, 0);
+assert.deepEqual(choreographed, [10, 0]);
 
 withMockDocument(() => {
   const barSlot = createMockElement('div');
@@ -911,7 +948,94 @@ withMockDocument(() => {
 syncClock.destroy();
 delete globalThis.__simulify;
 delete globalThis.__ready;
-console.log('[OK] TimelineDirector v1/v2, SpacetimeClock 1x seek, mountTimelineBar i18n, and exposeTestHooks v2 verified');
+console.log('[OK] TimelineDirector compatibility, SpacetimeClock 1x seek, timeline i18n, and v3 hook options verified');
+
+execFileSync(python, ['-B', '-c', `
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from scripts import verify_stage as verify
+from scripts.setup_vendor import collect_project_cjk_chars
+from scripts.verify_stage import PROFILE_GATES, entry_url, evaluate_falsify, evaluate_profile_policy, resolve_effective_profile
+
+assert list(PROFILE_GATES) == ${JSON.stringify(expectedProfiles)}
+resolve = resolve_effective_profile
+assert resolve('mechanical-3d', 'field-math', False, True) == 'mechanical-3d'
+assert resolve('auto', 'sandbox-direct', True, True) == 'sandbox-direct'
+assert resolve('auto', None, True, True) == 'mechanical-3d'
+assert resolve('auto', 'invalid', False, True) == 'mechanical-3d'
+assert resolve('auto', None, True, False) is None
+assert resolve('auto', None, False, False) is None
+
+all_hard = dict.fromkeys((
+    'geometry_diversity', 'three_views', 'initial_sparsity',
+    'temporal_scrub', 'camera_ownership', 'mandatory_falsify',
+), 'hard')
+advisory = dict(all_hard, geometry_diversity='advisory', three_views='advisory', initial_sparsity='advisory')
+for profile, expected in (
+    ('mechanical-3d', all_hard),
+    ('field-math', advisory), ('sandbox-direct', advisory),
+):
+    assert PROFILE_GATES[profile] == expected, profile
+    assert evaluate_profile_policy(profile) == expected, profile
+    assert evaluate_profile_policy(profile, duration=0.201)['temporal_scrub'] == 'hard', profile
+    static_scrub = 'hard' if profile == 'mechanical-3d' else 'skipped'
+    assert evaluate_profile_policy(profile, duration=0.2)['temporal_scrub'] == static_scrub, profile
+    assert evaluate_profile_policy(profile, has_3d=False) == (expected if profile == 'mechanical-3d' else dict(
+        expected, geometry_diversity='skipped', three_views='skipped', camera_ownership='skipped',
+    )), profile
+
+named_check = {'name': 'deflection', 'passed': True}
+assert evaluate_falsify({'passed': True, 'assertions': [named_check]}, True)
+for assertions in ([], [{}], [{'name': ' ', 'passed': True}],
+                   [dict(named_check, passed=1)], [dict(named_check, baseMetric=1, mutantMetric=1)],
+                   [dict(named_check, baseMetric=1)], [dict(named_check, baseMetric=None, mutantMetric=None)]):
+    assert not evaluate_falsify({'passed': True, 'assertions': assertions}, True), assertions
+structured = dict(passed=True, version=3, total=1, passedCount=1)
+assert not evaluate_falsify({'passed': True, 'assertions': [named_check]}, True, is_v3=True)
+assert not evaluate_falsify(dict(structured, assertions=[dict(named_check, comparisons=2)]), True, is_v3=True)
+assert evaluate_falsify(dict(structured, assertions=[dict(named_check, comparisons=2)]), True, from_model=True, is_v3=True)
+for malformed in (dict(total=True), dict(passedCount=1.0), dict(version=3.0)):
+    assert not evaluate_falsify(dict(structured, assertions=[dict(named_check, comparisons=2)]) | malformed,
+                                True, from_model=True, is_v3=True)
+assert not evaluate_falsify(dict(structured, assertions=[named_check]), True)
+assert not evaluate_falsify({'passed': True, 'assertions': [named_check]}, True, from_model=True)
+assert evaluate_falsify(dict(structured, assertions=[dict(named_check, comparisons=1, baseMetric=1, mutantMetric=2)]),
+                        True, from_model=True)
+for result in (None, {}, {'passed': False}, {'passed': 'true'}, {'passed': 1}, True):
+    assert not evaluate_falsify(result, True), result
+assert evaluate_falsify(None, False)
+assert evaluate_falsify({'passed': 'true'}, False)
+assert not evaluate_falsify({'passed': False}, False)
+assert entry_url('index.html?backend=webgpu&skin=paper-ink#view', 'webgl2', '?stage=ice&end') == (
+    'index.html?skin=paper-ink&stage=ice&end=&backend=webgl2#view'
+)
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    invalid = root / 'missing.png'
+    assert verify.analyze_canvas_variance(invalid, None) == (False, -1.0)
+    if verify.Image is not None:
+        solid = root / 'solid.png'
+        image = verify.Image.new('RGB', (40, 30), (31, 22, 15))
+        image.save(solid)
+        assert verify.analyze_canvas_variance(solid, None) == (False, 0.0)
+        image.paste((100, 22, 15), (20, 0, 40, 30))
+        image.save(solid)
+        assert verify.analyze_canvas_variance(solid, dict(left=50, top=0, width=20, height=20)) == (False, -1.0)
+        assert verify.analyze_canvas_variance(solid, None) == (True, 34.5)
+        with patch.object(verify, 'Image', None):
+            assert verify.analyze_canvas_variance(solid, None) == (False, -1.0)
+    else:
+        print('[SKIP] Solid PNG variance requires Pillow and NumPy')
+    project = root / 'build' / 'dist' / 'project'
+    project.mkdir(parents=True)
+    (project / 'index.html').write_text('硅', encoding='utf-8')
+    (project / 'build').mkdir()
+    (project / 'build' / 'index.html').write_text('釷', encoding='utf-8')
+    assert '硅' in collect_project_cjk_chars(project)
+    assert '釷' not in collect_project_cjk_chars(project)
+`], { cwd: ROOT, stdio: 'inherit' });
+console.log('[OK] Python verifier profile resolution, gate policies, and legacy and structured falsification verified');
 
 // ============================================================================
 // 8. Verify Spring negative `dt` guard (`kit/spring.js`)
@@ -1087,193 +1211,7 @@ withMockDocument(() => {
 console.log('[OK] PhaseScrubber, ChartCard v2 (persistent SVG/MA/11.5px), and LiveMathsPanel v2 (KaTeX AST/Unicode rescue) verified');
 
 // ============================================================================
-// 10. Verify Shell i18n (including RTL) & MasteryStore
-// ============================================================================
-const i18n = createI18n({
-  defaultLang: 'zh',
-  dicts: { zh: { hi: '你好 {n}' }, en: { hi: 'Hi {n}' }, ar: { hi: 'أهلا {n}' } },
-});
-assert.equal(i18n.t('hi', { n: '3D' }), '你好 3D');
-await i18n.setLang('ar');
-assert.equal(i18n.t('hi', { n: 'World' }), 'أهلا World');
-
-const mem = createMemoryStorage();
-const store = new MasteryStore(mem, ['a', 'b', 'c']);
-store.markDone('a');
-store.markDone('c');
-assert.deepEqual(store.getProgress(), { done: 2, total: 3, pct: 67 });
-console.log('[OK] Shell i18n (zh/en/ar) & MasteryStore verified');
-
-// ============================================================================
-// 11. Verify Stage 3D bounds audit & cardinal 3-view contract (kit/stage-3d.js)
-//     (executed in Section 13 once Three.js ESM import hook is active)
-// ============================================================================
-
-// ============================================================================
-// 12. Verify Pure-JS Export Muxers & Encoders (`kit/export/*.js`)
-// ============================================================================
-
-// 12a. MP4 Muxer (ISOBMFF: ftyp -> moov -> avcC -> mdat)
-const avcCDesc = new Uint8Array([
-  0x01, 0x64, 0x00, 0x28, 0xff, 0xe1,
-  0x00, 0x04, 0x67, 0x64, 0x00, 0x28,
-  0x01, 0x00, 0x04, 0x68, 0xee, 0x3c, 0x80,
-]);
-const mp4Mux = new Mp4Muxer({ width: 320, height: 180, fps: 30 });
-mp4Mux.addChunk(
-  { data: new Uint8Array([0x00, 0x00, 0x00, 0x04, 0x65, 0x88, 0x84, 0x21]), isKey: true, durationUs: 33333 },
-  { decoderConfig: { description: avcCDesc } }
-);
-mp4Mux.addChunk({ data: new Uint8Array([0x00, 0x00, 0x00, 0x03, 0x41, 0x9a, 0x02]), isKey: false, durationUs: 33333 });
-const mp4Bytes = mp4Mux.finalize();
-const mp4View = new DataView(mp4Bytes.buffer, mp4Bytes.byteOffset, mp4Bytes.byteLength);
-
-const topBoxes = [];
-let mp4Off = 0;
-while (mp4Off + 8 <= mp4Bytes.byteLength) {
-  const size = mp4View.getUint32(mp4Off, false);
-  const type = String.fromCharCode(...mp4Bytes.subarray(mp4Off + 4, mp4Off + 8));
-  assert.ok(size >= 8 && mp4Off + size <= mp4Bytes.byteLength, `Valid MP4 box bounds for ${type}`);
-  topBoxes.push({ type, offset: mp4Off, size });
-  mp4Off += size;
-}
-assert.equal(mp4Off, mp4Bytes.byteLength, 'MP4 top-level boxes must span entire buffer cleanly');
-assert.deepEqual(topBoxes.map((b) => b.type), ['ftyp', 'moov', 'mdat'], 'Fast-start MP4 box order must be ftyp/moov/mdat');
-assert.ok(indexOfBytes(mp4Bytes, asciiBytes('avcC')) > 0, 'MP4 moov must embed avcC box');
-assert.ok(indexOfBytes(mp4Bytes, asciiBytes('mvhd')) > 0, 'MP4 moov must embed mvhd box');
-const stcoPos = indexOfBytes(mp4Bytes, asciiBytes('stco'));
-assert.ok(stcoPos > 0, 'MP4 moov must embed stco chunk offset table');
-const stcoChunkOffset = mp4View.getUint32(stcoPos + 12, false);
-assert.equal(stcoChunkOffset, topBoxes[2].offset + 8, 'stco chunk offset must point directly to mdat payload');
-
-// Also verify Annex-B auto-conversion path
-const annexMux = new Mp4Muxer({ width: 160, height: 120, fps: 24 });
-annexMux.addChunk({
-  data: new Uint8Array([0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 0, 1, 0x65, 0x88]),
-  isKey: true,
-});
-assert.ok(indexOfBytes(annexMux.finalize(), asciiBytes('avcC')) > 0);
-console.log(`[OK] Mp4Muxer verified (ftyp/moov/avcC/mdat, ${mp4Bytes.byteLength} bytes, exact stco=${stcoChunkOffset})`);
-
-// 12b. WebM Muxer (EBML header + DocType 'webm' + Segment + Tracks + Cluster + Cues)
-const webmMux = new WebmMuxer({ width: 320, height: 180, fps: 30, codec: 'vp09.00.10.08' });
-webmMux.addChunk({ data: new Uint8Array([0x82, 0x49, 0x83, 0x42, 0x00]), isKey: true, timestampUs: 0, durationUs: 33333 });
-webmMux.addChunk({ data: new Uint8Array([0x86, 0x11, 0x22, 0x33]), isKey: false, timestampUs: 33333, durationUs: 33333 });
-webmMux.addChunk({ data: new Uint8Array([0x82, 0x49, 0x83, 0x42, 0x01]), isKey: true, timestampUs: 66666, durationUs: 33333 });
-const webmBytes = webmMux.finalize();
-assert.deepEqual(Array.from(webmBytes.subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3], 'WebM must start with EBML magic ID');
-assert.ok(indexOfBytes(webmBytes, asciiBytes('webm')) > 0, 'WebM EBML header must contain DocType "webm"');
-assert.ok(indexOfBytes(webmBytes, asciiBytes('V_VP9')) > 0, 'WebM Tracks must declare V_VP9 CodecID');
-assert.ok(indexOfBytes(webmBytes, new Uint8Array([0x18, 0x53, 0x80, 0x67])) > 0, 'WebM must contain Segment ID');
-assert.ok(indexOfBytes(webmBytes, new Uint8Array([0x1f, 0x43, 0xb6, 0x75])) > 0, 'WebM must contain Cluster ID');
-assert.ok(indexOfBytes(webmBytes, new Uint8Array([0x1c, 0x53, 0xbb, 0x6b])) > 0, 'WebM must contain seekable Cues ID');
-console.log(`[OK] WebmMuxer verified (EBML/webm/V_VP9/Segment/Cluster/Cues, ${webmBytes.byteLength} bytes)`);
-
-// 12c. GIF Encoder (GIF89a header + hold-frame coalescing reduces emitted frames)
-const gw = 16;
-const gh = 16;
-const makeRgbaFrame = (fillR, fillG, fillB, patch = false) => {
-  const buf = new Uint8Array(gw * gh * 4);
-  for (let y = 0; y < gh; y += 1) {
-    for (let x = 0; x < gw; x += 1) {
-      const o = (y * gw + x) * 4;
-      const inPatch = patch && x >= 4 && x < 8 && y >= 4 && y < 8;
-      buf[o] = inPatch ? 220 : fillR;
-      buf[o + 1] = inPatch ? 60 : fillG;
-      buf[o + 2] = inPatch ? 40 : fillB;
-      buf[o + 3] = 255;
-    }
-  }
-  return buf;
-};
-const frameA = makeRgbaFrame(20, 150, 148, false);
-const frameB = makeRgbaFrame(20, 150, 148, true);
-const gifFrames = [frameA, frameA, frameA, frameA, frameB, frameB];
-
-const gifCoalesced = encodeGifWithStats({
-  width: gw,
-  height: gh,
-  frames: gifFrames,
-  fps: 15,
-  coalesceHolds: true,
-  dirtyRect: true,
-});
-const gifNoCoalesce = encodeGifWithStats({
-  width: gw,
-  height: gh,
-  frames: gifFrames,
-  fps: 15,
-  coalesceHolds: false,
-  dirtyRect: false,
-});
-
-assert.equal(String.fromCharCode(...gifCoalesced.bytes.subarray(0, 6)), 'GIF89a', 'GIF must begin with GIF89a header');
-assert.equal(gifCoalesced.bytes[gifCoalesced.bytes.length - 1], 0x3b, 'GIF must end with 0x3B trailer');
-assert.ok(indexOfBytes(gifCoalesced.bytes, asciiBytes('NETSCAPE2.0')) > 0, 'Looping GIF must embed NETSCAPE2.0');
-assert.equal(gifCoalesced.stats.inputFrames, 6);
-assert.equal(gifCoalesced.stats.emittedFrames, 2, 'Hold coalescing must collapse 6 frames (4+2 holds) into 2 frames');
-assert.equal(gifCoalesced.stats.coalescedHolds, 4);
-assert.ok(
-  gifCoalesced.stats.emittedFrames < gifNoCoalesce.stats.emittedFrames,
-  'Coalesced GIF must emit strictly fewer frames than uncoalesced'
-);
-
-const gifSess = new GifEncoderSession({ width: gw, height: gh, fps: 15, useWorker: false });
-gifFrames.forEach((f) => gifSess.addRgbaFrame(f));
-const gifSessOut = await gifSess.finalize();
-assert.equal(String.fromCharCode(...gifSessOut.bytes.subarray(0, 6)), 'GIF89a');
-assert.equal(gifSessOut.stats.emittedFrames, 2);
-console.log(
-  `[OK] GifEncoder verified (GIF89a, hold coalescing ${gifCoalesced.stats.inputFrames}->${gifCoalesced.stats.emittedFrames} frames, ${gifCoalesced.bytes.byteLength} bytes)`
-);
-
-// 12d. APNG Muxer (valid PNG + acTL/fcTL/fdAT chunks + CRC32 + hold coalescing)
-const pngA = buildSyntheticPng(16, 16, new Uint8Array([0x78, 0x9c, 0x01, 0x02, 0x03, 0x04]));
-const pngB = buildSyntheticPng(16, 16, new Uint8Array([0x78, 0x9c, 0x09, 0x08, 0x07, 0x06]));
-const apngSess = new ApngSession({ fps: 24, loop: 0, coalesceHolds: true });
-apngSess.addPng(pngA);
-apngSess.addPng(pngA);
-apngSess.addPng(pngA);
-apngSess.addPng(pngB);
-apngSess.addPng(pngB);
-const apngRes = apngSess.finalize();
-const apngBytes = apngRes.bytes;
-assert.deepEqual(
-  Array.from(apngBytes.subarray(0, 8)),
-  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  'APNG must start with valid PNG signature'
-);
-assert.equal(apngRes.stats.inputFrames, 5);
-assert.equal(apngRes.stats.emittedFrames, 2, 'APNG hold coalescing must collapse 5 frames into 2');
-assert.equal(apngRes.stats.coalescedHolds, 3);
-
-// Walk every PNG chunk and verify CRC32 + presence of acTL, fcTL, IDAT, fdAT, IEND
-const apngView = new DataView(apngBytes.buffer, apngBytes.byteOffset, apngBytes.byteLength);
-const chunkTypes = [];
-const fctlDelays = [];
-let apngOff = 8;
-while (apngOff + 12 <= apngBytes.byteLength) {
-  const len = apngView.getUint32(apngOff, false);
-  const type = String.fromCharCode(...apngBytes.subarray(apngOff + 4, apngOff + 8));
-  const dataEnd = apngOff + 8 + len;
-  const storedCrc = apngView.getUint32(dataEnd, false);
-  const calcCrc = crc32(apngBytes, apngOff + 4, dataEnd);
-  assert.equal(storedCrc, calcCrc, `CRC32 mismatch in APNG chunk ${type}`);
-  chunkTypes.push(type);
-  if (type === 'fcTL') {
-    fctlDelays.push(apngView.getUint16(apngOff + 8 + 20, false));
-  }
-  apngOff = dataEnd + 4;
-}
-assert.equal(apngOff, apngBytes.byteLength);
-assert.deepEqual(chunkTypes, ['IHDR', 'acTL', 'fcTL', 'IDAT', 'fcTL', 'fdAT', 'IEND']);
-assert.deepEqual(fctlDelays, [3, 2], 'Coalesced fcTL delayNum must accumulate hold durations (3 + 2 ticks)');
-const apngRaw = muxApngWithStats({ frames: [{ png: pngA }, { png: pngA }], fps: 24, coalesceHolds: false });
-assert.equal(apngRaw.stats.emittedFrames, 2);
-console.log(`[OK] ApngMuxer verified (PNG/acTL/fcTL/fdAT + CRC32 + hold coalescing 5->2, ${apngBytes.byteLength} bytes)`);
-
-// ============================================================================
-// 13. Safe Node-Import Smoke Checks (`kit/html-surface.js`, `kit/manipulator.js`, `kit/stage-exporter.js`)
+// 13. Safe Node-Import Smoke Checks (`kit/html-surface.js`, `kit/manipulator.js`)
 // ============================================================================
 const threeUrl = pathToFileURL(path.join(ROOT, 'examples', 'shared', 'vendor', 'three', 'three.webgpu.js')).href;
 const addonsPrefix = pathToFileURL(path.join(ROOT, 'examples', 'shared', 'vendor', 'three', 'addons') + path.sep).href;
@@ -1452,23 +1390,6 @@ assert.equal(brush.active, true);
 assert.equal(fakeCanvas.style.cursor, 'crosshair');
 brush.dispose();
 
-// StageExporter & compositor Node smoke check
-assert.equal(typeof StageExporter, 'function');
-assert.equal(typeof mountExportButton, 'function');
-assert.equal(supportsHtmlInCanvasCompositor(), false, 'HTML-in-Canvas compositor must return false in Node');
-const exporter = new StageExporter({
-  workbench: {
-    getTimelineInfo: () => ({ mode: 'spacetime', duration: 10, defaultFps: 30, stages: [] }),
-    seek: () => {},
-  },
-});
-assert.equal(exporter.getTimelineInfo().duration, 10);
-const caps = await exporter.getCapabilities();
-assert.equal(caps.gif, true);
-assert.equal(caps.apng, true);
-assert.equal(caps.png, true);
-assert.equal(caps.htmlInCanvas, false);
-
 // IsometricStage volumetric bounds audit, setCardinalView() (Front/Side/Top/Iso) & WebGPU timeout auto-fallback
 const { IsometricStage } = await import('../kit/stage-3d.js');
 const mockStageCanvas = {
@@ -1481,7 +1402,7 @@ const mockStageCanvas = {
   releasePointerCapture() {},
   getBoundingClientRect: () => ({ left: 0, top: 0, width: 1280, height: 800 }),
 };
-const stage = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false });
+const stage = new IsometricStage(mockStageCanvas, { backend: 'webgl2', htmlInCanvas: false, autoLoop: false });
 const volMesh = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.01, 0), new THREE.Vector2(1.2, 0.8), new THREE.Vector2(0.4, 2.0)]), new THREE.MeshStandardMaterial());
 volMesh.userData.simulifyGeoKind = 'lathe';
 stage.scene.add(volMesh);
@@ -1512,7 +1433,7 @@ delete globalThis.__simulify;
 delete globalThis.__ready;
 stage.dispose();
 
-console.log('[OK] Node smoke checks passed for stage-3d (bounds + 3-views), html-surface, manipulator, GridBrush, stage-exporter, and compositor');
+console.log('[OK] Node smoke checks passed for stage-3d (bounds + 3-views), html-surface, manipulator, GridBrush');
 
 // ============================================================================
 // 14. Verify Offline Four-Tier Typography & Crisp CanvasTexture (`kit/fonts.js`)
@@ -1825,12 +1746,12 @@ assertValidSculpt(bellows, 'bellows', 'createPleatedBellows.extended');
 console.log('[OK] Cross-domain non-cuboid 3D sculpting kit (kit/geo-sculpt.js: all 5 families, 10 PBR presets & zero-GC updates) verified');
 
 // ============================================================================
-// 16. Verify Simulify v2.2 Visual Presentation, Multi-Layout, Lighting, Cutaway,
+// 16. Verify Simulify v3.0 Visual Presentation, Multi-Layout, Lighting, Cutaway,
 //     Field-Viz, Choreography, ClearType Callouts, Extended Maths & Charts
 // ============================================================================
 
-// 16a. Layout Archetypes, 6 Themes, ScrollyBridge, WipeCompare, ViewCube, ScaleBar
-assert.deepEqual(LAYOUT_ARCHETYPES, ['fullbleed-hud', 'split-bench', 'ab-compare', 'multi-view', 'scrolly-stage']);
+// 16a. Layout Archetypes, 6 Themes, WipeCompare, ViewCube, ScaleBar
+assert.deepEqual(LAYOUT_ARCHETYPES, ['fullbleed-hud', 'split-bench', 'ab-compare']);
 assert.equal(THEME_PRESETS.length, 6);
 assert.ok(ICONS.cutaway.includes('<svg') && ICONS.explode.includes('<svg'));
 
@@ -1840,53 +1761,6 @@ withMockDocument(() => {
   assert.equal(shellEl.dataset.zen, 'true');
   assert.equal(toggleZenMode(shellEl), false);
   assert.equal(shellEl.dataset.zen, undefined);
-
-  // ScrollyBridge bidirectional deterministic mapping
-  const sClock = new SpacetimeClock({ duration: 30, manualMode: true });
-  const step0 = createMockElement('section');
-  step0.dataset.tStart = '0';
-  step0.dataset.tEnd = '10';
-  const step1 = createMockElement('section');
-  step1.dataset.tStart = '10';
-  step1.dataset.tEnd = '20';
-  const step2 = createMockElement('section');
-  step2.dataset.tStart = '20';
-  step2.dataset.tEnd = '30';
-  const progEl = createMockElement('div');
-  progEl.style.setProperty = (k, v) => { progEl.style[k] = v; };
-
-  const bridge = new ScrollyBridge({ clock: sClock, steps: [step0, step1, step2], scrollTarget: null, progressEl: progEl });
-  const midRes = bridge.applyComputed(
-    bridge.computeTimeFromRects(
-      [
-        { top: -600, bottom: -100, height: 500 },
-        { top: -100, bottom: 500, height: 600 },
-        { top: 500, bottom: 1100, height: 600 },
-      ],
-      1000 // anchorY = 420 -> inside step1 at (420 - -100)/600 = 520/600 -> t ≈ 18.67
-    )
-  );
-  assert.equal(midRes.activeIndex, 1);
-  assert.ok(midRes.t > 18 && midRes.t < 19, `Expected t ~ 18.67, got ${midRes.t}`);
-  assert.equal(step1.classList.contains('is-active'), true);
-
-  // Scroll back up -> rewinds clock deterministically
-  const backRes = bridge.applyComputed(
-    bridge.computeTimeFromRects(
-      [
-        { top: 100, bottom: 700, height: 600 },
-        { top: 700, bottom: 1300, height: 600 },
-        { top: 1300, bottom: 1900, height: 600 },
-      ],
-      1000
-    )
-  );
-  assert.equal(backRes.activeIndex, 0);
-  assert.ok(backRes.t > 5 && backRes.t < 6);
-  assert.equal(step0.classList.contains('is-active'), true);
-  assert.equal(step1.classList.contains('is-active'), false);
-  bridge.dispose();
-  sClock.destroy();
 
   // WipeCompareController clamping + CSS property
   const wipeHost = createMockElement('div');
@@ -1907,8 +1781,10 @@ for (const th of THEME_PRESETS) {
   assert.ok(STUDIO_THEMES[th].rimColor !== undefined, `STUDIO_THEMES.${th} must define rimColor`);
 }
 
-const stageA = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false, theme: 'blueprint' });
-const stageB = new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl', htmlInCanvas: false, autoLoop: false, theme: 'obsidian-gallery' });
+assert.throws(() => new IsometricStage(mockStageCanvas, { backend: 'legacy-webgl' }),
+  /requires mapping "three" to three\.module\.js/);
+const stageA = new IsometricStage(mockStageCanvas, { backend: 'webgl2', htmlInCanvas: false, autoLoop: false, theme: 'blueprint' });
+const stageB = new IsometricStage(mockStageCanvas, { backend: 'webgl2', htmlInCanvas: false, autoLoop: false, theme: 'obsidian-gallery' });
 assert.equal(stageA._keyLight, stageA._shadowLight, 'Key light and shadow-casting light must be aligned (same light)');
 assert.equal(stageA._keyLight.castShadow, true, 'Key light must cast shadows');
 assert.ok(stageA._rimLight && stageA._rimLight.isDirectionalLight, 'Stage must include dedicated rim light');
@@ -1923,10 +1799,9 @@ const cutCap = stageA.createCutawayCap(cutSolid, cutPlane, { capSize: 8 });
 cutCap.setConstant(0.8);
 assert.equal(cutPlane.constant, 0.8);
 assert.equal(stageA.getGeometryAudit().cuboidMeshes, 0, 'Internal cutaway cap & contact shadow must not pollute cuboid count');
-const unlinkSync = stageA.syncCameraWith(stageB);
+stageA.syncCameraWith(stageB);
 stageA.setCameraImmediate({ azimuthDeg: 62, elevationDeg: 35, zoom: 1.4 });
 assert.ok(Math.abs(stageB.getCameraState().azimuthDeg - 62) < 0.2, 'syncCameraWith must mirror camera to peer stage');
-unlinkSync();
 
 withMockDocument(() => {
   const vcHost = createMockElement('div');
@@ -1941,7 +1816,55 @@ cutCap.dispose();
 cShadow.dispose();
 accLight.dispose();
 stageA.dispose();
+assert.ok(!stageB._syncedPeers.has(stageA), 'Disposing one camera must unlink it from the live peer');
 stageB.dispose();
+
+{
+  const canvas = createMockElement('canvas');
+  let width = 390;
+  canvas.getBoundingClientRect = () => ({ width, height: 600 });
+  canvas.getContext = () => null;
+  const stage = new IsometricStage(canvas, {
+    backend: 'webgl2', cameraType: 'perspective', fov: 36, distance: 10, htmlInCanvas: false, autoLoop: false,
+  });
+  await stage.ready;
+  assert.equal(stage.backendKind, 'fallback', 'Failed renderer init must resolve to fallback without rejecting');
+  stage.resize(true);
+  withMockDocument(() => {
+    const host = createMockElement('div');
+    const bar = mountScaleBar(host, stage, { worldUnitsPerMeter: 2, niceSteps: [0.5] });
+    const legacyBar = mountScaleBar(host, stage, { unitScale: 0.5, niceSteps: [0.5] });
+    const expected = (fov) => Math.round(600 / (20 * Math.tan(fov * Math.PI / 360)));
+    assert.equal(stage.camera.fov, 36 * 1.48);
+    assert.equal(bar.sync().barPx, expected(stage.camera.fov));
+    assert.equal(legacyBar.sync().barPx, bar.sync().barPx);
+    width = 1000;
+    stage.resize();
+    assert.equal(stage.camera.fov, 36);
+    assert.equal(bar.root.children[0].style.width, `${expected(36)}px`, 'Resize must update the mounted scale');
+    legacyBar.unmount();
+    bar.unmount();
+  });
+  const events = ['contextmenu', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave', 'wheel'];
+  for (const type of events) assert.equal(canvas.listenerCount(type), 1, type);
+  let finishPaint;
+  let frames = 0;
+  stage.htmlSurfaces = {
+    flushPaint: () => new Promise((resolve) => { finishPaint = resolve; }),
+    dispose() {},
+  };
+  stage.renderer = { render: () => { frames += 1; }, dispose() {} };
+  stage._rendererReady = true;
+  stage._prepareSceneBeforeRender = () => {};
+  const pendingFrame = stage.renderNowAsync();
+  stage.dispose();
+  finishPaint(true);
+  assert.equal(await pendingFrame, false);
+  assert.equal(await stage.renderNowAsync(), false);
+  assert.equal(stage.renderNow(), false);
+  assert.equal(frames, 0);
+  for (const type of events) assert.equal(canvas.listenerCount(type), 0, type);
+}
 
 // 16c. Procedural PBR Micro-Textures, Fresnel X-Ray & GLASS_LAYER on glass vessels
 const { createProceduralSurfaceMaps, createXRayMaterial } = GeoSculpt;
@@ -2004,7 +1927,7 @@ assert.ok(contour.contourTexture && contour.topMaterial.map === contour.contourT
 assert.ok(Array.isArray(contour.material) && contour.material.length === 2, 'Contour field with skirt must separate top map & matte skirt material');
 contour.updateField((u, v) => Math.cos(u * Math.PI) * 0.5 + 0.5);
 
-// 16e. Choreography v2.2: matte/wireframe focus, explodeGroup, clipSweep, draw & blueprint transitions
+// 16e. Choreography: matte/wireframe focus, explodeGroup, clipSweep, draw & blueprint transitions
 const matteMat = new THREE.MeshStandardMaterial({ color: 0x149694, roughness: 0.4 });
 const matteActor = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), matteMat);
 const heroActor = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), new THREE.MeshStandardMaterial({ color: 0xc96d24 }));
@@ -2085,7 +2008,7 @@ withMockDocument(() => {
   assert.ok(host.querySelectorAll((n) => n.classList?.contains('lm-align')).length === 1);
 });
 
-// 16h. Extended ChartCard modes (distribution, heatmap, timing, spark-kpi, generic hysteresis) + 4D SvgFlowStage
+// 16h. Extended ChartCard modes (distribution, heatmap, timing, spark-kpi, generic hysteresis)
 withMockDocument(() => {
   const makeCardHost = () => {
     const titleEl = createMockElement('span');
@@ -2118,24 +2041,9 @@ withMockDocument(() => {
   chart.updateSparkKpi({ value: '98.4', unit: '%', delta: '+2.1%', points: [82, 88, 95, 98.4] });
   assert.equal(chart.mode, 'spark-kpi');
 
-  // Deterministic 4D Track B SvgFlowStage
-  const s2dHost = createMockElement('div');
-  const s2d = new SvgFlowStage(s2dHost);
-  s2d.setTopology({
-    nodes: [{ id: 'A', x: 100, y: 200, label: 'Client' }, { id: 'B', x: 500, y: 200, label: 'Server' }],
-    edges: [{ id: 'e1', from: 'A', to: 'B', arc: 30 }],
-  });
-  s2d.setPacketSchedule([{ id: 'syn', from: 'A', to: 'B', edgeId: 'e1', start: 1, end: 3, label: 'SYN', tone: 'teal' }]);
-  assert.equal(s2d.evaluate(0.5).length, 0);
-  const midPkt = s2d.evaluate(2.0);
-  assert.equal(midPkt.length, 1);
-  assert.ok(Math.abs(midPkt[0].x - 300) < 2, 'Packet midpoint must travel centered between trimmed node borders');
-  const e1 = s2d.edges.get('e1');
-  assert.ok(e1.pStart.x > 160 && e1.pEnd.x < 440, 'Stage2D edges must trim cleanly to node box boundaries');
-  assert.equal(s2d.evaluate(0.5).length, 0, 'Backward seek must cleanly hide future packet');
 });
 
-console.log('[OK] Simulify v2.2 upgrades verified (6 layouts, 6 themes, aligned lights/rim/cutaway-cap, micro-PBR/X-Ray, field-viz, matte focus, ClearType callouts, extended maths/charts & 4D stage-2d)');
+console.log('[OK] Simulify v3.0 visual presentation verified (3 layouts, 6 themes, aligned lights/rim/cutaway-cap, micro-PBR/X-Ray, field-viz, matte focus, ClearType callouts, extended maths/charts)');
 
 // ============================================================================
 // 17. Claude Editorial Serif Typography & Full Offline KaTeX Formula Rendering
@@ -2165,7 +2073,11 @@ console.log('[OK] Simulify v2.2 upgrades verified (6 layouts, 6 themes, aligned 
   // 17b. Claude serif editorial typography tokens & still exactly 6 skins (no extra skins)
   const primerCss = fs.readFileSync(primerCssPath, 'utf8');
   const studioCss = fs.readFileSync(studioCssPath, 'utf8');
-  assert.ok(primerCss.includes('@import "./katex/katex.min.css";'), 'primer-tokens.css must import offline katex.min.css');
+  assert.doesNotMatch(primerCss, /@import[^;]+katex/, 'KaTeX is opt-in per page');
+  for (const example of ['open-differential', 'momentum-valley']) {
+    const html = fs.readFileSync(path.join(ROOT, 'examples', example, 'index.html'), 'utf8');
+    assert.match(html, /<link rel="stylesheet" href="[^"]+\/katex\/katex\.min\.css">/);
+  }
   assert.ok(primerCss.includes('--font-prose:'), 'primer-tokens.css must define --font-prose Claude serif stack');
   assert.ok(primerCss.includes('--font-serif:'), 'primer-tokens.css must define --font-serif stack');
   assert.ok(!primerCss.includes('backdrop-filter'), 'primer-tokens.css must maintain zero backdrop-filter ClearType rule');
@@ -2294,4 +2206,506 @@ console.log('[OK] Simulify v2.2 upgrades verified (6 layouts, 6 themes, aligned 
   console.log('[OK] Claude editorial serif typography & full offline KaTeX formula rendering verified (20 KaTeX woff2 + NotoSerifSC Regular/Display + renderTex/renderMathInElement/LiveMathsPanel)');
 }
 
-console.log('[OK] All Simulify v1 + v2.2 unit, typography, geo-sculpt, field-viz, layout, mathematical, muxer, syntax, and link-integrity tests PASSED');
+// One solve produces the exact same immutable value for every subscriber.
+{
+  const clock = new SpacetimeClock({ duration: 4, manualMode: true });
+  const input = { speed: 2, nested: { bias: 0 } };
+  const calls = [];
+  const model = createSimModel({
+    clock, params: input,
+    solve: (p, t) => {
+      calls.push([p.speed, t]);
+      return { coordinates: [p.speed * t + p.nested.bias] };
+    },
+    falsifyCases: [
+      {
+        name: 'double speed', t: [1, 2],
+        mutateParams: ({ speed }) => ({ speed: speed * 2 }),
+        check: (base, mutant, { baseParams, mutantParams }) => ({
+          passed: mutant.coordinates[0] === 2 * base.coordinates[0]
+            && mutantParams.speed === 2 * baseParams.speed,
+          baseMetric: base.coordinates[0], mutantMetric: mutant.coordinates[0],
+        }),
+      },
+      {
+        name: 'run in reverse order',
+        run: (evaluate) => evaluate(1, { speed: 4 }).coordinates[0] > evaluate(1).coordinates[0],
+      },
+      { name: 'empty runner', run: () => true },
+      { name: 'irrelevant mutation', mutateParams: () => ({ unused: true }), check: () => true },
+      { name: 'no mutation', mutateParams: () => ({}), check: () => true },
+      { name: 'failed check', t: 1, mutateParams: () => ({ speed: 4 }), check: () => false },
+    ],
+  });
+  const stageFrames = [];
+  const chartFrames = [];
+  model.subscribe((snapshot) => stageFrames.push(snapshot));
+  model.subscribe((snapshot) => chartFrames.push(snapshot));
+  input.nested.bias = 10;
+  const hooks = exposeTestHooks({ clock, model, syncAll: () => {} });
+  hooks.seek(3);
+  assert.deepEqual(calls, [[2, 0], [2, 3]]);
+  assert.equal(chartFrames.at(-1), stageFrames.at(-1));
+  assert.equal(model.getSnapshot(), stageFrames.at(-1));
+  assert.ok(Object.isFrozen(model.getSnapshot().coordinates));
+  assert.ok(Object.isFrozen(model.getParams().nested));
+  assert.deepEqual(model.evaluate(2, { speed: 5 }).coordinates, [10]);
+  assert.equal(model.t, 3);
+  assert.deepEqual(model.getSnapshot().coordinates, [6]);
+  assert.equal(model.getParams().speed, 2);
+  assert.deepEqual(hooks.setParams({ speed: 3 }).coordinates, [9]);
+  assert.deepEqual(model.resetParams().coordinates, [6]);
+  const beforeFalsify = calls.length;
+  const audit = hooks.falsify();
+  assert.deepEqual(calls.slice(beforeFalsify, beforeFalsify + 4), [[2, 1], [4, 1], [2, 2], [4, 2]]);
+  assert.equal(audit.version, 3);
+  assert.equal(audit.passed, false);
+  assert.equal(audit.total, 6);
+  assert.equal(audit.passedCount, 2);
+  assert.deepEqual(audit.assertions[0], {
+    name: 'double speed', passed: true, detail: '', baseMetric: 4, mutantMetric: 8, comparisons: 2,
+  });
+  assert.ok(audit.assertions.slice(2).every((item) => !item.passed && item.detail));
+  assert.equal(model.t, 3);
+  model.dispose();
+  clock.seek(1);
+  assert.equal(model.t, 3);
+  clock.destroy();
+  delete globalThis.__simulify;
+  delete globalThis.__ready;
+}
+assert.ok(Math.abs(rk4Step(1, 0, 0.1, (y) => y) - Math.exp(0.1)) < 1e-7);
+const [position, velocity] = integrateRK4([1, 0], 0, Math.PI / 2, 100, ([x, v]) => [v, -x]);
+assert.ok(Math.abs(position) < 1e-8 && Math.abs(velocity + 1) < 1e-8);
+assert.ok(Math.abs(bisectRoot((x) => x * x - 2, 0, 2) - Math.SQRT2) < 1e-8);
+assert.throws(() => bisectRoot((x) => x * x + 1, 0, 2), RangeError);
+assert.equal(formatUnit(1.256, 'm'), '1.26 m');
+{
+  const m = createSimModel({ params: { value: 0 }, solve: (p) => p.value });
+  const previousError = console.error;
+  const errors = [];
+  const snapshots = [];
+  console.error = (...args) => errors.push(args);
+  try {
+    m.subscribe((value) => {
+      if (value === 1) m.setParams({ value: 2 });
+      if (value) throw new Error('subscriber failure');
+    });
+    m.subscribe((value) => snapshots.push(value));
+    m.setParams({ value: 1 });
+    m.setParams({ value: 3 });
+  } finally {
+    console.error = previousError;
+  }
+  assert.deepEqual(snapshots, [0, 1, 2, 3]);
+  assert.equal(errors.length, 3);
+}
+console.log('[OK] Single-snapshot model, RK4, bisection, and boundary failure cases verified');
+
+// ============================================================================
+// 18. v3.1 Root-Cause Fixes: Dual-Tier Outline Hot-Swap, Shell Cutaway/X-Ray,
+//     Staggered Explode, Narrow-Screen Callout Bar, applyFalsifyCase,
+//     Visibility/Offscreen Pause & Stage Fallback Card
+// ============================================================================
+{
+  // 18a. Dual-tier outline resolution & live Primer <-> Studio setTheme() hot-swap
+  const stageStudio = new IsometricStage(mockStageCanvas, {
+    backend: 'webgl2',
+    htmlInCanvas: false,
+    autoLoop: false,
+    theme: 'obsidian-gallery',
+  });
+  assert.equal(stageStudio.outlinePreset, 'none', 'Studio theme with omitted outline must default to "none" (4x MSAA)');
+  assert.equal(stageStudio.outlineEnabled, false);
+  stageStudio.setTheme('paper-ink');
+  assert.equal(stageStudio.outlinePreset, 'primer', 'Switching to Primer theme with auto outline must engage "primer"');
+  assert.equal(stageStudio.outlineEnabled, true);
+  stageStudio.setTheme('dark-studio');
+  assert.equal(stageStudio.outlinePreset, 'none', 'Switching back to Studio theme must turn outline off cleanly');
+  assert.equal(stageStudio.outlineEnabled, false);
+  stageStudio.dispose();
+
+  const stageLocked = new IsometricStage(mockStageCanvas, {
+    backend: 'webgl2',
+    htmlInCanvas: false,
+    autoLoop: false,
+    theme: 'paper-ink',
+    outline: 'none',
+  });
+  assert.equal(stageLocked.outlinePreset, 'none');
+  stageLocked.setTheme('monochrome-print');
+  assert.equal(stageLocked.outlinePreset, 'none', 'Explicit outline:"none" must stay locked across theme switches');
+  stageLocked.dispose();
+
+  // 18b. Analytical hatch cutaway cap + onlyShells filter + setShellXRay lossless restore
+  const stageShell = new IsometricStage(mockStageCanvas, {
+    backend: 'webgl2',
+    htmlInCanvas: false,
+    autoLoop: false,
+    theme: 'paper-ink',
+  });
+  const asm = new THREE.Group();
+  const shellMat = new THREE.MeshStandardMaterial({ color: 0x363b44, roughness: 0.5, metalness: 0.72 });
+  const coreMat = new THREE.MeshStandardMaterial({ color: 0xd2a34e, roughness: 0.25, metalness: 0.9 });
+  const shellMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 1.4, 24), shellMat);
+  shellMesh.userData.shell = true;
+  const coreMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 1), coreMat);
+  asm.add(shellMesh, coreMesh);
+  stageShell.scene.add(asm);
+
+  const sPlane = stageShell.createCutawayPlane([0, -1, 0], 0.5);
+  const sCap = stageShell.createCutawayCap(asm, sPlane, { onlyShells: true, hatchMode: 'analytical', capSize: 6 });
+  assert.equal(sCap.onlyShells, true);
+  assert.equal(sCap.hatchMode, 'analytical');
+  assert.equal(sCap.capMesh.material.userData.simulifyHatchMode, 'analytical');
+  assert.ok(Array.isArray(shellMat.clippingPlanes) && shellMat.clippingPlanes.includes(sPlane), 'Shell material must receive clip plane');
+  assert.ok(!coreMat.clippingPlanes || !coreMat.clippingPlanes.includes(sPlane), 'Core mesh must NOT be clipped when onlyShells:true');
+  sCap.dispose();
+  assert.equal(shellMat.clippingPlanes.length, 0, 'Disposing cutaway cap must detach clip planes');
+
+  const xrayCount = stageShell.setShellXRay(asm, true, { opacity: 0.25 });
+  assert.equal(xrayCount, 1, 'setShellXRay must affect only shell:true meshes');
+  assert.notEqual(shellMesh.material, shellMat);
+  assert.equal(shellMesh.layers.isEnabled(GLASS_LAYER), true, 'X-Ray shell must move to GLASS_LAYER');
+  assert.equal(coreMesh.material, coreMat, 'Core material must remain untouched');
+  stageShell.setShellXRay(asm, false);
+  assert.equal(shellMesh.material, shellMat, 'Disabling setShellXRay must restore original shell material');
+  assert.equal(shellMesh.layers.isEnabled(0), true, 'Disabling setShellXRay must restore SOLID_LAYER');
+  shellMat.dispose();
+  coreMat.dispose();
+  stageShell.dispose();
+
+  // 18c. Declarative staggered exploded-view (collectExplodeParts + applyExplodeFactor + explodeGroup)
+  const expRoot = new THREE.Group();
+  const basePlate = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 16), new THREE.MeshStandardMaterial());
+  basePlate.position.set(0, 0, 0);
+  const midGear = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.2, 16), new THREE.MeshStandardMaterial());
+  midGear.position.set(0, 0.2, 0);
+  midGear.userData = { explodeStage: 1, explodeOffset: [0, 1.0, 0] };
+  const topBridge = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.15, 16), new THREE.MeshStandardMaterial());
+  topBridge.position.set(0, 0.5, 0);
+  topBridge.userData = { stage: 2, explode: [0, 2.0, 0] };
+  expRoot.add(basePlate, midGear, topBridge);
+
+  const collected = collectExplodeParts(expRoot);
+  assert.equal(collected.length, 2);
+  assert.equal(collected[0].object, midGear);
+  assert.equal(collected[1].object, topBridge);
+
+  applyExplodeFactor(expRoot, 0.35, { stageStagger: 0.25 });
+  const midProgress = (midGear.position.y - 0.2) / 1.0;
+  const topProgress = (topBridge.position.y - 0.5) / 2.0;
+  assert.ok(midProgress > topProgress, 'Lower stage must begin separating ahead of higher stage');
+  applyExplodeFactor(expRoot, 1.0, { stageStagger: 0.25 });
+  assert.ok(Math.abs(midGear.position.y - 1.2) < 1e-5 && Math.abs(topBridge.position.y - 2.5) < 1e-5);
+  applyExplodeFactor(expRoot, 0.0, { stageStagger: 0.25 });
+  assert.ok(Math.abs(midGear.position.y - 0.2) < 1e-5 && Math.abs(topBridge.position.y - 0.5) < 1e-5, 'Rewinding to 0 must restore exact restPos without drift');
+
+  const choreoExp = new ActorChoreographer();
+  choreoExp.explodeGroup('watch', expRoot, 1.0, 2.0, { stageStagger: 0.25 });
+  choreoExp.evaluate(3.0, { apply: true });
+  assert.ok(Math.abs(topBridge.position.y - 2.5) < 1e-5, 'explodeGroup(root) must expand declarative parts');
+  choreoExp.evaluate(0.0, { apply: true });
+  assert.ok(Math.abs(topBridge.position.y - 0.5) < 1e-5);
+
+  // 18d. CalloutLayer 390px narrow-screen compact bar + LinkBus selection + desktop restoration
+  withMockDocument(() => {
+    const stageSize = { width: 390, height: 420 };
+    const mockStage = { size: stageSize, projectToScreen: ([x, y]) => ({ x, y, visible: true }) };
+    const svgEl = createMockElement('svg', 'http://www.w3.org/2000/svg');
+    const tagsEl = createMockElement('div');
+    const bus = new LinkBus();
+    const cl = new CalloutLayer(mockStage, svgEl, tagsEl, { linkBus: bus, compactBreakpoint: 480, compactMode: 'bar' });
+    cl.setItems([
+      { id: 'crown', linkId: 'crown', label: '冠齿轮', sublabel: '减速比 3.7:1', pinned: true, getWorldPos: () => [120, 140, 0] },
+      { id: 'spider', linkId: 'spider', label: '行星齿轮', sublabel: '差速自转', getWorldPos: () => [240, 180, 0] },
+    ]);
+    assert.equal(cl.items.get('crown').tag.style.display, 'none', 'Floating pill must be hidden in 390px compact bar mode');
+    assert.equal(cl.items.get('crown').polyline.style.display, 'none', 'SVG leader line must be hidden in 390px compact bar mode');
+    const bar = tagsEl.children.find((el) => el.classList?.contains('callout-compact-bar'));
+    assert.ok(bar && bar.style.display !== 'none', 'Compact chip bar must render at 390px width');
+    const chips = bar.querySelectorAll((el) => el.classList?.contains('callout-compact-chip'));
+    assert.equal(chips.length, 2);
+    chips[1].dispatchEvent('click');
+    assert.equal(bus.selectedId, 'spider', 'Clicking a compact chip must publish LinkBus selection');
+
+    // Widening back to desktop restores floating callouts and hides compact bar
+    stageSize.width = 1280;
+    stageSize.height = 800;
+    cl.update();
+    assert.equal(bar.style.display, 'none', 'Compact bar must hide above compactBreakpoint');
+    assert.equal(cl.items.get('crown').tag.style.display, '', 'Floating pill must restore on desktop width');
+  });
+
+  // 18e. createSimModel getFalsifyCases() & applyFalsifyCase() (params shorthand + mutateParams)
+  {
+    const m = createSimModel({
+      params: { torque: 100, mu: 0.85 },
+      solve: (p, t) => ({ force: p.torque * p.mu, angle: t * p.mu }),
+      falsifyCases: [
+        {
+          name: 'ice-slip',
+          label: '冰面打滑',
+          description: '右轮摩擦降到 0.05',
+          params: { mu: 0.05 },
+          t: 1,
+          check: (base, mutant) => ({
+            passed: mutant.force < base.force * 0.2,
+            baseMetric: base.force,
+            mutantMetric: mutant.force,
+          }),
+        },
+        {
+          name: 'zero-torque',
+          label: '断动力',
+          mutateParams: () => ({ torque: 0 }),
+          t: 1,
+          check: (_base, mutant) => mutant.force === 0,
+        },
+      ],
+    });
+    const list = m.getFalsifyCases();
+    assert.equal(list.length, 2);
+    assert.deepEqual(list[0], { name: 'ice-slip', label: '冰面打滑', description: '右轮摩擦降到 0.05', hasParams: true });
+    assert.equal(m.falsify().passed, true, 'params shorthand must work inside falsify()');
+    const iceSnap = m.applyFalsifyCase('ice-slip');
+    assert.equal(m.getParams().mu, 0.05);
+    assert.ok(Math.abs(iceSnap.force - 5) < 1e-6);
+    const zeroSnap = m.applyFalsifyCase('zero-torque');
+    assert.equal(m.getParams().mu, 0.85, 'Applying a second failure case must mutate from clean baseline, not stack');
+    assert.equal(zeroSnap.force, 0);
+    m.resetParams();
+    assert.equal(m.getParams().torque, 100);
+    assert.throws(() => m.applyFalsifyCase('nonexistent'), RangeError);
+  }
+
+  // 18f. WebGL/WebGPU fallback overlay card + visibilitychange offscreen pause on Clock & AliveLoop
+  withMockDocument((doc) => {
+    const docListeners = new Map();
+    doc.visibilityState = 'visible';
+    doc.addEventListener = (type, fn) => {
+      if (!docListeners.has(type)) docListeners.set(type, new Set());
+      docListeners.get(type).add(fn);
+    };
+    doc.removeEventListener = (type, fn) => docListeners.get(type)?.delete(fn);
+    const fireVis = (state) => {
+      doc.visibilityState = state;
+      for (const fn of docListeners.get('visibilitychange') || []) fn();
+    };
+
+    // Fallback card mounts inside canvas parent when stage:fallback is not prevented
+    const host = createMockElement('div');
+    const fbCanvas = createMockElement('canvas');
+    fbCanvas.parentElement = host;
+    fbCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 400 });
+    fbCanvas.getContext = () => null;
+    const fbStage = new IsometricStage(fbCanvas, { backend: 'webgl2', htmlInCanvas: false, autoLoop: false });
+    fbStage._enterFallback(new Error('Mock WebGL context unavailable'));
+    assert.equal(fbStage.backendKind, 'fallback');
+    assert.equal(fbCanvas.dataset.stageFallback, 'true');
+    const fbCard = host.children.find((c) => c.classList?.contains('stage-fallback-card'));
+    assert.ok(fbCard, 'Fallback card must mount when stage:fallback is not prevented');
+    fbStage.dispose();
+    assert.equal(fbCard._removed, true, 'stage.dispose() must remove fallback card');
+
+    // SpacetimeClock & AliveLoop pause rAF when hidden and resume cleanly when visible
+    const prevRaf = globalThis.requestAnimationFrame;
+    const prevCaf = globalThis.cancelAnimationFrame;
+    let rafSeq = 0;
+    const activeRafs = new Set();
+    globalThis.requestAnimationFrame = () => {
+      const id = ++rafSeq;
+      activeRafs.add(id);
+      return id;
+    };
+    globalThis.cancelAnimationFrame = (id) => activeRafs.delete(id);
+    try {
+      const clk = new SpacetimeClock({ duration: 10, playing: true });
+      assert.equal(activeRafs.size, 1);
+      fireVis('hidden');
+      assert.equal(activeRafs.size, 0, 'SpacetimeClock must stop rAF when tab is hidden');
+      assert.equal(clk.playing, true, 'SpacetimeClock must preserve playing state across background pause');
+      fireVis('visible');
+      assert.equal(activeRafs.size, 1, 'SpacetimeClock must resume rAF when tab returns visible');
+      clk.destroy();
+      assert.equal(activeRafs.size, 0);
+
+      const alive = new AliveLoop({ onTick: () => {}, autoStart: true });
+      assert.equal(activeRafs.size, 1);
+      fireVis('hidden');
+      assert.equal(activeRafs.size, 0, 'AliveLoop must stop rAF when tab is hidden');
+      fireVis('visible');
+      assert.equal(activeRafs.size, 1, 'AliveLoop must resume rAF when tab returns visible');
+      alive.dispose();
+      assert.equal(activeRafs.size, 0);
+    } finally {
+      globalThis.requestAnimationFrame = prevRaf;
+      globalThis.cancelAnimationFrame = prevCaf;
+    }
+  });
+
+  console.log('[OK] v3.1 engine fixes verified (dual-tier outline hot-swap, onlyShells analytical cutaway & X-Ray, staggered explode, 390px callout bar, applyFalsifyCase, visibility pause & fallback card)');
+}
+
+const declarations = fs.readFileSync(path.join(ROOT, 'kit', 'index.d.ts'), 'utf8');
+assert.match(declarations, /mountScaleBar\([^\n]+options\?: \{[^}]*worldUnitsPerMeter\?: number;[^}]*unitScale\?: number;/);
+assert.match(declarations, /backend\?: "auto" \| "webgl2" \| "webgpu" \| "legacy-webgl";/);
+assert.match(declarations, /renderNowAsync\(\): Promise<boolean>;/);
+for (const file of fs.readdirSync(path.join(ROOT, 'kit')).filter((name) => name.endsWith('.js'))) {
+  const marker = `declare module "*/${file}" {`;
+  const start = declarations.indexOf(marker);
+  assert.ok(start >= 0, `Missing declarations for ${file}`);
+  const end = declarations.indexOf('\n}', start);
+  const section = declarations.slice(start + marker.length, end);
+  const declared = new Set();
+  for (const match of section.matchAll(/^  export (?:class|const|function) (\w+)|^  export \{([^}]+)\}/gm)) {
+    for (const name of match[1] ? [match[1]] : match[2].split(',').map((item) => item.trim())) declared.add(name);
+  }
+  const runtime = await import(`../kit/${file}`);
+  assert.deepEqual([...declared].sort(), Object.keys(runtime).sort(), `Runtime exports differ in ${file}`);
+}
+console.log('[OK] Type declaration modules cover every public runtime export');
+
+const benchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'simulify-bench-'));
+const sharedRoot = fs.mkdtempSync(path.join(ROOT, 'examples', '.test-benches-'));
+try {
+  const runPython = (args) => spawnSync(python, ['-B', ...args], { cwd: ROOT, encoding: 'utf8' });
+  const rejected = path.join(benchRoot, 'rejected');
+  const outsideTargets = [rejected];
+  if (process.platform === 'win32') {
+    const alternate = path.parse(ROOT).root.toUpperCase() === 'Z:\\' ? 'Y:' : 'Z:';
+    outsideTargets.push(path.win32.join(alternate + '\\', path.basename(benchRoot), 'rejected'));
+  }
+  for (const target of outsideTargets) {
+    for (const extra of [[], ['--vendor-base', '../shared/vendor'], ['--vendor-base', 'https://example.com/vendor', '--serve']]) {
+      const result = runPython(['scripts/new_bench.py', target, ...extra]);
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stderr, /outside the repository require --with-vendor/);
+      assert.doesNotMatch(result.stderr, /Traceback/);
+    }
+  }
+  assert.ok(!fs.existsSync(rejected));
+  const badServe = runPython(['scripts/new_bench.py', path.join(sharedRoot, 'unsafe'),
+    '--vendor-base', '../../../../outside-vendor', '--serve']);
+  assert.equal(badServe.status, 2, badServe.stderr);
+  assert.match(badServe.stderr, /--serve requires --vendor-base/);
+
+  const emptyProject = path.join(benchRoot, 'empty');
+  fs.mkdirSync(emptyProject);
+  for (const [project, error] of [[rejected, /does not exist/], [emptyProject, /No readable project text files/]]) {
+    const result = runPython(['scripts/setup_vendor.py', rejected, '--fonts-only', '--subset-cjk', project]);
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, error);
+    assert.ok(!fs.existsSync(rejected));
+  }
+
+  const retryTarget = path.join(benchRoot, 'retry');
+  fs.mkdirSync(retryTarget);
+  fs.writeFileSync(path.join(retryTarget, 'keep.txt'), 'keep');
+  execFileSync(python, ['-B', '-c', `
+from pathlib import Path
+import sys
+from unittest.mock import patch
+sys.path.insert(0, 'scripts')
+import new_bench
+
+target = Path(sys.argv[1])
+sys.argv = ['new_bench.py', str(target), '--with-vendor', '--no-katex']
+def partial_vendor(command, **kwargs):
+    staged = Path(command[3])
+    (staged / 'vendor').mkdir()
+    (staged / 'kit').mkdir()
+    raise OSError('injected partial vendor copy')
+with patch.object(new_bench.subprocess, 'run', side_effect=partial_vendor):
+    try:
+        new_bench.main()
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError('Partial vendor copy succeeded')
+assert [p.name for p in target.iterdir()] == ['keep.txt']
+`, retryTarget], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync(python, ['-B', 'scripts/new_bench.py', retryTarget, '--with-vendor', '--no-katex'], { cwd: ROOT });
+  const targets = [
+    { name: 'vendored bench', layout: 'split-bench', profile: 'field-math', skin: 'blueprint', extra: ['--with-vendor', '--no-katex'] },
+    { name: 'shared bench', layout: 'split-bench', profile: 'sandbox-direct', skin: 'bio-cutaway', extra: ['--vendor-base', '../../shared/vendor'] },
+    { name: 'default bench', layout: 'fullbleed-hud', profile: 'mechanical-3d', skin: 'paper-ink', extra: [] },
+    { name: 'URL bench', layout: 'ab-compare', profile: 'field-math', skin: 'dark-studio', extra: ['--vendor-base', 'https://example.com/vendor/'] },
+  ];
+  for (const { name, layout, profile, skin, extra } of targets) {
+    const vendored = extra.includes('--with-vendor');
+    const target = path.join(vendored ? benchRoot : sharedRoot, name);
+    execFileSync(python, ['-B', 'scripts/new_bench.py', target, '--title', '<测试 & bench>',
+      '--profile', profile, '--layout', layout, '--skin', skin, ...extra], {
+      cwd: ROOT, env: { ...process.env, npm_config_offline: 'true' },
+    });
+    const html = fs.readFileSync(path.join(target, 'index.html'), 'utf8');
+    assert.ok(html.includes('&lt;测试 &amp; bench&gt;'));
+    assert.ok(html.includes(`data-layout="${layout}"`) && html.includes(`data-theme="${skin}"`));
+    const { imports } = JSON.parse(html.match(/<script type="importmap">([\s\S]+?)<\/script>/)[1]);
+    for (const file of ['main.js', 'model.js']) {
+      const source = fs.readFileSync(path.join(target, file), 'utf8');
+      execFileSync(process.execPath, ['--input-type=module', '--check'], { input: source });
+    }
+    assert.ok(fs.existsSync(path.join(target, 'styles.css')));
+    assert.ok(fs.readFileSync(path.join(target, 'main.js'), 'utf8').includes(`profile: "${profile}"`));
+    const kit = path.resolve(target, decodeURIComponent(imports['simulify/']));
+    assert.ok(fs.existsSync(path.join(kit, 'fonts', 'fonts.css')));
+    assert.doesNotMatch(fs.readFileSync(path.join(kit, 'primer-tokens.css'), 'utf8'), /@import[^;]+katex/);
+    assert.equal(html.includes('/katex/katex.min.css'), !vendored);
+    assert.equal(fs.existsSync(path.join(kit, 'katex', 'katex.mjs')), !vendored);
+    if (vendored) {
+      assert.ok(fs.existsSync(path.join(target, 'primitives', 'gears-drivetrain.js')));
+      assert.ok(!fs.existsSync(path.join(target, 'vendor', 'three', 'three.module.js')));
+    }
+    if (name === 'shared bench') assert.equal(imports.three, '../../shared/vendor/three/three.webgpu.js');
+    if (name === 'URL bench') assert.equal(imports.three, 'https://example.com/vendor/three/three.webgpu.js');
+    else for (const key of ['three', 'three/tsl', 'three/addons/']) {
+      assert.ok(fs.existsSync(path.resolve(target, decodeURIComponent(imports[key]))), imports[key]);
+    }
+  }
+  execFileSync(python, ['-B', '-c', `
+import sys
+from pathlib import Path
+from scripts.verify_stage import launch_browser, start_server
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    print('[SKIP] Offline scaffold browser check requires Playwright')
+    sys.exit()
+root = Path(sys.argv[1])
+server, port = start_server(root)
+try:
+    with sync_playwright() as p:
+        try:
+            browser = launch_browser(p, backend='webgl2')
+        except RuntimeError as exc:
+            print(f'[SKIP] Offline scaffold browser check: {exc}')
+            sys.exit()
+        page = browser.new_page(viewport={'width': 1280, 'height': 800})
+        errors = []
+        page.on('response', lambda response: errors.append(response.url) if response.status >= 400 else None)
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(f'http://127.0.0.1:{port}/index.html?backend=webgl2')
+        page.wait_for_function('window.__ready === true')
+        assert page.evaluate('window.__simulify.stage.backendKind') == 'webgl2'
+        assert page.evaluate('window.__simulify.model.falsify().passed')
+        assert page.evaluate("""() => {
+            const shell = document.querySelector('.artboard-shell');
+            const stage = document.querySelector('.stage-pane').getBoundingClientRect();
+            const transport = document.querySelector('#transport').getBoundingClientRect();
+            return getComputedStyle(shell).gridTemplateAreas.includes('transport transport')
+                && transport.height > 0 && transport.top >= stage.bottom - 1;
+        }""")
+        assert errors == [], errors
+        browser.close()
+        print('[OK] Standalone --no-katex renders through HTTP with zero 404s and a placed split transport')
+finally:
+    server.shutdown()
+`, path.join(benchRoot, 'vendored bench')], { cwd: ROOT, stdio: 'inherit' });
+} finally {
+  fs.rmSync(benchRoot, { recursive: true, force: true });
+  fs.rmSync(sharedRoot, { recursive: true, force: true });
+}
+console.log('[OK] Scaffold syntax, import maps, and bundled offline assets verified');
+console.log('[OK] All Simulify tests passed');

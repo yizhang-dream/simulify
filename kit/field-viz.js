@@ -338,8 +338,10 @@ export function createVectorField(
   const geo = buildArrowGeometry();
   const mat = createSculptMaterial('ceramic', {
     color: 0xffffff,
-    roughness: 0.38,
-    metalness: 0.14,
+    roughness: 0.46,
+    metalness: 0.0,
+    clearcoat: 0.22,
+    clearcoatRoughness: 0.32,
     microTexture: false,
   });
 
@@ -827,7 +829,14 @@ export function createForceArrow(
   group.userData.simulifyGeoKind = 'field';
 
   const arrowGeo = buildArrowGeometry();
-  const arrowMat = createSculptMaterial('ceramic', { color, roughness: 0.34, metalness: 0.18, microTexture: false });
+  const arrowMat = createSculptMaterial('enamel', {
+    color,
+    roughness: 0.36,
+    metalness: 0.0,
+    clearcoat: 0.65,
+    clearcoatRoughness: 0.18,
+    microTexture: false,
+  });
   const arrowMesh = new THREE.Mesh(arrowGeo, arrowMat);
   arrowMesh.castShadow = true;
   arrowMesh.receiveShadow = true;
@@ -949,20 +958,192 @@ export function createAngleArc(
 }
 
 // ============================================================================
-// 7. Crisp Iso-Contour Scalar Heightfield (`createContourField`)
+// 7. Crisp Iso-Contour Scalar Heightfield & Analytical Physical Field Material
 // ============================================================================
 
+function smoothstep01(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(1e-6, edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Create a shaded, un-washed physical material for mathematical heightfields, wave membranes,
+ * and scalar/parametric surfaces (`emissiveIntensity = 0`, crisp clearcoat highlights for curvature,
+ * and optional analytical `fwidth()` screen-space iso-contours & coordinate grid lines).
+ * Works across both WebGPURenderer (TSL `MeshPhysicalNodeMaterial`) and legacy WebGLRenderer.
+ */
+export function createPhysicalFieldMaterial({
+  map = null,
+  color = 0xffffff,
+  vertexColors = false,
+  roughness = 0.44,
+  metalness = 0.0,
+  clearcoat = 0.24,
+  clearcoatRoughness = 0.3,
+  specularIntensity = 0.48,
+  side = THREE.FrontSide,
+  analyticalGrid = false,
+  gridDivisions = 12,
+  gridLineWidth = 1.15,
+  gridColor = 0x18202c,
+  gridOpacity = 0.22,
+  analyticalContours = false,
+  contourFreq = 6.0,
+  contourLineWidth = 1.25,
+  contourColor = 0x141c2a,
+  contourOpacity = 0.42,
+} = {}) {
+  const wantOverlay = Boolean(analyticalGrid || analyticalContours);
+  const canTSL = Boolean(wantOverlay && THREE.MeshPhysicalNodeMaterial && THREE.TSL);
+
+  if (canTSL) {
+    const TSL = THREE.TSL;
+    const {
+      uv,
+      positionLocal,
+      texture,
+      color: tslColor,
+      attribute,
+      float,
+      vec2,
+      abs,
+      fract,
+      fwidth,
+      min,
+      max,
+      smoothstep,
+      mix,
+    } = TSL;
+
+    const mat = new THREE.MeshPhysicalNodeMaterial({
+      color,
+      map: map || null,
+      vertexColors,
+      roughness,
+      metalness,
+      clearcoat,
+      clearcoatRoughness,
+      specularIntensity,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      side,
+    });
+
+    let baseCol = map ? texture(map, uv()).rgb.mul(tslColor(color)) : tslColor(color);
+    if (vertexColors) {
+      baseCol = baseCol.mul(attribute('color', 'vec3'));
+    }
+
+    if (analyticalGrid && gridDivisions > 0) {
+      const gCoord = uv().mul(float(gridDivisions));
+      const gDist = abs(fract(gCoord.sub(0.5)).sub(0.5)).div(max(fwidth(gCoord), vec2(1e-4)));
+      const gLine = float(1.0).sub(smoothstep(0.0, float(gridLineWidth), min(gDist.x, gDist.y)));
+      baseCol = mix(baseCol, tslColor(gridColor), gLine.mul(float(gridOpacity)));
+    }
+
+    if (analyticalContours && contourFreq > 0) {
+      const cCoord = positionLocal.y.mul(float(contourFreq));
+      const cDist = abs(fract(cCoord.sub(0.5)).sub(0.5)).div(max(fwidth(cCoord), float(1e-4)));
+      const cLine = float(1.0).sub(smoothstep(0.0, float(contourLineWidth), cDist));
+      baseCol = mix(baseCol, tslColor(contourColor), cLine.mul(float(contourOpacity)));
+    }
+
+    mat.colorNode = baseCol;
+    mat.userData = { ...(mat.userData || {}), reflective: true, simulifyEnvIntensity: 0.65 };
+    return mat;
+  }
+
+  const mat = new THREE.MeshPhysicalMaterial({
+    color,
+    map: map || null,
+    vertexColors,
+    roughness,
+    metalness,
+    clearcoat,
+    clearcoatRoughness,
+    specularIntensity,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+    envMapIntensity: 0.65,
+    side,
+  });
+
+  if (wantOverlay) {
+    const gCol = new THREE.Color(gridColor);
+    const cCol = new THREE.Color(contourColor);
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uFieldGridOn = { value: analyticalGrid ? 1.0 : 0.0 };
+      shader.uniforms.uFieldGridDiv = { value: Number(gridDivisions) || 12 };
+      shader.uniforms.uFieldGridWidth = { value: Number(gridLineWidth) || 1.15 };
+      shader.uniforms.uFieldGridColor = { value: gCol };
+      shader.uniforms.uFieldGridOpacity = { value: Number(gridOpacity) || 0.22 };
+      shader.uniforms.uFieldContourOn = { value: analyticalContours ? 1.0 : 0.0 };
+      shader.uniforms.uFieldContourFreq = { value: Number(contourFreq) || 6.0 };
+      shader.uniforms.uFieldContourWidth = { value: Number(contourLineWidth) || 1.25 };
+      shader.uniforms.uFieldContourColor = { value: cCol };
+      shader.uniforms.uFieldContourOpacity = { value: Number(contourOpacity) || 0.42 };
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nvarying vec2 vFieldUv;\nvarying float vFieldLocalY;'
+        )
+        .replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\nvFieldUv = uv;\nvFieldLocalY = position.y;'
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec2 vFieldUv;
+          varying float vFieldLocalY;
+          uniform float uFieldGridOn;
+          uniform float uFieldGridDiv;
+          uniform float uFieldGridWidth;
+          uniform vec3 uFieldGridColor;
+          uniform float uFieldGridOpacity;
+          uniform float uFieldContourOn;
+          uniform float uFieldContourFreq;
+          uniform float uFieldContourWidth;
+          uniform vec3 uFieldContourColor;
+          uniform float uFieldContourOpacity;`
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          if (uFieldGridOn > 0.5) {
+            vec2 gc = vFieldUv * uFieldGridDiv;
+            vec2 gd = abs(fract(gc - 0.5) - 0.5) / max(fwidth(gc), vec2(1e-4));
+            float gl = 1.0 - smoothstep(0.0, uFieldGridWidth, min(gd.x, gd.y));
+            diffuseColor.rgb = mix(diffuseColor.rgb, uFieldGridColor, gl * uFieldGridOpacity);
+          }
+          if (uFieldContourOn > 0.5) {
+            float cc = vFieldLocalY * uFieldContourFreq;
+            float cd = abs(fract(cc - 0.5) - 0.5) / max(fwidth(cc), 1e-4);
+            float cl = 1.0 - smoothstep(0.0, uFieldContourWidth, cd);
+            diffuseColor.rgb = mix(diffuseColor.rgb, uFieldContourColor, cl * uFieldContourOpacity);
+          }`
+        );
+    };
+  }
+
+  mat.userData = { ...(mat.userData || {}), reflective: true, simulifyEnvIntensity: 0.65 };
+  return mat;
+}
+
 function bakeContourTexture(scalarFn, {
-  resolution = 256,
+  resolution = 512,
   min = 0,
   max = 1,
   levels = 10,
   colormap = 'viridis',
   contourColor = [20, 26, 44],
   contourOpacity = 0.52,
-  lineWidth = 0.075,
+  lineWidth = 0.068,
 } = {}) {
-  const n = Math.max(32, Math.min(512, Math.round(resolution)));
+  const n = Math.max(32, Math.min(1024, Math.round(resolution)));
   const data = new Uint8Array(n * n * 4);
   const span = Math.max(1e-6, max - min);
   const tmp = new THREE.Color();
@@ -982,8 +1163,9 @@ function bakeContourTexture(scalarFn, {
       if (levels > 0) {
         const scaled = norm * levels;
         const frac = Math.abs(scaled - Math.round(scaled));
-        if (frac < lineWidth) {
-          const blend = (1 - frac / lineWidth) * contourOpacity;
+        if (frac < lineWidth * 1.45) {
+          const aa = 1 - smoothstep01(lineWidth * 0.35, lineWidth * 1.45, frac);
+          const blend = aa * contourOpacity;
           r = r * (1 - blend) + contourColor[0] * blend;
           g = g * (1 - blend) + contourColor[1] * blend;
           b = b * (1 - blend) + contourColor[2] * blend;
@@ -1011,7 +1193,8 @@ function bakeContourTexture(scalarFn, {
 
 /**
  * Create a continuous 3D heightfield surface textured with crisp scientific iso-contour bands
- * and perceptually uniform colormap (works identically on WebGPU & WebGL2, zero GLSL divergence).
+ * and perceptually uniform colormap using shaded `MeshPhysicalMaterial` (`clearcoat`, zero emissive
+ * washout) plus optional analytical `fwidth()` coordinate grid / iso-contour overlay.
  */
 export function createContourField({
   width = 6,
@@ -1024,10 +1207,15 @@ export function createContourField({
   max = 1,
   levels = 10,
   colormap = 'viridis',
-  textureSize = 256,
+  textureSize = 512,
   skirt = true,
   skirtBottom = -0.35,
   skirtColor = null,
+  analyticalGrid = false,
+  gridDivisions = 12,
+  gridOpacity = 0.22,
+  analyticalContours = false,
+  contourFreq = 6.0,
   name = 'contour-field',
 } = {}) {
   const sFn = typeof scalarFn === 'function' ? scalarFn : heightFn;
@@ -1039,11 +1227,20 @@ export function createContourField({
     colormap,
   });
 
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+  const mat = createPhysicalFieldMaterial({
     map: contourTex,
+    color: 0xffffff,
     roughness: 0.44,
-    metalness: 0.06,
+    metalness: 0.0,
+    clearcoat: 0.24,
+    clearcoatRoughness: 0.3,
+    specularIntensity: 0.48,
+    side: skirt ? THREE.FrontSide : THREE.DoubleSide,
+    analyticalGrid,
+    gridDivisions,
+    gridOpacity,
+    analyticalContours,
+    contourFreq,
   });
 
   const activeTheme = typeof document !== 'undefined' ? document.documentElement?.dataset?.theme : '';
@@ -1051,8 +1248,8 @@ export function createContourField({
   const skirtMat = skirt
     ? createSculptMaterial('travertine', {
         color: skirtColor ?? (isDarkTheme ? 0x26354d : 0xd4c6b0),
-        roughness: 0.78,
-        metalness: 0.05,
+        roughness: 0.86,
+        metalness: 0.0,
         microTexture: false,
       })
     : null;

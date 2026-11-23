@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark-studio">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>梯度下降与动量 · Simulify</title>
+  <link rel="icon" href="../../assets/logo.svg">
+  <link rel="stylesheet" href="../../kit/primer-tokens.css">
+  <link rel="stylesheet" href="../../kit/theme-studio.css">
+  <link rel="stylesheet" href="../../kit/katex/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">{
+    "imports": {
+      "simulify/": "../../kit/",
+      "three": "../shared/vendor/three/three.webgpu.js",
+      "three/webgpu": "../shared/vendor/three/three.webgpu.js",
+      "three/tsl": "../shared/vendor/three/three.tsl.js",
+      "three/addons/": "../shared/vendor/three/addons/"
+    }
+  }</script>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <main class="artboard-shell" data-layout="fullbleed-hud">
+    <header class="hud-top-left">
+      <a class="gallery-link" href="../../index.html">← 实验台画廊</a>
+      <h1>梯度下降与动量</h1>
+      <p class="brand-sub">窄谷放大横向梯度，步长过大会越走越远。</p>
+      <div class="track-key" aria-label="轨迹图例">
+        <span class="key-momentum">Heavy-Ball</span><span class="key-sgd">纯 SGD</span>
+      </div>
+    </header>
+
+    <div class="stage-pane">
+      <canvas id="stage-canvas" class="stage-canvas" aria-label="损失曲面与两条下降轨迹，拖动白色圆环调整起点"></canvas>
+      </div>
+
+    <aside class="hud-guide" aria-label="实验参数">
+      <div class="presets" aria-label="预设">
+        <button type="button" data-preset="valley">峡谷动量</button>
+        <button type="button" data-preset="sgd">纯 SGD 锯齿</button>
+        <button type="button" data-preset="unstable">超临界发散</button>
+      </div>
+      <div class="controls">
+        <label for="kappa"><span>κ 条件数</span><input id="kappa" type="range" min="2" max="28" step="1"><output for="kappa"></output></label>
+        <label for="lr"><span>η 学习率</span><input id="lr" type="range" min="0.01" max="0.22" step="0.01"><output for="lr"></output></label>
+        <label for="beta"><span>β 动量</span><input id="beta" type="range" min="0" max="0.92" step="0.01"><output for="beta"></output></label>
+      </div>
+      <div class="start-coordinates">
+        <label for="startX">起点 x<input id="startX" type="number" step="0.01"></label>
+        <label for="startY">起点 y<input id="startY" type="number" step="0.01"></label>
+      </div>
+      <div class="ghost-row">
+        <button id="ghost" type="button" aria-pressed="false">保存基准对照</button>
+        <span>拖动白环改起点</span>
+      </div>
+      <div id="maths"></div>
+      <p id="stability" class="stability"></p>
+    </aside>
+
+    <div id="chart" class="hud-bottom-left"></div>
+    <div id="transport" class="bottom-transport"></div>
+    <div id="views" class="view-cube-dock"></div>
+  </main>
+</body>
+</html>

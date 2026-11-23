@@ -8,8 +8,8 @@
     {
       "name": "simulify",
       "source": "./",
-      "description": "Crisp offline 3D/4D mechanism, cutaway and simulation explainers: 6 layout archetypes (incl. scrollytelling, split-bench, A/B wipe & multi-view), 6 themes, 1:1 HiDPI WebGPU + HTML-in-Canvas, stencil cutaway caps, Fresnel X-Ray, dynamic 4D field & particle primitives, extended KaTeX live maths, and deterministic video/GIF export.",
-      "version": "2.2.0",
+      "description": "Build offline interactive 3D/4D workbenches for mechanisms, physical structures, mathematical laws, and dynamical systems. Scaffold a static bundle with 3 profiles, 3 layouts, and 6 CSS skins, then drive it with a single model, live KaTeX, direct manipulation, and structured counterfactual tests.",
+      "version": "3.1.0",
       "category": "visualization"
     }
   ]

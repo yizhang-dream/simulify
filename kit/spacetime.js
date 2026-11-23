@@ -318,6 +318,19 @@ export class SpacetimeClock {
     if (typeof onTick === 'function') this._tickSubs.add(onTick);
     if (typeof onSeek === 'function') this._seekSubs.add(onSeek);
 
+    this._onVisibilityChange = () => {
+      if (this._disposed || this.manualMode) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        this.#stopRaf();
+      } else if (this.playing) {
+        this._lastMs = nowMs();
+        this.#startRaf();
+      }
+    };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
+    }
+
     if (playing && !this.manualMode) {
       this.play();
     }
@@ -392,9 +405,7 @@ export class SpacetimeClock {
    * fallback) so consumers registering both `onTick` and `onSeek` never run 2× per seek.
    */
   seek(t, { silent = false, notifyHandlers = true, emitTick = false } = {}) {
-    const raw = Number(t);
-    const next = Number.isFinite(raw) ? Math.max(0, Math.min(this.duration, raw)) : 0;
-    this.t = next;
+    this.t = Math.max(0, Math.min(this.duration, Number(t) || 0));
     this.complete = !this.loop && this.t >= this.duration - 1e-6;
     const snap = this.getState();
     if (!silent) {
@@ -611,6 +622,9 @@ export class SpacetimeClock {
     this._disposed = true;
     this.playing = false;
     this.#stopRaf();
+    if (this._onVisibilityChange && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    }
     this._tickSubs.clear();
     this._seekSubs.clear();
     this._stateSubs.clear();
@@ -618,6 +632,7 @@ export class SpacetimeClock {
 
   #startRaf() {
     if (this._raf || typeof requestAnimationFrame !== 'function') return;
+    if (!this.manualMode && typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     this._lastMs = nowMs();
     const step = (now) => {
       if (this._disposed || !this.playing || this.manualMode) {

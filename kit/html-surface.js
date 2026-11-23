@@ -1151,7 +1151,7 @@ export class HtmlSurfaceManager {
    * Used by `compositor.js`, `stage.renderNowAsync()`, and `__simulify.seek(t)` for deterministic capture.
    */
   async flushPaint({ timeoutMs = 180 } = {}) {
-    if (this._disposed || this.surfaces.size === 0) return false;
+    if (this._disposed || this.stage._disposed || this.surfaces.size === 0) return false;
 
     if (!this.nativeEnabled) {
       return this.syncPaint(null);
@@ -1180,6 +1180,7 @@ export class HtmlSurfaceManager {
         this.requestPaint();
       });
 
+      if (this._disposed || this.stage._disposed) return false;
       if (!receivedPaint && this.hasPendingVisible()) {
         // Timeout fallback: attempt upload only when element is visible and laid out
         this.syncPaint(null, { fromPaint: true });

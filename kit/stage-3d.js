@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createXRayMaterial } from './geo-sculpt.js';
 import { HtmlSurfaceManager, supportsHtmlInCanvas } from './html-surface.js';
 import {
   GLASS_LAYER,
@@ -42,118 +43,196 @@ const SCULPTED_GEO_TYPES = new Set([
   'BufferGeometry',
 ]);
 
+export const PRIMER_THEMES = new Set(['paper-ink', 'monochrome-print']);
+
+/**
+ * Procedural high-contrast dark-wall Studio Softbox / Lightformer environment for PMREM baking.
+ * Replaces bright-wall `RoomEnvironment(sigma=0.04)` gray wash with crisp specular strips
+ * and dark negative-fill baffles — zero external HDRI/EXR assets, works identically on
+ * WebGPURenderer and WebGLRenderer.
+ */
+export class StudioLightformerEnvironment extends THREE.Scene {
+  constructor() {
+    super();
+    this.name = 'StudioLightformerEnvironment';
+
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    boxGeo.deleteAttribute('uv');
+
+    // Dark absorbent enclosure eliminates 360-degree grey ambient floor
+    const enclosureMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0d12,
+      roughness: 1.0,
+      metalness: 0.0,
+      side: THREE.BackSide,
+    });
+    const enclosure = new THREE.Mesh(boxGeo, enclosureMat);
+    enclosure.scale.set(34, 28, 34);
+    enclosure.position.set(0, 6, 0);
+    this.add(enclosure);
+
+    const makeLightformer = (hex, intensity, pos, scale, rot = null) => {
+      // Emissive-only MeshLambertMaterial works identically on WebGPURenderer & WebGLRenderer (#31348)
+      const mat = new THREE.MeshLambertMaterial({
+        color: 0x000000,
+        emissive: hex,
+        emissiveIntensity: intensity,
+      });
+      const mesh = new THREE.Mesh(boxGeo, mat);
+      mesh.position.set(pos[0], pos[1], pos[2]);
+      mesh.scale.set(scale[0], scale[1], scale[2]);
+      if (rot) mesh.rotation.set(rot[0], rot[1], rot[2]);
+      this.add(mesh);
+      return mesh;
+    };
+
+    // 1. Overhead warm key softbox strip (broad hero highlight across top bevels)
+    makeLightformer(0xfff6e8, 12.0, [-2.5, 14.0, 3.5], [10.5, 0.2, 6.0]);
+    // 2. Narrow cool rim strip (razor specular catchlight on machined metal & glass edges)
+    makeLightformer(0xcfe2ff, 7.5, [11.5, 8.5, -9.0], [0.25, 8.5, 4.8], [0, -0.35, 0]);
+    // 3. Side warm-white key accent strip
+    makeLightformer(0xfff1dc, 5.2, [-12.5, 9.0, 6.5], [0.25, 5.2, 7.0], [0, 0.25, 0]);
+    // 4. Subdued cool-neutral fill card (keeps shadows readable without muddying contrast)
+    makeLightformer(0xd8e2f0, 2.0, [12.5, 5.5, 8.0], [0.25, 4.0, 6.0]);
+    // 5. Subtle ground bounce card (gives metallic undersides natural horizon tone)
+    makeLightformer(0x2c303a, 0.65, [0, -5.5, 0], [18.0, 0.2, 18.0]);
+
+    // 6. Dark negative-fill baffles opposite key for crisp dark-to-bright specular rolloff
+    const baffleMat = new THREE.MeshStandardMaterial({ color: 0x040507, roughness: 1.0, metalness: 0.0 });
+    const baffleA = new THREE.Mesh(boxGeo, baffleMat);
+    baffleA.position.set(-10.0, 4.0, -9.5);
+    baffleA.scale.set(5.5, 10.0, 0.3);
+    this.add(baffleA);
+    const baffleB = new THREE.Mesh(boxGeo, baffleMat);
+    baffleB.position.set(1.5, 3.5, -13.0);
+    baffleB.scale.set(9.0, 9.0, 0.3);
+    this.add(baffleB);
+  }
+
+  dispose() {
+    const resources = new Set();
+    this.traverse((obj) => {
+      if (obj.isMesh) {
+        resources.add(obj.geometry);
+        resources.add(obj.material);
+      }
+    });
+    for (const r of resources) r?.dispose?.();
+  }
+}
+
 export const STUDIO_THEMES = {
   'paper-ink': {
-    hemiSky: 0xfffaf3,
-    hemiGround: 0xc2ae90,
-    hemiIntensity: 0.64,
+    hemiSky: 0xfffaf2,
+    hemiGround: 0xa68e6e,
+    hemiIntensity: 0.56,
     keyColor: 0xfff7ec,
-    keyIntensity: 1.24,
+    keyIntensity: 1.42,
     fillColor: 0xdfe8f2,
-    fillIntensity: 0.28,
+    fillIntensity: 0.16,
     rimColor: 0xfff4e0,
-    rimIntensity: 0.42,
+    rimIntensity: 0.24,
     shadowColor: 0x6f4d2d,
-    shadowOpacity: 0.26,
+    shadowOpacity: 0.25,
     gridCenter: 0xb6a489,
     gridLine: 0xd3c4ac,
     gridOpacity: 0.48,
-    envIntensity: 0.4,
-    inkColor: '#141a2c',
-    inkOpacity: 0.86,
+    envIntensity: 0.95,
+    inkColor: '#1f160f',
+    inkOpacity: 0.84,
   },
   'dark-studio': {
     hemiSky: 0xdbeafe,
     hemiGround: 0x1e293b,
-    hemiIntensity: 0.56,
+    hemiIntensity: 0.52,
     keyColor: 0xf8fafc,
-    keyIntensity: 1.32,
+    keyIntensity: 1.38,
     fillColor: 0x38bdf8,
-    fillIntensity: 0.34,
+    fillIntensity: 0.28,
     rimColor: 0x5eead4,
-    rimIntensity: 0.62,
+    rimIntensity: 0.64,
     shadowColor: 0x04070f,
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.52,
     gridCenter: 0x475569,
     gridLine: 0x293548,
     gridOpacity: 0.56,
-    envIntensity: 0.55,
+    envIntensity: 0.85,
     inkColor: '#060911',
     inkOpacity: 0.72,
   },
   'bio-cutaway': {
     hemiSky: 0xf4fbf9,
-    hemiGround: 0x8faea7,
-    hemiIntensity: 0.66,
+    hemiGround: 0x86a69f,
+    hemiIntensity: 0.6,
     keyColor: 0xfafffe,
-    keyIntensity: 1.18,
+    keyIntensity: 1.28,
     fillColor: 0xd1fae5,
-    fillIntensity: 0.3,
+    fillIntensity: 0.24,
     rimColor: 0x99f6e4,
-    rimIntensity: 0.4,
+    rimIntensity: 0.36,
     shadowColor: 0x254442,
-    shadowOpacity: 0.24,
+    shadowOpacity: 0.26,
     gridCenter: 0x9eb8b1,
     gridLine: 0xc3d5d0,
     gridOpacity: 0.46,
-    envIntensity: 0.44,
+    envIntensity: 0.72,
     inkColor: '#142b2e',
-    inkOpacity: 0.82,
+    inkOpacity: 0.8,
   },
   blueprint: {
     hemiSky: 0xdbeeff,
     hemiGround: 0x0b1f3a,
-    hemiIntensity: 0.62,
+    hemiIntensity: 0.56,
     keyColor: 0xf0f9ff,
-    keyIntensity: 1.28,
+    keyIntensity: 1.34,
     fillColor: 0x38bdf8,
-    fillIntensity: 0.42,
+    fillIntensity: 0.36,
     rimColor: 0x38e8ff,
     rimIntensity: 0.72,
     shadowColor: 0x030b18,
-    shadowOpacity: 0.46,
+    shadowOpacity: 0.48,
     gridCenter: 0x7dd3fc,
     gridLine: 0x38bdf8,
     gridOpacity: 0.36,
-    envIntensity: 0.5,
+    envIntensity: 0.8,
     inkColor: '#e0f2fe',
     inkOpacity: 0.68,
   },
   'monochrome-print': {
     hemiSky: 0xffffff,
-    hemiGround: 0xd4d2cc,
-    hemiIntensity: 0.7,
+    hemiGround: 0xc0beb8,
+    hemiIntensity: 0.58,
     keyColor: 0xffffff,
-    keyIntensity: 1.22,
+    keyIntensity: 1.38,
     fillColor: 0xe6e8ec,
-    fillIntensity: 0.24,
+    fillIntensity: 0.16,
     rimColor: 0xffffff,
-    rimIntensity: 0.36,
-    shadowColor: 0x1a1d24,
-    shadowOpacity: 0.22,
+    rimIntensity: 0.22,
+    shadowColor: 0x54473d,
+    shadowOpacity: 0.25,
     gridCenter: 0x8c9099,
     gridLine: 0xcbc9c2,
     gridOpacity: 0.36,
-    envIntensity: 0.36,
+    envIntensity: 0.85,
     inkColor: '#111317',
     inkOpacity: 0.9,
   },
   'obsidian-gallery': {
     hemiSky: 0xfaf0dc,
     hemiGround: 0x1c1916,
-    hemiIntensity: 0.5,
+    hemiIntensity: 0.46,
     keyColor: 0xfff5e4,
-    keyIntensity: 1.38,
+    keyIntensity: 1.44,
     fillColor: 0x5eead4,
-    fillIntensity: 0.24,
+    fillIntensity: 0.2,
     rimColor: 0xd9b061,
-    rimIntensity: 0.74,
+    rimIntensity: 0.76,
     shadowColor: 0x050403,
     shadowOpacity: 0.56,
     gridCenter: 0x6b5b43,
     gridLine: 0x3a3228,
     gridOpacity: 0.46,
-    envIntensity: 0.62,
+    envIntensity: 0.95,
     inkColor: '#090807',
     inkOpacity: 0.74,
   },
@@ -174,7 +253,11 @@ function parseRequestedBackend(explicit) {
   return 'auto';
 }
 
-function resolveOutlinePreset(opt) {
+function resolveOutlinePreset(opt, themeName) {
+  if (opt === undefined || opt === 'auto') {
+    return PRIMER_THEMES.has(themeName) ? 'primer' : 'none';
+  }
+  if (opt === 'primer') return 'primer';
   if (opt === false || opt === 'none') return 'none';
   if (opt === 'subtle') return 'subtle';
   return 'crisp';
@@ -205,124 +288,255 @@ function hexToCss(hex, alpha = 1) {
   return alpha >= 0.999 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${alpha})`;
 }
 
-function createRadialGridTexture(style, theme, divisions = 24) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext?.('2d');
-  if (!ctx) return null;
+async function disposeRenderer(renderer) {
+  try {
+    await renderer?.dispose();
+  } catch {
+    // Three.js disposal awaits initialization and can reject with the same init error.
+  }
+}
 
-  const S = 1024;
-  const half = S * 0.5;
-  ctx.clearRect(0, 0, S, S);
+const ANALYTICAL_GRID_VERTEX = /* glsl */ `
+  varying vec2 vXZ;
+  void main() {
+    vXZ = position.xz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
 
-  const minorColor = hexToCss(theme.gridLine, 0.72);
-  const majorColor = hexToCss(theme.gridCenter, 0.95);
+const ANALYTICAL_GRID_FRAGMENT = /* glsl */ `
+  #ifdef GL_OES_standard_derivatives
+    #extension GL_OES_standard_derivatives : enable
+  #endif
+  uniform vec3 uMinorColor;
+  uniform vec3 uMajorColor;
+  uniform float uOpacity;
+  uniform float uHalfSize;
+  uniform float uCellSize;
+  uniform float uStyle; // 0 = cartesian, 1 = polar, 2 = plinth
+  varying vec2 vXZ;
 
-  if (style === 'polar') {
-    const rings = 8;
-    const maxR = half * 0.94;
-    for (let i = 1; i <= rings; i += 1) {
-      const r = (i / rings) * maxR;
-      ctx.beginPath();
-      ctx.arc(half, half, r, 0, Math.PI * 2);
-      ctx.strokeStyle = i % 2 === 0 ? majorColor : minorColor;
-      ctx.lineWidth = i % 2 === 0 ? 1.8 : 1.1;
-      ctx.stroke();
+  void main() {
+    float r = length(vXZ);
+    float rNorm = r / max(uHalfSize, 1e-4);
+    float fade = 1.0 - smoothstep(0.32, 0.98, rNorm);
+    if (fade <= 0.001) discard;
+
+    float minorMask = 0.0;
+    float majorMask = 0.0;
+
+    if (uStyle < 0.5) {
+      // Crisp analytical 1px cartesian drafting grid
+      vec2 coord = vXZ / max(uCellSize, 1e-4);
+      vec2 gMin = abs(fract(coord - 0.5) - 0.5) / max(fwidth(coord), vec2(1e-4));
+      minorMask = 1.0 - min(min(gMin.x, gMin.y), 1.0);
+
+      vec2 coordMaj = coord * 0.25;
+      vec2 gMaj = abs(fract(coordMaj - 0.5) - 0.5) / max(fwidth(coordMaj), vec2(1e-4));
+      majorMask = 1.0 - min(min(gMaj.x, gMaj.y), 1.0);
+
+      float axX = 1.0 - clamp(abs(vXZ.x) / max(fwidth(vXZ.x) * 1.4, 1e-4), 0.0, 1.0);
+      float axZ = 1.0 - clamp(abs(vXZ.y) / max(fwidth(vXZ.y) * 1.4, 1e-4), 0.0, 1.0);
+      majorMask = max(majorMask, max(axX, axZ));
+    } else if (uStyle < 1.5) {
+      // Crisp analytical polar rings + seam-free 12-spoke reticle
+      float ringStep = uHalfSize / 8.0;
+      float rc = r / max(ringStep, 1e-4);
+      float gRing = abs(fract(rc - 0.5) - 0.5) / max(fwidth(rc), 1e-4);
+      minorMask = (1.0 - min(gRing, 1.0)) * step(0.08, rc);
+
+      float rcMaj = rc * 0.5;
+      float gRingMaj = abs(fract(rcMaj - 0.5) - 0.5) / max(fwidth(rcMaj), 1e-4);
+      majorMask = (1.0 - min(gRingMaj, 1.0)) * step(0.08, rc);
+
+      float ang = atan(vXZ.y, vXZ.x);
+      float fwPos = max((fwidth(vXZ.x) + fwidth(vXZ.y)) * 0.7071, 1e-4);
+      float spokeDist = abs(sin(ang * 6.0)) * r / (6.0 * fwPos);
+      minorMask = max(minorMask, (1.0 - min(spokeDist, 1.0)) * smoothstep(0.0, 0.12, rNorm));
+      float majSpokeDist = abs(sin(ang * 2.0)) * r / (2.0 * fwPos);
+      majorMask = max(majorMask, (1.0 - min(majSpokeDist, 1.0)) * smoothstep(0.0, 0.12, rNorm));
+    } else {
+      // Crisp analytical plinth double ring + interior crosshairs
+      float fwR = max(fwidth(r), 1e-4);
+      float outerR = uHalfSize * 0.82;
+      float innerR = uHalfSize * 0.77;
+      majorMask = 1.0 - clamp(abs(r - outerR) / (fwR * 1.6), 0.0, 1.0);
+      minorMask = 1.0 - clamp(abs(r - innerR) / (fwR * 1.1), 0.0, 1.0);
+      float inside = 1.0 - smoothstep(innerR - fwR, innerR + fwR, r);
+      float axX = 1.0 - clamp(abs(vXZ.x) / max(fwidth(vXZ.x) * 1.1, 1e-4), 0.0, 1.0);
+      float axZ = 1.0 - clamp(abs(vXZ.y) / max(fwidth(vXZ.y) * 1.1, 1e-4), 0.0, 1.0);
+      minorMask = max(minorMask, max(axX, axZ) * inside);
     }
-    const spokes = 12;
-    for (let i = 0; i < spokes; i += 1) {
-      const ang = (i / spokes) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(half, half);
-      ctx.lineTo(half + Math.cos(ang) * maxR, half + Math.sin(ang) * maxR);
-      ctx.strokeStyle = i % 3 === 0 ? majorColor : minorColor;
-      ctx.lineWidth = i % 3 === 0 ? 1.6 : 1.0;
-      ctx.stroke();
+
+    float lineAlpha = max(minorMask * 0.72, majorMask * 0.96);
+    float outAlpha = lineAlpha * fade * uOpacity;
+    if (outAlpha <= 0.002) discard;
+    vec3 col = mix(uMinorColor, uMajorColor, clamp(majorMask, 0.0, 1.0));
+    gl_FragColor = vec4(col, outAlpha);
+  }
+`;
+
+/**
+ * Build a razor-sharp analytical `fwidth()` ground grid material (TSL on WebGPURenderer,
+ * GLSL ShaderMaterial on legacy WebGLRenderer) with smooth radial edge fade and zero texture blur.
+ */
+function createAnalyticalGridMaterial(style, theme, gridSize, useTSL) {
+  const halfSize = Math.max(1, gridSize * 0.5);
+  const cellSize = Math.max(0.5, gridSize / Math.max(8, Math.round(gridSize / 1.5)));
+  const minorCol = new THREE.Color(theme.gridLine);
+  const majorCol = new THREE.Color(theme.gridCenter);
+  const styleIdx = style === 'polar' ? 1 : style === 'plinth' ? 2 : 0;
+
+  if (useTSL && THREE.MeshBasicNodeMaterial && THREE.TSL) {
+    const TSL = THREE.TSL;
+    const {
+      positionLocal,
+      vec2,
+      float,
+      color: tslColor,
+      abs,
+      fract,
+      fwidth,
+      min,
+      max,
+      clamp: tslClamp,
+      smoothstep,
+      mix,
+      length,
+      sin,
+      atan,
+      step,
+    } = TSL;
+
+    const posXZ = vec2(positionLocal.x, positionLocal.z);
+    const r = length(posXZ);
+    const rNorm = r.div(float(halfSize));
+    const fade = float(1.0).sub(smoothstep(0.32, 0.98, rNorm));
+
+    let minorMask;
+    let majorMask;
+
+    if (styleIdx === 0) {
+      const coord = posXZ.div(float(cellSize));
+      const gMin = abs(fract(coord.sub(0.5)).sub(0.5)).div(max(fwidth(coord), vec2(1e-4)));
+      minorMask = float(1.0).sub(min(min(gMin.x, gMin.y), float(1.0)));
+
+      const coordMaj = coord.mul(0.25);
+      const gMaj = abs(fract(coordMaj.sub(0.5)).sub(0.5)).div(max(fwidth(coordMaj), vec2(1e-4)));
+      const majGrid = float(1.0).sub(min(min(gMaj.x, gMaj.y), float(1.0)));
+
+      const axX = float(1.0).sub(tslClamp(abs(posXZ.x).div(max(fwidth(posXZ.x).mul(1.4), float(1e-4))), 0.0, 1.0));
+      const axZ = float(1.0).sub(tslClamp(abs(posXZ.y).div(max(fwidth(posXZ.y).mul(1.4), float(1e-4))), 0.0, 1.0));
+      majorMask = max(majGrid, max(axX, axZ));
+    } else if (styleIdx === 1) {
+      const ringStep = float(halfSize / 8.0);
+      const rc = r.div(ringStep);
+      const gRing = abs(fract(rc.sub(0.5)).sub(0.5)).div(max(fwidth(rc), float(1e-4)));
+      const ringGate = step(float(0.08), rc);
+      const minRing = float(1.0).sub(min(gRing, float(1.0))).mul(ringGate);
+
+      const rcMaj = rc.mul(0.5);
+      const gRingMaj = abs(fract(rcMaj.sub(0.5)).sub(0.5)).div(max(fwidth(rcMaj), float(1e-4)));
+      const majRing = float(1.0).sub(min(gRingMaj, float(1.0))).mul(ringGate);
+
+      const ang = atan(posXZ.y, posXZ.x);
+      const fwPos = max(fwidth(posXZ.x).add(fwidth(posXZ.y)).mul(0.7071), float(1e-4));
+      const centerGate = smoothstep(0.0, 0.12, rNorm);
+      const spokeDist = abs(sin(ang.mul(6.0))).mul(r).div(fwPos.mul(6.0));
+      const majSpokeDist = abs(sin(ang.mul(2.0))).mul(r).div(fwPos.mul(2.0));
+      minorMask = max(minRing, float(1.0).sub(min(spokeDist, float(1.0))).mul(centerGate));
+      majorMask = max(majRing, float(1.0).sub(min(majSpokeDist, float(1.0))).mul(centerGate));
+    } else {
+      const fwR = max(fwidth(r), float(1e-4));
+      const outerR = float(halfSize * 0.82);
+      const innerR = float(halfSize * 0.77);
+      majorMask = float(1.0).sub(tslClamp(abs(r.sub(outerR)).div(fwR.mul(1.6)), 0.0, 1.0));
+      const innerRing = float(1.0).sub(tslClamp(abs(r.sub(innerR)).div(fwR.mul(1.1)), 0.0, 1.0));
+      const inside = float(1.0).sub(smoothstep(innerR.sub(fwR), innerR.add(fwR), r));
+      const axX = float(1.0).sub(tslClamp(abs(posXZ.x).div(max(fwidth(posXZ.x).mul(1.1), float(1e-4))), 0.0, 1.0));
+      const axZ = float(1.0).sub(tslClamp(abs(posXZ.y).div(max(fwidth(posXZ.y).mul(1.1), float(1e-4))), 0.0, 1.0));
+      minorMask = max(innerRing, max(axX, axZ).mul(inside));
     }
-  } else if (style === 'plinth') {
-    const r = half * 0.82;
-    ctx.beginPath();
-    ctx.arc(half, half, r, 0, Math.PI * 2);
-    ctx.strokeStyle = majorColor;
-    ctx.lineWidth = 2.4;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(half, half, r * 0.94, 0, Math.PI * 2);
-    ctx.strokeStyle = minorColor;
-    ctx.lineWidth = 1.1;
-    ctx.stroke();
-    // Subtle crosshairs
-    ctx.strokeStyle = minorColor;
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(half - r * 0.94, half);
-    ctx.lineTo(half + r * 0.94, half);
-    ctx.moveTo(half, half - r * 0.94);
-    ctx.lineTo(half, half + r * 0.94);
-    ctx.stroke();
-  } else {
-    // Crisp cartesian drafting grid with major/minor hierarchy
-    const step = S / Math.max(8, divisions);
-    for (let i = 0; i <= divisions; i += 1) {
-      const p = Math.round(i * step) + 0.5;
-      const isAxis = Math.abs(i - divisions * 0.5) < 0.01;
-      const isMajor = isAxis || i % 4 === 0;
-      ctx.strokeStyle = isMajor ? majorColor : minorColor;
-      ctx.lineWidth = isAxis ? 2.2 : isMajor ? 1.5 : 1.0;
-      ctx.beginPath();
-      ctx.moveTo(p, 0);
-      ctx.lineTo(p, S);
-      ctx.moveTo(0, p);
-      ctx.lineTo(S, p);
-      ctx.stroke();
-    }
+
+    const lineAlpha = max(minorMask.mul(0.72), majorMask.mul(0.96));
+    const mat = new THREE.MeshBasicNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+    });
+    mat.colorNode = mix(tslColor(minorCol), tslColor(majorCol), tslClamp(majorMask, 0.0, 1.0));
+    mat.opacityNode = lineAlpha.mul(fade).mul(float(theme.gridOpacity));
+    return mat;
   }
 
-  // Smooth radial edge fade so the grid never shows a harsh square boundary
-  ctx.globalCompositeOperation = 'destination-in';
-  const fade = ctx.createRadialGradient(half, half, S * 0.14, half, half, half * 0.98);
-  fade.addColorStop(0, 'rgba(255,255,255,1)');
-  fade.addColorStop(0.62, 'rgba(255,255,255,0.86)');
-  fade.addColorStop(0.86, 'rgba(255,255,255,0.28)');
-  fade.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = fade;
-  ctx.fillRect(0, 0, S, S);
-  ctx.globalCompositeOperation = 'source-over';
+  return new THREE.ShaderMaterial({
+    vertexShader: ANALYTICAL_GRID_VERTEX,
+    fragmentShader: ANALYTICAL_GRID_FRAGMENT,
+    uniforms: {
+      uMinorColor: { value: minorCol },
+      uMajorColor: { value: majorCol },
+      uOpacity: { value: theme.gridOpacity },
+      uHalfSize: { value: halfSize },
+      uCellSize: { value: cellSize },
+      uStyle: { value: styleIdx },
+    },
+    transparent: true,
+    depthWrite: false,
+    extensions: { derivatives: true },
+  });
+}
 
-  const tex = new THREE.CanvasTexture(canvas);
+function createGaussianContactBlobTexture(colorHex, size = 128) {
+  const n = Math.max(32, Math.min(256, Math.round(size)));
+  const data = new Uint8Array(n * n * 4);
+  const c = new THREE.Color(colorHex);
+  const cr = Math.round(c.r * 255);
+  const cg = Math.round(c.g * 255);
+  const cb = Math.round(c.b * 255);
+  const half = (n - 1) * 0.5;
+  for (let y = 0; y < n; y += 1) {
+    const dy = (y - half) / half;
+    for (let x = 0; x < n; x += 1) {
+      const dx = (x - half) / half;
+      const t = Math.min(1, Math.hypot(dx, dy));
+      // Backcountry-101 Gaussian grounding curve: exp(-t^2 * 4.5) * (1 - t)
+      const alpha = Math.max(0, Math.min(1, Math.exp(-t * t * 4.5) * (1 - t)));
+      const idx = (y * n + x) * 4;
+      data[idx] = cr;
+      data[idx + 1] = cg;
+      data[idx + 2] = cb;
+      data[idx + 3] = Math.round(alpha * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.anisotropy = 16;
   tex.needsUpdate = true;
   return tex;
 }
 
 function createContactShadowTexture(colorHex) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext?.('2d');
-  if (!ctx) return null;
-  const c = new THREE.Color(colorHex);
-  const r = Math.round(c.r * 255);
-  const g = Math.round(c.g * 255);
-  const b = Math.round(c.b * 255);
-  const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 124);
-  grad.addColorStop(0, `rgba(${r},${g},${b},0.92)`);
-  grad.addColorStop(0.45, `rgba(${r},${g},${b},0.48)`);
-  grad.addColorStop(0.78, `rgba(${r},${g},${b},0.12)`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 256, 256);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
+  return createGaussianContactBlobTexture(colorHex, 128);
+}
+
+function toneMappingName(tm) {
+  if (tm === THREE.NoToneMapping) return 'NoToneMapping';
+  if (tm === THREE.NeutralToneMapping) return 'NeutralToneMapping';
+  if (tm === THREE.ACESFilmicToneMapping) return 'ACESFilmicToneMapping';
+  if (tm === THREE.AgXToneMapping) return 'AgXToneMapping';
+  if (tm === THREE.LinearToneMapping) return 'LinearToneMapping';
+  if (tm === THREE.ReinhardToneMapping) return 'ReinhardToneMapping';
+  if (tm === THREE.CineonToneMapping) return 'CineonToneMapping';
+  return String(tm ?? 'unknown');
+}
+
+function shadowTypeName(st) {
+  if (st === THREE.PCFShadowMap) return 'PCFShadowMap';
+  if (st === THREE.VSMShadowMap) return 'VSMShadowMap';
+  if (st === THREE.BasicShadowMap) return 'BasicShadowMap';
+  if (st === THREE.PCFSoftShadowMap) return 'PCFSoftShadowMap';
+  return String(st ?? 'unknown');
 }
 
 function createCutawayHatchTexture({
@@ -368,6 +582,114 @@ function createCutawayHatchTexture({
   return tex;
 }
 
+const ANALYTICAL_CAP_VERTEX = /* glsl */ `
+  varying vec2 vPlaneXY;
+  void main() {
+    vPlaneXY = position.xy;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const ANALYTICAL_CAP_FRAGMENT = /* glsl */ `
+  #ifdef GL_OES_standard_derivatives
+    #extension GL_OES_standard_derivatives : enable
+  #endif
+  uniform vec3 uBaseColor;
+  uniform vec3 uHatchColor;
+  uniform vec2 uDir;
+  uniform float uSpacing;
+  uniform float uLinePx;
+  uniform float uHatchOpacity;
+  varying vec2 vPlaneXY;
+
+  void main() {
+    float coord = dot(vPlaneXY, uDir) / max(uSpacing, 1e-4);
+    float fw = max(fwidth(coord), 1e-4);
+    float dist = abs(fract(coord - 0.5) - 0.5) / fw;
+    float mask = 1.0 - clamp(dist / max(uLinePx, 0.5), 0.0, 1.0);
+    vec3 col = mix(uBaseColor, uHatchColor, mask * uHatchOpacity);
+    gl_FragColor = vec4(col, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+/**
+ * Build a resolution-independent world-space analytical `fwidth()` cross-hatch material
+ * for solid stencil cutaway caps (TSL on WebGPURenderer, GLSL ShaderMaterial on legacy WebGL).
+ */
+function createAnalyticalCutawayCapMaterial({
+  baseColor = '#eadec9',
+  hatchColor = '#1f160f',
+  spacing = 0.14,
+  angleDeg = 45,
+  linePx = 1.25,
+  hatchOpacity = 0.68,
+  useTSL = false,
+} = {}) {
+  const baseCol = new THREE.Color(baseColor);
+  const hatchCol = new THREE.Color(hatchColor);
+  const rad = ((Number(angleDeg) || 45) * Math.PI) / 180;
+  const cosA = Math.cos(rad);
+  const sinA = Math.sin(rad);
+  const worldSpacing =
+    spacing !== undefined && spacing !== null
+      ? Number(spacing) <= 2
+        ? Math.max(0.03, Number(spacing) || 0.14)
+        : Math.max(0.03, (Number(spacing) / 16) * 0.14)
+      : 0.14;
+
+  const stencilProps = {
+    side: THREE.DoubleSide,
+    stencilWrite: true,
+    stencilRef: 0,
+    stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.ReplaceStencilOp,
+    stencilZFail: THREE.ReplaceStencilOp,
+    stencilZPass: THREE.ReplaceStencilOp,
+  };
+
+  if (useTSL && THREE.TSL && (THREE.MeshStandardNodeMaterial || THREE.MeshBasicNodeMaterial)) {
+    const TSL = THREE.TSL;
+    const { positionLocal, float, color: tslColor, abs, fract, fwidth, max, clamp: tslClamp, mix } = TSL;
+    const coord = positionLocal.x
+      .mul(float(cosA))
+      .add(positionLocal.y.mul(float(sinA)))
+      .div(float(worldSpacing));
+    const fw = max(fwidth(coord), float(1e-4));
+    const dist = abs(fract(coord.sub(0.5)).sub(0.5)).div(fw);
+    const lineMask = float(1.0).sub(tslClamp(dist.div(float(linePx)), 0.0, 1.0));
+    const colorExpr = mix(tslColor(baseCol), tslColor(hatchCol), lineMask.mul(float(hatchOpacity)));
+
+    const mat = THREE.MeshStandardNodeMaterial
+      ? new THREE.MeshStandardNodeMaterial({
+          roughness: 0.72,
+          metalness: 0.08,
+          ...stencilProps,
+        })
+      : new THREE.MeshBasicNodeMaterial(stencilProps);
+    mat.colorNode = colorExpr;
+    mat.userData = { ...(mat.userData || {}), simulifyHatchMode: 'analytical', reflective: false };
+    return mat;
+  }
+
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: ANALYTICAL_CAP_VERTEX,
+    fragmentShader: ANALYTICAL_CAP_FRAGMENT,
+    uniforms: {
+      uBaseColor: { value: baseCol },
+      uHatchColor: { value: hatchCol },
+      uDir: { value: new THREE.Vector2(cosA, sinA) },
+      uSpacing: { value: worldSpacing },
+      uLinePx: { value: linePx },
+      uHatchOpacity: { value: hatchOpacity },
+    },
+    extensions: { derivatives: true },
+    ...stencilProps,
+  });
+  mat.userData = { ...(mat.userData || {}), simulifyHatchMode: 'analytical', reflective: false };
+  return mat;
+}
+
 /**
  * Simulify v2 3D/4D Stage supporting:
  * - Automatic 3-tier backend: Hardware WebGPU -> WebGL2 (TSL) -> Graceful Fallback
@@ -376,7 +698,7 @@ function createCutawayHatchTexture({
  * - Separated user/script camera ownership (`setCameraFromScript`, `isUserCameraLocked`, `unlockUserCamera`)
  * - On-demand dirty-flag rendering (`requestRender`) eliminating 60fps idle GPU spin
  * - Sharp texture helpers (`getMaxAnisotropy`, `configureSharpTexture`) & `getGeometryAudit()`
- * - Crisp TSL/GLSL ink outlines (`'crisp' | 'subtle' | 'none'`) with un-tone-mapped `SURFACE_LAYER`
+ * - Crisp TSL/GLSL ink outlines (`'primer' | 'crisp' | 'subtle' | 'none'`) with un-tone-mapped `SURFACE_LAYER`
  * - Native HTML-in-Canvas surface manager (`stage.htmlSurfaces`) with HiDPI fallback
  * - Deterministic manual/export contract (`setManualMode`, `renderNow`, `renderNowAsync`,
  *   `renderFrame`, `setCameraImmediate`, `setExportSize`, `restoreSize`)
@@ -395,6 +717,13 @@ export class IsometricStage {
   }
 
   constructor(canvas, options = {}) {
+    const requestedBackend = parseRequestedBackend(options.backend);
+    if (requestedBackend === 'legacy-webgl' && !THREE.WebGLRenderer) {
+      throw new Error('legacy-webgl requires mapping "three" to three.module.js. Use webgl2 with three.webgpu.js.');
+    }
+    if (requestedBackend === 'webgpu' && !THREE.WebGPURenderer) {
+      throw new Error('webgpu requires mapping "three" to three.webgpu.js.');
+    }
     this.canvas = canvas;
     this._options = options;
     this.reducedMotion =
@@ -405,9 +734,10 @@ export class IsometricStage {
     this.far = options.far ?? (this.cameraType === 'perspective' ? 260 : 240);
     this.baseSpan = options.baseSpan ?? 11.5;
     this.distance = options.distance ?? (this.cameraType === 'perspective' ? 16 : 90);
-    this.outlinePreset = resolveOutlinePreset(options.outline);
-    this.outlineEnabled = this.outlinePreset !== 'none';
     this.themeName = detectThemeName(options.theme);
+    this._outlineOption = options.outline;
+    this.outlinePreset = resolveOutlinePreset(this._outlineOption, this.themeName);
+    this.outlineEnabled = this.outlinePreset !== 'none';
 
     this.defaultView = {
       azimuth: options.azimuth ?? 36 * DEG,
@@ -467,11 +797,31 @@ export class IsometricStage {
     this._accentLights = new Set();
     this._contactShadows = new Set();
     this._cutawayCaps = new Set();
+    this._shellXRaySaved = new WeakMap();
+    this._shellXRayMats = new Set();
     this._syncedPeers = new Set();
     this._syncingCamera = false;
+    this._shadowTypeOption = options.shadowType;
+    this._autoUpdateShadows = options.autoUpdateShadows !== false;
+    this._autoFitShadowFrustum = options.autoFitShadowFrustum !== false;
+    this._autoPauseOffscreen = options.autoPauseOffscreen !== false;
+    this._pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    this._offscreen = false;
+    this._fallbackEl = null;
+    this._intersectionObserver = null;
+    this._onVisibilityChange = null;
+    this._shadowFrustumFitted = false;
+    this._envAppliedOnce = false;
+    this._envKind = 'none';
+    this._selectiveIBL = options.selectiveIBL !== undefined ? Boolean(options.selectiveIBL) : PRIMER_THEMES.has(this.themeName);
+    this.envMap = null;
+    this._keyLightOffset = new THREE.Vector3(-42, 86, 54);
 
     this._setupLights(options.shadowBounds ?? 16);
     this._setupGround(this._groundY, this._gridSize);
+
+    // Expose live telemetry getter on globalThis.__SIMULIFY_TELEMETRY__ for verify_stage.py look-dev audit
+    this._registerGlobalTelemetry();
 
     // Attach HtmlSurfaceManager early so callers can mount surfaces before or after stage.ready
     this.htmlSurfaces =
@@ -483,12 +833,12 @@ export class IsometricStage {
 
     this._bindEvents();
     this._initResizeObserver();
+    this._initVisibilityGuards();
 
     this.renderer = null;
     this._envRT = null;
     this.outline = null;
 
-    const requestedBackend = parseRequestedBackend(options.backend);
     const useWebGPURenderer = Boolean(THREE.WebGPURenderer) && requestedBackend !== 'legacy-webgl';
 
     if (useWebGPURenderer) {
@@ -504,6 +854,11 @@ export class IsometricStage {
     cam.layers.enable(GROUND_LAYER);
     cam.layers.enable(SURFACE_LAYER);
     cam.layers.enable(GLASS_LAYER);
+  }
+
+  _listen(target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    this._eventCleanups.push(() => target.removeEventListener(type, handler, options));
   }
 
   _initResizeObserver() {
@@ -541,6 +896,53 @@ export class IsometricStage {
       }
     }
     this._resizeObserver.observe(this.canvas);
+  }
+
+  _isPausedByVisibility() {
+    return Boolean(this._autoPauseOffscreen && !this._manualMode && (this._pageHidden || this._offscreen));
+  }
+
+  _syncVisibilityPlayback() {
+    if (this._disposed) return;
+    if (this._isPausedByVisibility()) {
+      if (this._raf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(this._raf);
+        this._raf = 0;
+      }
+      this._lastFrameTime = null;
+      return;
+    }
+    if (!this._manualMode && this._rendererReady && (this._dirty || this._needsContinuousLoop())) {
+      this._lastFrameTime = null;
+      this._scheduleTick();
+    }
+  }
+
+  _initVisibilityGuards() {
+    if (!this._autoPauseOffscreen) return;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this._onVisibilityChange = () => {
+        this._pageHidden = document.visibilityState === 'hidden';
+        this._syncVisibilityPlayback();
+      };
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
+    }
+    if (typeof IntersectionObserver === 'function' && this.canvas) {
+      try {
+        this._intersectionObserver = new IntersectionObserver(
+          (entries) => {
+            if (this._disposed || !entries || entries.length === 0) return;
+            const entry = entries[entries.length - 1];
+            this._offscreen = !entry.isIntersecting;
+            this._syncVisibilityPlayback();
+          },
+          { threshold: 0.01 }
+        );
+        this._intersectionObserver.observe(this.canvas);
+      } catch {
+        this._intersectionObserver = null;
+      }
+    }
   }
 
   _createCamera() {
@@ -581,6 +983,9 @@ export class IsometricStage {
         const isSoftwareFallback = Boolean(
           adapter && (adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter)
         );
+        if (!adapter && requestedBackend === 'webgpu') {
+          throw new Error('Requested WebGPU backend is unavailable');
+        }
         // Only engage WebGPU automatically on real hardware adapters (avoids headless
         // Dawn SwiftShader silent-blank regression unless explicitly forced via ?backend=webgpu)
         if (!adapter || (isSoftwareFallback && requestedBackend !== 'webgpu')) {
@@ -596,28 +1001,35 @@ export class IsometricStage {
           ? renderer.init()
           : withTimeout(renderer.init(), timeoutMs, 'WebGPURenderer.init'));
       } catch (initErr) {
-        try {
-          renderer.dispose?.();
-        } catch {}
-        if (forceWebGL || requestedBackend === 'webgpu') {
+        void disposeRenderer(renderer);
+        if (this._disposed || forceWebGL || requestedBackend === 'webgpu') {
           throw initErr;
         }
         // Auto-recover from stalled/broken WebGPU init in embedded WebViews by falling back to WebGL2
         forceWebGL = true;
         renderer = buildRenderer(true);
-        await renderer.init();
+        try {
+          await renderer.init();
+        } catch (fallbackError) {
+          void disposeRenderer(renderer);
+          throw fallbackError;
+        }
       }
 
       if (this._disposed) {
-        renderer.dispose();
+        void disposeRenderer(renderer);
         return this;
+      }
+      if (requestedBackend === 'webgpu' && !renderer.backend?.isWebGPUBackend) {
+        void disposeRenderer(renderer);
+        throw new Error('Requested WebGPU backend could not be initialized');
       }
 
       this.renderer = renderer;
       this.backendKind = renderer.backend?.isWebGPUBackend ? 'webgpu' : 'webgl2';
 
       if (renderer.backend?.device) {
-        renderer.backend.device.addEventListener('uncapturederror', (ev) => {
+        this._listen(renderer.backend.device, 'uncapturederror', (ev) => {
           const msg = ev?.error?.message || String(ev?.error || 'WebGPU uncaptured error');
           this.gpuErrors.push(msg);
         });
@@ -665,6 +1077,34 @@ export class IsometricStage {
     }
   }
 
+  _registerGlobalTelemetry() {
+    if (typeof globalThis === 'undefined') return;
+    try {
+      const stageRef = this;
+      const getter = function getSimulifyTelemetry() {
+        return stageRef.getTelemetry();
+      };
+      getter._simulifyStage = stageRef;
+      this._telemetryGetter = getter;
+      Object.defineProperty(globalThis, '__SIMULIFY_TELEMETRY__', {
+        configurable: true,
+        enumerable: true,
+        get: getter,
+      });
+    } catch {
+      // Ignore if environment freezes globalThis
+    }
+  }
+
+  _resolveDefaultToneMapping(themeName) {
+    if (this._options.toneMapping !== undefined) return this._options.toneMapping;
+    if (PRIMER_THEMES.has(themeName)) {
+      // Faithful warm paper & pigment hex without ACES/Neutral grey crush (Primer aesthetic tier)
+      return THREE.NoToneMapping;
+    }
+    return THREE.NeutralToneMapping !== undefined ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
+  }
+
   _configureRendererCommon(options) {
     const theme = STUDIO_THEMES[this.themeName] || STUDIO_THEMES['paper-ink'];
     const r = this.renderer;
@@ -673,28 +1113,168 @@ export class IsometricStage {
       r.setClearColor(0x000000, 0);
     }
     r.outputColorSpace = THREE.SRGBColorSpace;
-    // Khronos PBR Neutral preserves true warm-paper albedo & crisp contrast without ACES grey crush
-    r.toneMapping =
-      options.toneMapping ??
-      (THREE.NeutralToneMapping !== undefined ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping);
-    r.toneMappingExposure = options.toneMappingExposure ?? 1.0;
+    r.toneMapping = this._resolveDefaultToneMapping(this.themeName);
+    r.toneMappingExposure =
+      options.toneMappingExposure ?? (PRIMER_THEMES.has(this.themeName) ? 1.0 : 1.02);
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFShadowMap;
-    r.localClippingEnabled = Boolean(options.localClippingEnabled ?? true);
+    r.shadowMap.autoUpdate = this._autoUpdateShadows;
 
-    try {
-      const pmrem = new THREE.PMREMGenerator(r);
-      this._envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
-      this.scene.environment = this._envRT.texture;
-      this.scene.environmentIntensity = options.envIntensity ?? theme.envIntensity;
-      pmrem.dispose();
-    } catch {
-      this._envRT = null;
-    }
+    this._configureShadows();
+    r.localClippingEnabled = Boolean(options.localClippingEnabled ?? true);
+    this._bakeEnvironment();
+    this._syncSceneEnvironment(theme);
+
+    // Rebuild analytical grid now that we know whether WebGPURenderer (TSL) or legacy WebGL is active
+    this._rebuildGrid(this._groundY, this._gridSize, theme);
 
     if (this.outlineEnabled) {
       this.outline = this._createOutlinePass(theme, options);
     }
+  }
+
+  _configureShadows() {
+    const primer = PRIMER_THEMES.has(this.themeName);
+    const { shadowRadius, shadowBlurSamples } = this._options;
+    const shadowMap = this.renderer.shadowMap;
+    const type = this._shadowTypeOption ?? 'pcf';
+    const wantVsm = type === 'vsm' && THREE.VSMShadowMap !== undefined;
+    shadowMap.type = wantVsm ? THREE.VSMShadowMap : THREE.PCFShadowMap;
+    this._keyLight.shadow.radius = shadowRadius ?? (wantVsm ? (primer ? 10 : 8) : (primer ? 4.2 : 1.65));
+    if (wantVsm) this._keyLight.shadow.blurSamples = shadowBlurSamples ?? (primer ? 18 : 16);
+    if (!this._autoUpdateShadows) shadowMap.needsUpdate = true;
+  }
+
+  _bakeEnvironment() {
+    const pmremSigma = PRIMER_THEMES.has(this.themeName) ? 0.030 : 0.008;
+    let pmrem;
+    try {
+      pmrem = new THREE.PMREMGenerator(this.renderer);
+      for (const [Environment, sigma, kind] of [
+        [StudioLightformerEnvironment, pmremSigma, 'studio-lightformer'],
+        [RoomEnvironment, 0.02, 'room-fallback'],
+      ]) {
+        let environment;
+        try {
+          environment = new Environment();
+          const target = pmrem.fromScene(environment, sigma);
+          if (!target?.texture) continue;
+          this._envRT = target;
+          this._envKind = kind;
+          this._pmremSigma = sigma;
+          break;
+        } catch {
+          // Fall back to the room if the studio bake fails.
+        } finally {
+          environment?.dispose?.();
+        }
+      }
+    } catch {
+      // Environment lighting is optional when PMREM is unsupported.
+    } finally {
+      pmrem?.dispose();
+    }
+    this.envMap = this._envRT?.texture ?? null;
+  }
+
+  _syncSceneEnvironment(theme = STUDIO_THEMES[this.themeName] || STUDIO_THEMES['paper-ink']) {
+    const selective =
+      this._options.selectiveIBL !== undefined
+        ? Boolean(this._options.selectiveIBL)
+        : PRIMER_THEMES.has(this.themeName);
+    this._selectiveIBL = selective;
+    if (!this.envMap) {
+      this.scene.environment = null;
+      return;
+    }
+    if (selective) {
+      // Primer Illustrated Tier: keep global scene.environment null so matte dielectrics never get washed gray
+      this.scene.environment = null;
+      this.scene.environmentIntensity = 0;
+    } else {
+      // Studio PBR Tier: rich StudioLightformerEnvironment on scene.environment
+      this.scene.environment = this.envMap;
+      this.scene.environmentIntensity = this._options.envIntensity ?? theme.envIntensity;
+    }
+    this.applyEnvironment(this.scene);
+  }
+
+  /**
+   * Apply Three.js r187-safe Selective IBL across `root`:
+   * In Three.js r187 (both WebGPURenderer and WebGLRenderer), `material.envMapIntensity` is
+   * silently ignored unless `material.envMap` is explicitly assigned.
+   * - On Primer illustrated skins (`paper-ink`, `monochrome-print`): assigns `stage.envMap` ONLY
+   *   to reflective/metallic/glass/enamel materials (`userData.reflective === true`, high metalness,
+   *   or clearcoat/glass), keeping matte dielectrics crisp with `envMap = null`.
+   * - On Studio PBR skins: explicitly wires `material.envMap = stage.envMap` on materials carrying
+   *   custom `simulifyEnvIntensity` or `reflective === false` so per-material intensity overrides
+   *   are strictly honored in r187.
+   */
+  applyEnvironment(root = this.scene) {
+    if (!root || typeof root.traverse !== 'function') return 0;
+    const theme = STUDIO_THEMES[this.themeName] || STUDIO_THEMES['paper-ink'];
+    const envScale = this._options.envIntensity ?? theme.envIntensity;
+    let updated = 0;
+
+    root.traverse((obj) => {
+      if (!obj || !obj.isMesh || !obj.material || obj.userData?.simulifyInternal) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat || (!mat.isMeshStandardMaterial && !mat.isMeshPhysicalMaterial)) continue;
+        // Never overwrite user-supplied custom HDRI envMaps
+        if (mat.envMap && mat.envMap !== this.envMap && !mat.userData?.simulifyEnvManaged) continue;
+
+        const explicitRefl = mat.userData?.reflective;
+        const inferredRefl =
+          (mat.metalness ?? 0) >= 0.35 ||
+          (mat.clearcoat ?? 0) >= 0.35 ||
+          (mat.transmission ?? 0) > 0 ||
+          (Boolean(mat.transparent) && (mat.opacity ?? 1) < 0.85);
+        const isReflective = explicitRefl !== undefined ? Boolean(explicitRefl) : inferredRefl;
+
+        if (!this.envMap) {
+          if (mat.userData?.simulifyEnvManaged) {
+            mat.envMap = null;
+            mat.needsUpdate = true;
+          }
+          continue;
+        }
+
+        const desiredIntensity =
+          mat.userData?.simulifyEnvIntensity !== undefined
+            ? mat.userData.simulifyEnvIntensity
+            : isReflective
+              ? Math.max(0.85, mat.envMapIntensity ?? 1.05)
+              : Math.min(0.1, mat.envMapIntensity ?? 0.08);
+
+        if (this._selectiveIBL) {
+          if (isReflective) {
+            if (mat.envMap !== this.envMap) {
+              mat.envMap = this.envMap;
+              mat.needsUpdate = true;
+            }
+            mat.envMapIntensity = desiredIntensity * Math.max(0.75, Math.min(1.25, envScale));
+            mat.userData = { ...(mat.userData || {}), simulifyEnvManaged: true };
+            updated += 1;
+          } else if (mat.userData?.simulifyEnvManaged || mat.envMap === this.envMap) {
+            mat.envMap = null;
+            mat.needsUpdate = true;
+            updated += 1;
+          }
+        } else {
+          // Studio PBR tier: assign explicit envMap so r187 honors per-material envMapIntensity (matte vs metal!)
+          if (mat.envMap !== this.envMap) {
+            mat.envMap = this.envMap;
+            mat.needsUpdate = true;
+          }
+          mat.envMapIntensity = isReflective
+            ? desiredIntensity
+            : Math.min(0.18, desiredIntensity);
+          mat.userData = { ...(mat.userData || {}), simulifyEnvManaged: true };
+          updated += 1;
+        }
+      }
+    });
+    return updated;
   }
 
   _createOutlinePass(theme, options = this._options) {
@@ -750,10 +1330,11 @@ export class IsometricStage {
   }
 
   /**
-   * Switch outline quality preset at runtime: 'crisp' | 'subtle' | 'none'.
+   * Switch outline quality preset at runtime: 'primer' | 'crisp' | 'subtle' | 'none'.
    */
   setOutlinePreset(preset) {
-    const next = resolveOutlinePreset(preset);
+    this._outlineOption = preset;
+    const next = resolveOutlinePreset(preset, this.themeName);
     this.outlinePreset = next;
     this.outlineEnabled = next !== 'none';
     if (this.outlineEnabled && !this.outline && this.renderer) {
@@ -884,17 +1465,54 @@ export class IsometricStage {
   }
 
   _enterFallback(error) {
+    if (this._disposed) return;
     this.backendKind = 'fallback';
     this._rendererReady = false;
     const reason = error instanceof Error ? error.message : String(error || 'WebGPU/WebGL unavailable');
+    let prevented = false;
     if (this.canvas) {
       this.canvas.dataset.stageFallback = 'true';
-      this.canvas.dispatchEvent(
-        new CustomEvent('stage:fallback', {
+      if (typeof CustomEvent === 'function' && typeof this.canvas.dispatchEvent === 'function') {
+        const ev = new CustomEvent('stage:fallback', {
           bubbles: true,
+          cancelable: true,
           detail: { reason, error },
-        })
-      );
+        });
+        const dispatched = this.canvas.dispatchEvent(ev);
+        prevented = Boolean(ev.defaultPrevented) || dispatched === false;
+      }
+      if (!prevented && typeof document !== 'undefined' && this.canvas.parentElement) {
+        this._mountFallbackOverlay(reason);
+      }
+    }
+  }
+
+  _mountFallbackOverlay(reason) {
+    const parent = this.canvas?.parentElement;
+    if (!parent || typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+    if (!this._fallbackEl) {
+      const lang = String(document.documentElement?.lang || 'zh').toLowerCase();
+      const isEn = lang.startsWith('en');
+      const card = document.createElement('div');
+      card.className = 'stage-fallback-card';
+      card.setAttribute('role', 'status');
+      const title = document.createElement('strong');
+      title.textContent = isEn
+        ? '3D Hardware Acceleration Unavailable (WebGL / WebGPU)'
+        : '当前浏览器未启用 3D 硬件加速（WebGL / WebGPU 不可用）';
+      const body = document.createElement('p');
+      body.textContent = isEn
+        ? 'Enable graphics acceleration in browser settings and reload. Parameters, live equations, and charts remain interactive.'
+        : '请在浏览器设置中开启图形硬件加速后刷新；右侧参数、公式与图表仍可正常交互分析。';
+      const code = document.createElement('code');
+      code.className = 'stage-fallback-reason';
+      card.append(title, body, code);
+      card._reasonEl = code;
+      parent.append(card);
+      this._fallbackEl = card;
+    }
+    if (this._fallbackEl._reasonEl) {
+      this._fallbackEl._reasonEl.textContent = String(reason || '');
     }
   }
 
@@ -916,9 +1534,8 @@ export class IsometricStage {
     this._keyLight.shadow.camera.bottom = -shadowBounds;
     this._keyLight.shadow.camera.near = 10;
     this._keyLight.shadow.camera.far = 210;
-    this._keyLight.shadow.radius = 3.5;
-    this._keyLight.shadow.bias = -0.00035;
-    this._keyLight.shadow.normalBias = 0.025;
+    this._keyLight.shadow.bias = this._options.shadowBias ?? -0.00015;
+    this._keyLight.shadow.normalBias = this._options.shadowNormalBias ?? 0.02;
     this.scene.add(this._keyLight);
     this.scene.add(this._keyLight.target);
     this._shadowLight = this._keyLight;
@@ -987,45 +1604,295 @@ export class IsometricStage {
     }
     if (this._gridStyle === 'none') return;
 
-    const divisions = Math.max(8, Math.round(gridSize / 1.5));
-    const tex = createRadialGridTexture(this._gridStyle, theme, divisions);
-    if (tex) {
-      tex.anisotropy = this.getMaxAnisotropy();
-      this._gridTex = tex;
-      const geo = new THREE.PlaneGeometry(gridSize, gridSize);
-      geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshBasicMaterial({
-        map: tex,
-        transparent: true,
-        opacity: theme.gridOpacity,
-        depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.y = groundY - 0.008;
-      mesh.layers.set(GROUND_LAYER);
-      mesh.renderOrder = -2;
-      mesh.visible = this._showGrid;
-      mesh.userData.simulifyInternal = true;
-      this.scene.add(mesh);
-      this._grid = mesh;
-      return;
+    const useTSL = Boolean(
+      (this.renderer?.isWebGPURenderer || (!this.renderer && THREE.WebGPURenderer)) &&
+      THREE.MeshBasicNodeMaterial &&
+      THREE.TSL
+    );
+    const geo = new THREE.PlaneGeometry(gridSize, gridSize);
+    geo.rotateX(-Math.PI / 2);
+    const mat = createAnalyticalGridMaterial(this._gridStyle, theme, gridSize, useTSL);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = groundY - 0.008;
+    mesh.layers.set(GROUND_LAYER);
+    mesh.renderOrder = -2;
+    mesh.visible = this._showGrid;
+    mesh.userData.simulifyInternal = true;
+    this.scene.add(mesh);
+    this._grid = mesh;
+  }
+
+  /**
+   * Mark shadow map dirty (for `autoUpdateShadows: false` on-demand shadow rendering)
+   * and schedule a stage render.
+   */
+  markShadowsDirty() {
+    if (this.renderer?.shadowMap) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Compute a tight light-view-space orthographic shadow frustum wrapping visible shadow-casting
+   * meshes under `target`, with texel snapping to eliminate shadow edge shimmering.
+   *
+   * @param {THREE.Object3D} [target=this.scene]
+   * @param {number} [padding=1.12]
+   */
+  fitShadowFrustum(target = this.scene, padding = 1.12) {
+    if (!this._keyLight || !target) return null;
+    const pad = Math.max(1.0, Number(padding) || 1.12);
+    target.updateMatrixWorld(true);
+
+    const casters = [];
+    const fallbackMeshes = [];
+    const meshBox = new THREE.Box3();
+    const worldBox = new THREE.Box3();
+
+    target.traverseVisible((obj) => {
+      if (!obj || !obj.isMesh || !obj.geometry || obj.userData?.simulifyInternal) return;
+      if (obj.layers && !obj.layers.isEnabled(SOLID_LAYER)) return;
+      if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+      if (!obj.geometry.boundingBox || obj.geometry.boundingBox.isEmpty()) return;
+      if (obj.castShadow) casters.push(obj);
+      else fallbackMeshes.push(obj);
+    });
+
+    const list = casters.length > 0 ? casters : fallbackMeshes;
+    if (list.length === 0) return null;
+
+    for (const obj of list) {
+      meshBox.copy(obj.geometry.boundingBox).applyMatrix4(obj.matrixWorld);
+      if (Number.isFinite(meshBox.min.x) && Number.isFinite(meshBox.max.x)) {
+        worldBox.union(meshBox);
+      }
+    }
+    if (worldBox.isEmpty()) return null;
+
+    const worldCenter = new THREE.Vector3();
+    const worldSize = new THREE.Vector3();
+    worldBox.getCenter(worldCenter);
+    worldBox.getSize(worldSize);
+
+    // Keep key light direction & distance while re-centering onto the actual scene bounding center
+    this._keyLight.target.position.copy(worldCenter);
+    this._keyLight.position.copy(worldCenter).add(this._keyLightOffset);
+    this._keyLight.target.updateMatrixWorld(true);
+    this._keyLight.updateMatrixWorld(true);
+
+    const shadowCam = this._keyLight.shadow.camera;
+    shadowCam.position.copy(this._keyLight.position);
+    shadowCam.up.set(0, 1, 0);
+    shadowCam.lookAt(worldCenter);
+    shadowCam.updateMatrixWorld(true);
+    shadowCam.matrixWorldInverse.copy(shadowCam.matrixWorld).invert();
+
+    // Project all 8 corners of every shadow caster into light view space
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    const corner = new THREE.Vector3();
+
+    for (const obj of list) {
+      const bb = obj.geometry.boundingBox;
+      const xs = [bb.min.x, bb.max.x];
+      const ys = [bb.min.y, bb.max.y];
+      const zs = [bb.min.z, bb.max.z];
+      for (let ix = 0; ix < 2; ix += 1) {
+        for (let iy = 0; iy < 2; iy += 1) {
+          for (let iz = 0; iz < 2; iz += 1) {
+            corner.set(xs[ix], ys[iy], zs[iz]).applyMatrix4(obj.matrixWorld).applyMatrix4(shadowCam.matrixWorldInverse);
+            if (!Number.isFinite(corner.x) || !Number.isFinite(corner.y) || !Number.isFinite(corner.z)) continue;
+            if (corner.x < minX) minX = corner.x;
+            if (corner.x > maxX) maxX = corner.x;
+            if (corner.y < minY) minY = corner.y;
+            if (corner.y > maxY) maxY = corner.y;
+            if (corner.z < minZ) minZ = corner.z;
+            if (corner.z > maxZ) maxZ = corner.z;
+          }
+        }
+      }
     }
 
-    // Node / non-DOM fallback
-    const grid = new THREE.GridHelper(gridSize, divisions, theme.gridCenter, theme.gridLine);
-    grid.position.y = groundY - 0.008;
-    const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
-    for (const m of mats) {
-      m.transparent = true;
-      m.opacity = theme.gridOpacity;
-      m.depthWrite = false;
+    if (!Number.isFinite(minX)) return null;
+
+    // Pad tightly & make square aspect to match square 2048x2048 shadow map with texel snapping
+    const rawSpanX = Math.max(0.5, maxX - minX);
+    const rawSpanY = Math.max(0.5, maxY - minY);
+    const sceneSpan = Math.max(rawSpanX, rawSpanY);
+    const frustumSpan = Math.max(1.0, sceneSpan * pad);
+    const halfSpan = frustumSpan * 0.5;
+
+    const mapW = Math.max(256, this._keyLight.shadow.mapSize?.x || 2048);
+    const texelSize = frustumSpan / mapW;
+    const cx = Math.round(((minX + maxX) * 0.5) / texelSize) * texelSize;
+    const cy = Math.round(((minY + maxY) * 0.5) / texelSize) * texelSize;
+
+    const depthMargin = Math.max(4.0, frustumSpan * 0.6);
+    shadowCam.left = cx - halfSpan;
+    shadowCam.right = cx + halfSpan;
+    shadowCam.top = cy + halfSpan;
+    shadowCam.bottom = cy - halfSpan;
+    shadowCam.near = Math.max(0.5, -maxZ - depthMargin);
+    shadowCam.far = Math.max(shadowCam.near + 4.0, -minZ + depthMargin);
+    shadowCam.updateProjectionMatrix();
+
+    // Scale normalBias gently to scene scale to avoid acne on tiny or huge scenes
+    if (this._options.shadowNormalBias === undefined) {
+      this._keyLight.shadow.normalBias = clamp(frustumSpan * 0.0022, 0.008, 0.045);
     }
-    grid.layers.set(GROUND_LAYER);
-    grid.renderOrder = -2;
-    grid.visible = this._showGrid;
-    grid.userData.simulifyInternal = true;
-    this.scene.add(grid);
-    this._grid = grid;
+
+    this._shadowFrustumFitted = true;
+    this.markShadowsDirty();
+
+    return {
+      left: +shadowCam.left.toFixed(4),
+      right: +shadowCam.right.toFixed(4),
+      top: +shadowCam.top.toFixed(4),
+      bottom: +shadowCam.bottom.toFixed(4),
+      near: +shadowCam.near.toFixed(4),
+      far: +shadowCam.far.toFixed(4),
+      sceneSpan: +sceneSpan.toFixed(4),
+      frustumSpan: +frustumSpan.toFixed(4),
+      utilization: +(sceneSpan / Math.max(1e-6, frustumSpan)).toFixed(4),
+    };
+  }
+
+  /**
+   * Deterministic look-dev & rendering telemetry snapshot for `verify_stage.py` and `window.__SIMULIFY_TELEMETRY__`.
+   */
+  getTelemetry() {
+    const shadowCam = this._keyLight?.shadow?.camera;
+    const frustumW = shadowCam ? Math.abs(shadowCam.right - shadowCam.left) : 0;
+    const frustumH = shadowCam ? Math.abs(shadowCam.top - shadowCam.bottom) : 0;
+    const frustumSpan = Math.max(frustumW, frustumH, 1e-6);
+
+    const audit = this.getGeometryAudit();
+    const b = audit.bounds;
+    const sceneSpan = b ? Math.hypot(b.width, b.height, b.depth) * 0.72 : 0;
+    const utilization = b ? clamp(sceneSpan / frustumSpan, 0, 1) : 0;
+
+    let meshCount = 0;
+    let roughMin = Infinity;
+    let roughMax = -Infinity;
+    let roughSum = 0;
+    let roughCount = 0;
+    let plasticClusterCount = 0;
+    let metalMin = Infinity;
+    let metalMax = -Infinity;
+    let metalCount = 0;
+    let midMetalnessCount = 0;
+    let reflectiveCount = 0;
+    let matteCount = 0;
+    let maxTexAniso = 0;
+    let minTexAniso = Infinity;
+
+    const inspectTex = (tex) => {
+      if (!tex || typeof tex.anisotropy !== 'number') return;
+      if (tex.anisotropy > maxTexAniso) maxTexAniso = tex.anisotropy;
+      if (tex.anisotropy < minTexAniso) minTexAniso = tex.anisotropy;
+    };
+
+    this.scene.traverseVisible((obj) => {
+      if (!obj || !obj.isMesh || obj.userData?.simulifyInternal) return;
+      meshCount += 1;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        if (!m) continue;
+        inspectTex(m.map);
+        inspectTex(m.roughnessMap);
+        inspectTex(m.bumpMap);
+        inspectTex(m.normalMap);
+        if (typeof m.roughness === 'number') {
+          const r = m.roughness;
+          if (r < roughMin) roughMin = r;
+          if (r > roughMax) roughMax = r;
+          roughSum += r;
+          roughCount += 1;
+          const met = typeof m.metalness === 'number' ? m.metalness : 0;
+          if (r >= 0.2 && r <= 0.45 && met < 0.5) plasticClusterCount += 1;
+        }
+        if (typeof m.metalness === 'number') {
+          const met = m.metalness;
+          if (met < metalMin) metalMin = met;
+          if (met > metalMax) metalMax = met;
+          metalCount += 1;
+          if (met > 0.2 && met < 0.7) midMetalnessCount += 1;
+        }
+        const isRefl =
+          m.userData?.reflective !== undefined
+            ? Boolean(m.userData.reflective)
+            : Boolean((m.metalness ?? 0) >= 0.35 || (m.clearcoat ?? 0) >= 0.35);
+        if (isRefl) reflectiveCount += 1;
+        else matteCount += 1;
+      }
+    });
+
+    return {
+      version: '3.1',
+      theme: this.themeName,
+      aestheticTier: PRIMER_THEMES.has(this.themeName) ? 'primer-illustration' : 'studio-pbr',
+      backend: this.backendKind,
+      dpr: +this.size.dpr.toFixed(3),
+      physicalWidth: this.size.physicalWidth,
+      physicalHeight: this.size.physicalHeight,
+      toneMapping: toneMappingName(this.renderer?.toneMapping),
+      toneMappingExposure: +(this.renderer?.toneMappingExposure ?? 1.0),
+      outline: {
+        preset: this.outlinePreset,
+        enabled: Boolean(this.outlineEnabled),
+        inkColor: this.outline ? `#${this.outline.lineColor.getHexString()}` : null,
+      },
+      ibl: {
+        kind: this._envKind,
+        pmremSigma: this._pmremSigma ?? null,
+        selective: Boolean(this._selectiveIBL),
+        sceneEnvironmentAttached: Boolean(this.scene.environment),
+        environmentIntensity: +(this.scene.environmentIntensity ?? 0),
+      },
+      shadow: {
+        type: shadowTypeName(this.renderer?.shadowMap?.type),
+        radius: this._keyLight?.shadow?.radius ?? 0,
+        autoUpdate: Boolean(this.renderer?.shadowMap?.autoUpdate ?? this._autoUpdateShadows),
+        mapSize: [
+          this._keyLight?.shadow?.mapSize?.x ?? 2048,
+          this._keyLight?.shadow?.mapSize?.y ?? 2048,
+        ],
+        frustum: shadowCam
+          ? {
+              left: +shadowCam.left.toFixed(3),
+              right: +shadowCam.right.toFixed(3),
+              top: +shadowCam.top.toFixed(3),
+              bottom: +shadowCam.bottom.toFixed(3),
+              near: +shadowCam.near.toFixed(3),
+              far: +shadowCam.far.toFixed(3),
+            }
+          : null,
+        frustumSpan: +frustumSpan.toFixed(4),
+        sceneSpan: +sceneSpan.toFixed(4),
+        utilization: +utilization.toFixed(4),
+        fitted: Boolean(this._shadowFrustumFitted),
+      },
+      materials: {
+        meshCount,
+        roughnessMin: roughCount > 0 ? +roughMin.toFixed(3) : null,
+        roughnessMax: roughCount > 0 ? +roughMax.toFixed(3) : null,
+        roughnessSpread: roughCount > 0 ? +(roughMax - roughMin).toFixed(3) : 0,
+        roughnessMean: roughCount > 0 ? +(roughSum / roughCount).toFixed(3) : null,
+        plasticClusterRatio: roughCount > 0 ? +(plasticClusterCount / roughCount).toFixed(3) : 0,
+        metalnessMin: metalCount > 0 ? +metalMin.toFixed(3) : null,
+        metalnessMax: metalCount > 0 ? +metalMax.toFixed(3) : null,
+        midMetalnessCount,
+        reflectiveCount,
+        matteCount,
+        maxTextureAnisotropy: maxTexAniso,
+        minTextureAnisotropy: Number.isFinite(minTexAniso) ? minTexAniso : null,
+      },
+    };
   }
 
   /** Switch radial-fade stage ground grid style: `'cartesian' | 'polar' | 'plinth' | 'none'`. */
@@ -1042,6 +1909,7 @@ export class IsometricStage {
   /** Switch studio lighting, rim light, shadow tint, radial grid palette, and outline ink live. */
   setTheme(themeName) {
     const key = STUDIO_THEMES[themeName] ? themeName : 'paper-ink';
+    const tierChanged = PRIMER_THEMES.has(this.themeName) !== PRIMER_THEMES.has(key);
     this.themeName = key;
     const t = STUDIO_THEMES[key];
     this._hemiLight.color.setHex(t.hemiSky);
@@ -1057,14 +1925,54 @@ export class IsometricStage {
     }
     this._shadowMat.color.setHex(t.shadowColor);
     this._shadowMat.opacity = t.shadowOpacity;
-    if (this.scene.environment) {
-      this.scene.environmentIntensity = this._options.envIntensity ?? t.envIntensity;
+    if (this.renderer && this._options.toneMapping === undefined) {
+      this.renderer.toneMapping = this._resolveDefaultToneMapping(key);
+      this.renderer.toneMappingExposure =
+        this._options.toneMappingExposure ?? (PRIMER_THEMES.has(key) ? 1.0 : 1.02);
     }
+    const previousEnv = tierChanged && this.renderer ? this._envRT : null;
+    if (tierChanged) {
+      if (this.renderer) {
+        this._configureShadows();
+        this._bakeEnvironment();
+      }
+      if (this._outlineOption === undefined || this._outlineOption === 'auto') {
+        this.setOutlinePreset(this._outlineOption);
+      }
+    }
+    this._syncSceneEnvironment(t);
+    if (previousEnv !== this._envRT) previousEnv?.dispose();
     this._rebuildGrid(this._groundY, this._gridSize, t);
     if (this.outline && this._options.lineColor === undefined) {
       this.outline.setInkColor(t.inkColor, this._options.lineOpacity ?? t.inkOpacity);
     }
     this.requestRender();
+  }
+
+  /**
+   * Add a Backcountry-101 Gaussian grounding blob shadow (`exp(-t*t*4.5)*(1-t)`) on `GROUND_LAYER`.
+   * Accepts either `(radius, opacity, opts)` or an options object `{ radius, radiusX, radiusZ, opacity, position, color }`.
+   */
+  addContactBlobShadow(radiusOrOpts = 2.4, opacity = 0.28, opts = {}) {
+    if (radiusOrOpts && typeof radiusOrOpts === 'object') {
+      const rx = radiusOrOpts.radiusX ?? radiusOrOpts.radius ?? 2.4;
+      const rz = radiusOrOpts.radiusZ ?? radiusOrOpts.radius ?? rx;
+      return this.addContactShadow({
+        position: radiusOrOpts.position ?? [0, this._groundY, 0],
+        radiusX: rx,
+        radiusZ: rz,
+        opacity: radiusOrOpts.opacity ?? 0.28,
+        color: radiusOrOpts.color,
+      });
+    }
+    const r = Math.max(0.2, Number(radiusOrOpts) || 2.4);
+    return this.addContactShadow({
+      position: opts.position ?? [0, this._groundY, 0],
+      radiusX: opts.radiusX ?? r,
+      radiusZ: opts.radiusZ ?? r,
+      opacity: Number(opacity) || 0.28,
+      color: opts.color,
+    });
   }
 
   /**
@@ -1230,6 +2138,9 @@ export class IsometricStage {
    * Works on BOTH WebGPURenderer (via `THREE.ClippingGroup` + `stencilBuffer: true` on `OutlinePass` `colorPass`)
    * and legacy WebGLRenderer (via `material.clippingPlanes`), preventing hollow paper-shell slices and
    * rendering crisp 45° engineering cross-hatching on the cut face.
+   *
+   * - `onlyShells: true` clips ONLY subtrees tagged with `userData.shell === true`, leaving inner mechanisms intact.
+   * - `hatchMode: 'analytical' | 'texture'` (default `'analytical'`) selects resolution-independent `fwidth()` hatching.
    */
   createCutawayCap(target, plane, opts = {}) {
     if (!target || !plane) {
@@ -1238,25 +2149,51 @@ export class IsometricStage {
     const t = STUDIO_THEMES[this.themeName] || STUDIO_THEMES['paper-ink'];
     const capSize = Math.max(2, Number(opts.capSize) || 14);
     const baseOrder = Number(opts.renderOrder) || 10;
+    const onlyShells = Boolean(opts.onlyShells);
+    const hatchMode = opts.hatchMode === 'texture' ? 'texture' : 'analytical';
     const group = new THREE.Group();
     group.name = opts.name || 'simulify-cutaway-cap';
     group.userData.simulifyInternal = true;
 
+    const collectShellRoots = (rootObj) => {
+      const found = [];
+      const walk = (node) => {
+        if (!node || node.userData?.simulifyInternal) return;
+        if (node.userData?.shell === true) {
+          found.push(node);
+          return;
+        }
+        if (Array.isArray(node.children)) {
+          for (const ch of node.children) walk(ch);
+        }
+      };
+      walk(rootObj);
+      return found;
+    };
+
+    const clipTargets = onlyShells ? collectShellRoots(target) : [target];
+
     // On WebGPURenderer r187+, clipping is scoped by `THREE.ClippingGroup` (not `material.clippingPlanes`).
-    // Wrap `target` inside an identity-transform ClippingGroup at its current parent so local & world transforms stay identical.
-    let targetClipGroup = null;
+    // Wrap each clipped subtree inside an identity-transform ClippingGroup at its current parent so transforms stay identical.
+    const targetClipGroups = [];
+    const targetClipPairs = [];
     if (typeof THREE.ClippingGroup === 'function' && opts.attachClipping !== false) {
-      targetClipGroup = this.createClippingGroup([plane], {
-        clipShadows: true,
-        enabled: true,
-        name: `${group.name}-target-clip`,
+      clipTargets.forEach((subTarget, idx) => {
+        const cg = this.createClippingGroup([plane], {
+          clipShadows: true,
+          enabled: true,
+          name: `${group.name}-target-clip-${idx}`,
+        });
+        if (subTarget.parent) {
+          const origParent = subTarget.parent;
+          origParent.add(cg);
+          cg.add(subTarget);
+        }
+        targetClipGroups.push(cg);
+        targetClipPairs.push({ subTarget, cg });
       });
-      if (target.parent) {
-        const origParent = target.parent;
-        origParent.add(targetClipGroup);
-        targetClipGroup.add(target);
-      }
     }
+    const targetClipGroup = targetClipGroups[0] || null;
 
     const stencilGroup = this.createClippingGroup([plane], {
       clipShadows: false,
@@ -1297,66 +2234,91 @@ export class IsometricStage {
     stencilMats.push(backMat, frontMat);
 
     const attachedMats = [];
-    target.traverse((obj) => {
-      if (!obj || !obj.isMesh || !obj.geometry || obj.userData?.simulifyInternal) return;
-      if (opts.attachClipping !== false && obj.material) {
-        const list = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const m of list) {
-          if (!m) continue;
-          const prev = Array.isArray(m.clippingPlanes) ? m.clippingPlanes : [];
-          if (!prev.includes(plane)) {
-            m.clippingPlanes = [...prev, plane];
+    const seenMeshes = new Set();
+    for (const subTarget of clipTargets) {
+      subTarget.traverse((obj) => {
+        if (!obj || !obj.isMesh || !obj.geometry || obj.userData?.simulifyInternal || seenMeshes.has(obj)) return;
+        seenMeshes.add(obj);
+        if (opts.attachClipping !== false && obj.material) {
+          const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const m of list) {
+            if (!m) continue;
+            const prev = Array.isArray(m.clippingPlanes) ? m.clippingPlanes : [];
+            if (!prev.includes(plane)) {
+              m.clippingPlanes = [...prev, plane];
+            }
+            m.clipShadows = true;
+            attachedMats.push(m);
           }
-          m.clipShadows = true;
-          attachedMats.push(m);
         }
-      }
-      const mBack = new THREE.Mesh(obj.geometry, backMat);
-      mBack.renderOrder = baseOrder;
-      mBack.frustumCulled = false;
-      mBack.matrixAutoUpdate = false;
-      mBack.userData.simulifyInternal = true;
-      mBack.layers.set(GROUND_LAYER);
+        const mBack = new THREE.Mesh(obj.geometry, backMat);
+        mBack.renderOrder = baseOrder;
+        mBack.frustumCulled = false;
+        mBack.matrixAutoUpdate = false;
+        mBack.userData.simulifyInternal = true;
+        mBack.layers.set(GROUND_LAYER);
 
-      const mFront = new THREE.Mesh(obj.geometry, frontMat);
-      mFront.renderOrder = baseOrder;
-      mFront.frustumCulled = false;
-      mFront.matrixAutoUpdate = false;
-      mFront.userData.simulifyInternal = true;
-      mFront.layers.set(GROUND_LAYER);
+        const mFront = new THREE.Mesh(obj.geometry, frontMat);
+        mFront.renderOrder = baseOrder;
+        mFront.frustumCulled = false;
+        mFront.matrixAutoUpdate = false;
+        mFront.userData.simulifyInternal = true;
+        mFront.layers.set(GROUND_LAYER);
 
-      stencilGroup.add(mBack, mFront);
-      clonedPairs.push({ source: obj, back: mBack, front: mFront });
-    });
+        stencilGroup.add(mBack, mFront);
+        clonedPairs.push({ source: obj, back: mBack, front: mFront });
+      });
+    }
 
     const isDark =
       this.themeName === 'dark-studio' || this.themeName === 'blueprint' || this.themeName === 'obsidian-gallery';
-    const hatchTex = createCutawayHatchTexture({
-      baseColor: opts.baseColor ?? (isDark ? '#24344e' : '#eadec9'),
-      hatchColor: opts.hatchColor ?? t.inkColor,
-      spacing: opts.hatchSpacing ?? 16,
-      angleDeg: opts.hatchAngle ?? 45,
-    });
-    if (hatchTex) {
-      const rep = Math.max(2, capSize * 1.1);
-      hatchTex.repeat.set(rep, rep);
-      hatchTex.anisotropy = this.getMaxAnisotropy();
+    const baseCapColor = opts.baseColor ?? (isDark ? '#24344e' : '#eadec9');
+    const hatchCapColor = opts.hatchColor ?? t.inkColor;
+
+    let hatchTex = null;
+    let capMat;
+    if (hatchMode === 'analytical') {
+      const useTSL = Boolean(
+        (this.renderer?.isWebGPURenderer || (!this.renderer && THREE.WebGPURenderer)) &&
+          THREE.TSL &&
+          (THREE.MeshStandardNodeMaterial || THREE.MeshBasicNodeMaterial)
+      );
+      capMat = createAnalyticalCutawayCapMaterial({
+        baseColor: baseCapColor,
+        hatchColor: hatchCapColor,
+        spacing: opts.hatchSpacing,
+        angleDeg: opts.hatchAngle ?? 45,
+        useTSL,
+      });
+    } else {
+      hatchTex = createCutawayHatchTexture({
+        baseColor: baseCapColor,
+        hatchColor: hatchCapColor,
+        spacing: opts.hatchSpacing ?? 16,
+        angleDeg: opts.hatchAngle ?? 45,
+      });
+      if (hatchTex) {
+        const rep = Math.max(2, capSize * 1.1);
+        hatchTex.repeat.set(rep, rep);
+        hatchTex.anisotropy = this.getMaxAnisotropy();
+      }
+      capMat = new THREE.MeshStandardMaterial({
+        color: hatchTex ? 0xffffff : (opts.baseColor ?? 0xd9cbb4),
+        map: hatchTex || null,
+        roughness: 0.72,
+        metalness: 0.08,
+        side: THREE.DoubleSide,
+        stencilWrite: true,
+        stencilRef: 0,
+        stencilFunc: THREE.NotEqualStencilFunc,
+        stencilFail: THREE.ReplaceStencilOp,
+        stencilZFail: THREE.ReplaceStencilOp,
+        stencilZPass: THREE.ReplaceStencilOp,
+      });
+      capMat.userData = { ...(capMat.userData || {}), simulifyHatchMode: 'texture' };
     }
 
     const capGeo = new THREE.PlaneGeometry(capSize, capSize);
-    const capMat = new THREE.MeshStandardMaterial({
-      color: hatchTex ? 0xffffff : (opts.baseColor ?? 0xd9cbb4),
-      map: hatchTex || null,
-      roughness: 0.72,
-      metalness: 0.08,
-      side: THREE.DoubleSide,
-      stencilWrite: true,
-      stencilRef: 0,
-      stencilFunc: THREE.NotEqualStencilFunc,
-      stencilFail: THREE.ReplaceStencilOp,
-      stencilZFail: THREE.ReplaceStencilOp,
-      stencilZPass: THREE.ReplaceStencilOp,
-    });
 
     const capGroup = new THREE.Group();
     capGroup.name = `${group.name}-cap-plane`;
@@ -1377,11 +2339,13 @@ export class IsometricStage {
     const zAxis = new THREE.Vector3(0, 0, 1);
 
     const syncMatrices = () => {
-      // If target was added to scene AFTER createCutawayCap, wrap it now
-      if (targetClipGroup && !targetClipGroup.parent && target.parent && target.parent !== targetClipGroup) {
-        const origParent = target.parent;
-        origParent.add(targetClipGroup);
-        targetClipGroup.add(target);
+      // If any clipped target was added to scene AFTER createCutawayCap, wrap it now
+      for (const { subTarget, cg } of targetClipPairs) {
+        if (!cg.parent && subTarget.parent && subTarget.parent !== cg) {
+          const origParent = subTarget.parent;
+          origParent.add(cg);
+          cg.add(subTarget);
+        }
       }
       target.updateMatrixWorld(true);
       for (const pair of clonedPairs) {
@@ -1411,9 +2375,12 @@ export class IsometricStage {
     const handle = {
       group,
       targetClipGroup,
+      targetClipGroups,
       stencilGroup,
       plane,
       capMesh,
+      onlyShells,
+      hatchMode,
       sync,
       syncMatrices,
       setConstant: (c) => {
@@ -1423,7 +2390,9 @@ export class IsometricStage {
       setEnabled: (enabled) => {
         const on = Boolean(enabled);
         group.visible = on;
-        if (targetClipGroup && targetClipGroup.isClippingGroup) targetClipGroup.enabled = on;
+        for (const cg of targetClipGroups) {
+          if (cg && cg.isClippingGroup) cg.enabled = on;
+        }
         if (stencilGroup && stencilGroup.isClippingGroup) stencilGroup.enabled = on;
         for (const m of attachedMats) {
           m.clippingPlanes = on ? [plane] : [];
@@ -1432,11 +2401,11 @@ export class IsometricStage {
       },
       dispose: () => {
         group.removeFromParent();
-        if (targetClipGroup) {
-          if (targetClipGroup.parent && target.parent === targetClipGroup) {
-            targetClipGroup.parent.add(target);
+        for (const { subTarget, cg } of targetClipPairs) {
+          if (cg.parent && subTarget.parent === cg) {
+            cg.parent.add(subTarget);
           }
-          targetClipGroup.removeFromParent();
+          cg.removeFromParent();
         }
         capGeo.dispose();
         hatchTex?.dispose?.();
@@ -1455,11 +2424,83 @@ export class IsometricStage {
   }
 
   /**
+   * Toggle Fresnel X-Ray visibility strictly on meshes inside `userData.shell === true` subtrees,
+   * moving them to `GLASS_LAYER` so internal solid mechanisms retain crisp shadows and outlines.
+   * Restores original materials, layers, and `castShadow` flags losslessly when disabled.
+   *
+   * @param {THREE.Object3D} root
+   * @param {boolean} enabled
+   * @param {{ color?: string|number, rimColor?: string|number, opacity?: number, emissiveIntensity?: number, doubleSide?: boolean }} [opts]
+   * @returns {number} Count of shell meshes updated
+   */
+  setShellXRay(root, enabled, opts = {}) {
+    if (!root || typeof root.traverse !== 'function') return 0;
+    const on = Boolean(enabled);
+    const shellMeshes = [];
+    const walk = (node, insideShell) => {
+      if (!node || node.userData?.simulifyInternal) return;
+      const isShell = insideShell || node.userData?.shell === true;
+      if (isShell && node.isMesh) {
+        shellMeshes.push(node);
+      }
+      if (Array.isArray(node.children)) {
+        for (const ch of node.children) walk(ch, isShell);
+      }
+    };
+    walk(root, false);
+
+    if (shellMeshes.length === 0) return 0;
+
+    if (on) {
+      const xrayMat = createXRayMaterial(opts);
+      xrayMat.userData = { ...(xrayMat.userData || {}), simulifyShellXRay: true };
+      this._shellXRayMats.add(xrayMat);
+      for (const mesh of shellMeshes) {
+        if (!this._shellXRaySaved.has(mesh)) {
+          this._shellXRaySaved.set(mesh, {
+            material: mesh.material,
+            layerMask: mesh.layers.mask,
+            castShadow: mesh.castShadow,
+          });
+        }
+        mesh.material = xrayMat;
+        mesh.layers.set(GLASS_LAYER);
+        mesh.castShadow = false;
+      }
+    } else {
+      for (const mesh of shellMeshes) {
+        const saved = this._shellXRaySaved.get(mesh);
+        if (!saved) continue;
+        mesh.material = saved.material;
+        mesh.layers.mask = saved.layerMask;
+        mesh.castShadow = saved.castShadow;
+        this._shellXRaySaved.delete(mesh);
+      }
+      if (this._shellXRayMats.size > 0) {
+        const inUse = new Set();
+        this.scene.traverse((obj) => {
+          if (obj?.isMesh && obj.material && this._shellXRayMats.has(obj.material)) {
+            inUse.add(obj.material);
+          }
+        });
+        for (const mat of Array.from(this._shellXRayMats)) {
+          if (!inUse.has(mat)) {
+            mat.dispose?.();
+            this._shellXRayMats.delete(mat);
+          }
+        }
+      }
+    }
+    this.requestRender();
+    return shellMeshes.length;
+  }
+
+  /**
    * Synchronize camera orbit/zoom/pan lockstep with a peer IsometricStage (e.g. `ab-compare`).
    * Returns an unlink function.
    */
   syncCameraWith(otherStage) {
-    if (!otherStage || otherStage === this) return () => {};
+    if (this._disposed || !otherStage || otherStage === this || otherStage._disposed) return () => {};
     this._syncedPeers.add(otherStage);
     otherStage._syncedPeers?.add(this);
     return () => {
@@ -1470,7 +2511,7 @@ export class IsometricStage {
 
   /**
    * Render a crisp orthographic Front / Side / Top snapshot of the current scene into a target
-   * 2D `<canvas>` without creating a second WebGL/WebGPU context (powers `multi-view` strips).
+   * 2D `<canvas>` without creating a second WebGL/WebGPU context.
    */
   captureCardinalSnapshot(viewName, destCanvas, { zoom } = {}) {
     if (!destCanvas || !this._rendererReady || !this.renderer) return false;
@@ -1515,18 +2556,6 @@ export class IsometricStage {
       this._updateCamera();
       this.renderNow();
     }
-  }
-
-  /** Batch-update an array of `{ view: 'front'|'side'|'top', canvas: HTMLCanvasElement }` slots. */
-  updateMultiViewStrip(slots = []) {
-    if (!Array.isArray(slots) || !this._rendererReady) return 0;
-    let count = 0;
-    for (const slot of slots) {
-      if (slot?.view && slot?.canvas && this.captureCardinalSnapshot(slot.view, slot.canvas, slot)) {
-        count += 1;
-      }
-    }
-    return count;
   }
 
   /** Toggle camera orbit/pan/zoom input (e.g. while a 3D manipulator owns the drag). */
@@ -1601,10 +2630,12 @@ export class IsometricStage {
 
   _bindEvents() {
     const c = this.canvas;
+    this._eventCleanups = [];
+    const listen = (type, handler, options) => this._listen(c, type, handler, options);
     c.style.cursor = 'grab';
-    c.addEventListener('contextmenu', (e) => e.preventDefault());
+    listen('contextmenu', (e) => e.preventDefault());
 
-    c.addEventListener('pointerdown', (e) => {
+    listen('pointerdown', (e) => {
       if (!this._orbitEnabled) return;
       if (e.button !== 0 && e.button !== 2) return;
       this._fly = null;
@@ -1626,7 +2657,7 @@ export class IsometricStage {
       c.style.cursor = panMode ? 'move' : 'grabbing';
     });
 
-    c.addEventListener('pointermove', (e) => {
+    listen('pointermove', (e) => {
       if (this._drag && e.pointerId === this._drag.id) {
         const dx = e.clientX - this._drag.lastX;
         const dy = e.clientY - this._drag.lastY;
@@ -1646,8 +2677,8 @@ export class IsometricStage {
         } else {
           const span =
             this.cameraType === 'perspective'
-              ? 2 * (this.view.distance / this.view.zoom) * Math.tan((this.fov * DEG) / 2)
-              : this.baseSpan / this.view.zoom;
+              ? 2 * (this.view.distance / this.view.zoom) * Math.tan((this.camera.fov * DEG) / 2)
+              : this.camera.top - this.camera.bottom;
           const scale = span / Math.max(this.size.height, 240);
           const forward = new THREE.Vector3(-Math.sin(this.view.azimuth), 0, -Math.cos(this.view.azimuth));
           const right = new THREE.Vector3(Math.cos(this.view.azimuth), 0, -Math.sin(this.view.azimuth));
@@ -1683,13 +2714,13 @@ export class IsometricStage {
       this.requestRender();
     };
 
-    c.addEventListener('pointerup', endPointer);
-    c.addEventListener('pointercancel', endPointer);
-    c.addEventListener('pointerleave', () => {
+    listen('pointerup', endPointer);
+    listen('pointercancel', endPointer);
+    listen('pointerleave', () => {
       if (!this._drag) this._setHover(null, 0, 0);
     });
 
-    c.addEventListener(
+    listen(
       'wheel',
       (e) => {
         if (!this._orbitEnabled) return;
@@ -1795,6 +2826,7 @@ export class IsometricStage {
    * Respects locked export dimensions when `setExportSize(w, h, dpr)` is active.
    */
   resize(force = false) {
+    if (this._disposed) return;
     let width;
     let height;
     let dpr;
@@ -1860,6 +2892,7 @@ export class IsometricStage {
       this.outline.setSize(width, height, dpr, physicalWidth, physicalHeight);
     }
     this._updateCamera();
+    this._onViewChange?.(this.getCameraState());
     this.htmlSurfaces?.handleViewportResize?.();
     if (this.htmlSurfaces?.nativeEnabled) {
       this.htmlSurfaces.requestPaint();
@@ -1892,11 +2925,12 @@ export class IsometricStage {
 
   _updateCamera() {
     const aspect = this.size.width / Math.max(1, this.size.height);
+    const fitBoost = aspect < 1 ? 1.48 : 1;
     const { target, azimuth, elevation } = this.view;
     const cosEl = Math.cos(elevation);
 
     if (this.cameraType === 'perspective') {
-      this.camera.fov = this.fov;
+      this.camera.fov = this.fov * fitBoost;
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
       const dist = (this.view.distance || this.distance) / Math.max(0.2, this.view.zoom);
@@ -1906,7 +2940,6 @@ export class IsometricStage {
         target.z + dist * cosEl * Math.cos(azimuth)
       );
     } else {
-      const fitBoost = aspect < 1 ? 1.48 : 1.0;
       const halfH = (this.baseSpan * fitBoost) / (2 * this.view.zoom);
       const halfW = halfH * aspect;
 
@@ -2225,7 +3258,7 @@ export class IsometricStage {
 
   /**
    * Toggle manual deterministic rendering mode (stops/resumes internal rAF loop).
-   * Shared contract with SpacetimeClock and StageExporter / export_video.py.
+   * Shared contract with SpacetimeClock and deterministic capture hooks.
    */
   setManualMode(enabled) {
     const next = Boolean(enabled);
@@ -2242,12 +3275,25 @@ export class IsometricStage {
     }
   }
 
+  _prepareSceneBeforeRender() {
+    if (!this._envAppliedOnce && this.envMap) {
+      const applied = this.applyEnvironment(this.scene);
+      if (applied > 0 || this.scene.children.length > 8) {
+        this._envAppliedOnce = true;
+      }
+    }
+    if (this._autoFitShadowFrustum && !this._shadowFrustumFitted) {
+      this.fitShadowFrustum(this.scene, 1.15);
+    }
+  }
+
   /**
    * Synchronously render the current scene state and sync HTML surface geometries.
    * Safe to call inside deterministic `window.__simulify.seek(t)`.
    */
   renderNow() {
     if (this._disposed || !this._rendererReady || !this.renderer) return false;
+    this._prepareSceneBeforeRender();
     this.scene.updateMatrixWorld();
     if (this._cutawayCaps.size > 0) {
       for (const cap of this._cutawayCaps) {
@@ -2279,10 +3325,12 @@ export class IsometricStage {
       await this.ready;
     }
     if (this._disposed || !this._rendererReady || !this.renderer) return false;
+    this._prepareSceneBeforeRender();
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
     if (this.htmlSurfaces?.flushPaint) {
       await this.htmlSurfaces.flushPaint();
+      if (this._disposed) return false;
     }
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
@@ -2290,19 +3338,13 @@ export class IsometricStage {
       this.htmlSurfaces.updateGeometries(this.camera);
       if (this.htmlSurfaces.hasPendingVisible?.() && this.htmlSurfaces.flushPaint) {
         await this.htmlSurfaces.flushPaint();
+        if (this._disposed) return false;
       }
-      this.htmlSurfaces.syncPaint(null);
     }
-    if (this.outline && this.outlineEnabled) {
-      await this.outline.renderAsync(this.scene, this.camera);
-    } else {
-      if (this.renderer._initialized === false && typeof this.renderer.init === 'function') {
-        await this.renderer.init();
-      }
-      this.renderer.render(this.scene, this.camera);
+    if (this.renderer._initialized === false && typeof this.renderer.init === 'function') {
+      await this.renderer.init();
     }
-    this._dirty = false;
-    return true;
+    return this.renderNow();
   }
 
   /**
@@ -2349,13 +3391,13 @@ export class IsometricStage {
   }
 
   _scheduleTick() {
-    if (this._raf || this._disposed || this._manualMode) return;
+    if (this._raf || this._disposed || this._manualMode || this._isPausedByVisibility()) return;
     if (this._lastFrameTime === null) {
       this._lastFrameTime = performance.now();
     }
     this._raf = requestAnimationFrame((now) => {
       this._raf = 0;
-      if (this._disposed || this._manualMode) return;
+      if (this._disposed || this._manualMode || this._isPausedByVisibility()) return;
       if (this._dirty || this._needsContinuousLoop()) {
         this.renderFrame(now);
       }
@@ -2369,21 +3411,47 @@ export class IsometricStage {
   }
 
   dispose() {
+    if (this._disposed) return;
     this._disposed = true;
     this._rendererReady = false;
+    for (const cleanup of this._eventCleanups.splice(0)) cleanup();
+    if (this._drag && this.canvas.hasPointerCapture?.(this._drag.id)) {
+      this.canvas.releasePointerCapture(this._drag.id);
+    }
+    this._drag = null;
     if (this._raf) {
       cancelAnimationFrame(this._raf);
       this._raf = 0;
     }
+    if (this._onVisibilityChange && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange);
+      this._onVisibilityChange = null;
+    }
+    this._intersectionObserver?.disconnect?.();
+    this._intersectionObserver = null;
+    this._fallbackEl?.remove?.();
+    this._fallbackEl = null;
     for (const cap of Array.from(this._cutawayCaps)) cap.dispose();
+    for (const mat of Array.from(this._shellXRayMats)) mat.dispose?.();
+    this._shellXRayMats.clear();
     for (const cs of Array.from(this._contactShadows)) cs.dispose();
     for (const al of Array.from(this._accentLights)) al.dispose();
+    for (const peer of this._syncedPeers) peer._syncedPeers?.delete(this);
     this._syncedPeers.clear();
     this._gridTex?.dispose?.();
     this._resizeObserver?.disconnect();
     this.htmlSurfaces?.dispose();
     this.outline?.dispose();
     this._envRT?.dispose();
-    this.renderer?.dispose();
+    this.envMap = null;
+    if (typeof globalThis !== 'undefined' && this._telemetryGetter) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(globalThis, '__SIMULIFY_TELEMETRY__');
+        if (desc?.get === this._telemetryGetter) {
+          delete globalThis.__SIMULIFY_TELEMETRY__;
+        }
+      } catch {}
+    }
+    void disposeRenderer(this.renderer);
   }
 }

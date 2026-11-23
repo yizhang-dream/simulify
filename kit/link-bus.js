@@ -56,7 +56,7 @@ export class LinkBus {
    */
   focus(id, source = 'unknown') {
     if (!id) return false;
-    this.selectedId = id;
+    this.select(id, source);
     for (const fn of this._focusListeners) {
       fn(id, source, this.getState());
     }

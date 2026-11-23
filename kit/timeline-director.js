@@ -11,6 +11,12 @@
 
 export const easeLinear = (u) => u;
 
+export const VALID_PROFILES = Object.freeze([
+  'mechanical-3d',
+  'field-math',
+  'sandbox-direct',
+]);
+
 export const easeOutCubic = (u) => {
   const x = Math.max(0, Math.min(1, u));
   return 1 - Math.pow(1 - x, 3);
@@ -1144,7 +1150,7 @@ export function mountTimelineBar(
 
 /**
  * Parse URL deep-linking query parameters:
- * `?stage=&step=&t=&paused&end&thumb=1&export=stage|caption|hud&lang=&backend=`.
+ * `?stage=&step=&t=&paused&end&thumb=1&export=stage|caption|hud&lang=&backend=&skin=`.
  * @param {string} [search='']
  */
 export function parseUrlState(search = '') {
@@ -1178,6 +1184,7 @@ export function parseUrlState(search = '') {
     export: exportMode,
     backend: params.get('backend'),
     lang: params.get('lang'),
+    skin: params.get('skin'),
   };
 }
 
@@ -1251,13 +1258,19 @@ export function applyUrlState(controller, search = globalThis.location?.search |
 }
 
 /**
- * Expose the unified `window.__simulify` v2 contract (100% backward-compatible with v1 hooks)
- * for Tier 1 in-browser export, Tier 2 Playwright studio video export, and v2 4D verification.
+ * Expose deterministic playback and verification hooks on `globalThis.__simulify`.
+ * Accepts a configuration object or the legacy controller and options pair.
  *
  * @param {TimelineDirector | import('./spacetime.js').SpacetimeClock | PhaseScrubber | null} controller
  * @param {Record<string, any>} [extra]
  */
 export function exposeTestHooks(controller, extra = {}) {
+  const isOptions = arguments.length === 1 && controller && typeof controller === 'object'
+    && !isSpacetimeClock(controller) && !isTimelineDirector(controller) && !isPhaseScrubber(controller);
+  if (isOptions) {
+    extra = controller;
+    controller = extra.clock ?? extra.director ?? extra.scrubber ?? null;
+  }
   const isClock = isSpacetimeClock(controller);
   const isDirector = isTimelineDirector(controller);
   const isScrubber = isPhaseScrubber(controller);
@@ -1266,6 +1279,11 @@ export function exposeTestHooks(controller, extra = {}) {
   const resolveCallouts = () => extra.callouts || extra.scene?.callouts || null;
   const resolveSound = () => extra.sound || extra.scene?.sound || null;
   const choreographer = extra.choreographer || null;
+  const version = extra.version ?? (isOptions ? 3 : (isClock || choreographer) ? 2 : 1);
+  const declaredProfile = extra.profile ?? resolveStage()?.profile;
+  const profile = VALID_PROFILES.includes(declaredProfile) ? declaredProfile
+    : (version >= 2 || resolveStage() || declaredProfile === 'narrative-3d') ? 'mechanical-3d' : null;
+  const model = extra.model ?? null;
 
   const exportRestore = {
     active: false,
@@ -1329,16 +1347,19 @@ export function exposeTestHooks(controller, extra = {}) {
       snap = controller.scrub(t);
     }
 
+    const appliedTime = snap?.t ?? snap?.globalTime ?? t;
+    // A clock-bound model already received the state change through subscribe().
+    if (model && (!isClock || model.clock !== controller)) model.setTime(appliedTime);
     if (typeof extra.onSeek === 'function') {
-      extra.onSeek(t, snap);
+      extra.onSeek(appliedTime, snap);
     }
     if (hasExplicitSync) {
-      extra.syncAll(t);
+      extra.syncAll(appliedTime);
     }
 
     const evalCountAfter = choreographer ? (choreographer._evalCount ?? 0) : 0;
     if (choreographer && evalCountAfter === prevEvalCount) {
-      choreographer.evaluate(t, { apply: true, stage, forceCamera });
+      choreographer.evaluate(appliedTime, { apply: true, stage, forceCamera });
     }
 
     const callouts = resolveCallouts();
@@ -1434,14 +1455,12 @@ export function exposeTestHooks(controller, extra = {}) {
     const hasDoc = typeof document !== 'undefined';
     const rootEl = extra.rootEl || (hasDoc ? document.querySelector('.artboard-shell') || document.body : null);
     const stageCanvas = stage?.canvas || (hasDoc ? document.querySelector('#stage-canvas, canvas.stage-canvas, canvas') : null);
-    const stageSvg = hasDoc ? document.querySelector('.stage-2d-svg') : null;
     const overlayEls = hasDoc
       ? Array.from(document.querySelectorAll('#leader-svg, #tags-layer, #popups-layer, .hud-top-left, .top-ribbon, .hud-guide, .right-dock, .hud-bottom-left, .bottom-left-dock, .hud-bottom-center, .bottom-transport'))
       : [];
     return {
       rootEl,
       stageCanvas,
-      stageSvg,
       overlayEls,
       callouts,
       stage,
@@ -1583,9 +1602,9 @@ export function exposeTestHooks(controller, extra = {}) {
 
   const setParams = typeof extra.setParams === 'function'
     ? extra.setParams
-    : typeof extra.engine?.setParams === 'function'
+    : typeof (model ?? extra.engine)?.setParams === 'function'
       ? (patch) => {
-          const res = extra.engine.setParams(patch);
+          const res = (model ?? extra.engine).setParams(patch);
           extra.syncAll?.();
           resolveStage()?.renderNow?.();
           return res;
@@ -1600,7 +1619,12 @@ export function exposeTestHooks(controller, extra = {}) {
 
   globalThis.__simulify = {
     ...extra,
-    version: extra.version ?? ((isClock || choreographer) ? 2 : 1),
+    version,
+    stage: resolveStage(),
+    model,
+    ...(model && typeof extra.falsify !== 'function' ? { falsify: () => model.falsify() } : {}),
+    profile,
+    getProfile: () => profile,
     director: isDirector ? controller : (extra.director ?? null),
     clock: isClock ? controller : (extra.clock ?? null),
     scrubber: isScrubber ? controller : (extra.scrubber ?? null),

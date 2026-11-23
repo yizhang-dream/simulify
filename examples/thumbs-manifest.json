@@ -1,1 +1,23 @@
-[]
+[
+  {
+    "id": "open-differential",
+    "profile": "mechanical-3d",
+    "url": "examples/open-differential/index.html?stage=ice",
+    "out": "examples/thumbs/open-differential.png",
+    "selector": ".stage-viewport",
+    "width": 720,
+    "height": 450,
+    "t": 14,
+    "exportMode": "stage"
+  },
+  {
+    "id": "momentum-valley",
+    "profile": "field-math",
+    "url": "examples/momentum-valley/index.html?stage=descent",
+    "out": "examples/thumbs/momentum-valley.png",
+    "width": 720,
+    "height": 450,
+    "t": 5.2,
+    "exportMode": "stage"
+  }
+]

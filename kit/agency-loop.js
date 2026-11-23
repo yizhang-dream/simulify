@@ -8,11 +8,28 @@ export class AliveLoop {
     this.onTick = onTick;
     this.speed = speed;
     this.onStateChange = onStateChange;
-    this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.reducedMotion =
+      typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)').matches : false;
     this._running = false;
     this._userIntervened = false;
     this._raf = 0;
     this._last = 0;
+
+    this._onVisibilityChange = () => {
+      if (!this._running) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        if (this._raf && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(this._raf);
+        }
+        this._raf = 0;
+      } else if (!this._raf) {
+        this._last = performance.now();
+        this._scheduleFrame();
+      }
+    };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
+    }
 
     if (autoStart && !this.reducedMotion) {
       this.start();
@@ -31,27 +48,39 @@ export class AliveLoop {
     this.speed = Math.max(0.1, Number(speed) || 1);
   }
 
-  start() {
-    if (this._running) return;
-    this._running = true;
-    this._last = performance.now();
-    this._emitState();
+  _scheduleFrame() {
+    if (!this._running || this._raf || typeof requestAnimationFrame !== 'function') return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const loop = (now) => {
+      this._raf = 0;
       if (!this._running) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const dt = Math.min(0.05, Math.max(0, (now - this._last) / 1000));
       this._last = now;
       if (this.onTick) {
         this.onTick(dt * this.speed, now);
       }
-      this._raf = requestAnimationFrame(loop);
+      if (this._running) {
+        this._raf = requestAnimationFrame(loop);
+      }
     };
     this._raf = requestAnimationFrame(loop);
+  }
+
+  start() {
+    if (this._running) return;
+    this._running = true;
+    this._last = performance.now();
+    this._emitState();
+    this._scheduleFrame();
   }
 
   pause() {
     if (!this._running) return;
     this._running = false;
-    cancelAnimationFrame(this._raf);
+    if (this._raf && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._raf);
+    }
     this._raf = 0;
     this._emitState();
   }
@@ -79,6 +108,9 @@ export class AliveLoop {
 
   dispose() {
     this.pause();
+    if (this._onVisibilityChange && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    }
   }
 }
 

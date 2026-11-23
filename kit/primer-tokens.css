@@ -1,5 +1,4 @@
 @import "./fonts/fonts.css";
-@import "./katex/katex.min.css";
 
 :root {
   color-scheme: light;
@@ -245,26 +244,33 @@ button {
 .artboard-shell[data-layout="split-bench"] {
   display: grid;
   grid-template-columns: minmax(0, var(--split-stage, 62%)) minmax(310px, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     "ribbon ribbon"
-    "stage aside";
+    "stage aside"
+    "transport transport";
 }
 
 .artboard-shell[data-layout="split-bench"][data-split="left"] {
   grid-template-columns: minmax(310px, 1fr) minmax(0, var(--split-stage, 62%));
   grid-template-areas:
     "ribbon ribbon"
-    "aside stage";
+    "aside stage"
+    "transport transport";
 }
 
 .artboard-shell[data-layout="split-bench"][data-split="bottom"] {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, var(--split-stage, 62%)) minmax(200px, 1fr);
+  grid-template-rows: auto minmax(0, var(--split-stage, 62%)) minmax(200px, 1fr) auto;
   grid-template-areas:
     "ribbon"
     "stage"
-    "aside";
+    "aside"
+    "transport";
+}
+
+.artboard-shell[data-layout="split-bench"] > .bench-transport {
+  grid-area: transport;
 }
 
 .artboard-shell[data-layout="split-bench"] > .top-ribbon {
@@ -471,247 +477,7 @@ button {
 }
 
 /* ==========================================================================
-   4. Layout Archetype 4: Engineering Multi-View Blueprint (`data-layout="multi-view"`)
-      Primary 3D stage + synchronized Front / Side / Top / Cutaway orthographic strip
-   ========================================================================== */
-.artboard-shell[data-layout="multi-view"] {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 24vw);
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas:
-    "ribbon ribbon"
-    "stage views";
-}
-
-.artboard-shell[data-layout="multi-view"] > .top-ribbon {
-  position: relative;
-  inset: auto;
-  grid-area: ribbon;
-  border-radius: 0;
-  border-inline: 0;
-  border-top: 0;
-}
-
-.artboard-shell[data-layout="multi-view"] > .stage-fullbleed,
-.artboard-shell[data-layout="multi-view"] > .stage-pane {
-  position: relative;
-  inset: auto;
-  grid-area: stage;
-  min-width: 0;
-  min-height: 0;
-}
-
-.multiview-strip {
-  grid-area: views;
-  display: grid;
-  grid-auto-rows: minmax(0, 1fr);
-  gap: 8px;
-  padding: 10px;
-  border-inline-start: 1px solid var(--line);
-  background: var(--bg-deep);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.multiview-cell {
-  position: relative;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  overflow: hidden;
-  min-height: 110px;
-}
-
-.multiview-cell canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.multiview-label {
-  position: absolute;
-  top: 6px;
-  left: 8px;
-  z-index: 3;
-  padding: 1px 7px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: var(--card-solid);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--navy);
-  letter-spacing: 0.03em;
-}
-
-/* ==========================================================================
-   5. Layout Archetype 5: Editorial Scrollytelling (`data-layout="scrolly-stage"`)
-      Natural scrollable narrative column paired with sticky interactive 3D stage
-   ========================================================================== */
-.artboard-shell[data-layout="scrolly-stage"],
-.scrolly-shell {
-  position: relative;
-  inline-size: 100%;
-  block-size: auto;
-  min-block-size: 100dvh;
-  overflow: visible;
-  display: grid;
-  grid-template-columns: minmax(320px, 42%) minmax(0, 1fr);
-  align-items: start;
-  background-color: var(--bg);
-  background-image: var(--stage-backdrop-grad), var(--stage-dot-pattern);
-  background-size: 100% 100%, var(--stage-dot-size);
-}
-
-.artboard-shell[data-layout="scrolly-stage"][data-split="right"],
-.scrolly-shell[data-split="right"] {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
-}
-
-.scrolly-progress-rail {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  z-index: 40;
-  background: var(--line-soft);
-  pointer-events: none;
-}
-
-.scrolly-progress-fill {
-  height: 100%;
-  width: 100%;
-  background: var(--teal);
-  transform-origin: 0 50%;
-  transform: scaleX(var(--scroll-progress, 0));
-}
-
-@supports ((animation-timeline: scroll()) and (animation-range: 0% 100%)) {
-  @keyframes simulify-scroll-progress {
-    from { transform: scaleX(0); }
-    to { transform: scaleX(1); }
-  }
-  .scrolly-progress-fill {
-    animation: simulify-scroll-progress auto linear both;
-    animation-timeline: scroll(root block);
-    animation-range: 0% 100%;
-  }
-}
-
-.scrolly-prose {
-  position: relative;
-  z-index: 3;
-  padding: clamp(24px, 4vw, 48px) clamp(20px, 3.2vw, 44px) 42vh;
-  background: var(--card-solid);
-  border-inline-end: 1px solid var(--line);
-  min-width: 0;
-  container-type: inline-size;
-  container-name: prose;
-}
-
-.artboard-shell[data-layout="scrolly-stage"][data-split="right"] > .scrolly-prose,
-.scrolly-shell[data-split="right"] > .scrolly-prose {
-  order: 2;
-  border-inline-end: 0;
-  border-inline-start: 1px solid var(--line);
-}
-
-.scrolly-header {
-  max-width: 60ch;
-  padding-bottom: 24px;
-  margin-bottom: 28px;
-  border-bottom: 1px solid var(--line);
-}
-
-.scrolly-header h1 {
-  margin: 0 0 12px;
-  font-family: var(--font-display);
-  font-size: var(--fs-hero);
-  font-weight: 500;
-  line-height: 1.16;
-  letter-spacing: -0.022em;
-  text-wrap: balance;
-  color: var(--navy);
-}
-
-.scrolly-header p {
-  margin: 0;
-  font-family: var(--font-prose);
-  font-size: var(--fs-prose);
-  font-weight: 400;
-  line-height: 1.72;
-  letter-spacing: 0.004em;
-  text-wrap: pretty;
-  color: var(--muted);
-}
-
-.scrolly-step {
-  max-width: 60ch;
-  min-block-size: 56vh;
-  padding: 24px 0 40px;
-  border-top: 1px solid var(--line-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  opacity: 0.56;
-  transition: opacity 220ms ease;
-}
-
-.scrolly-step.is-active {
-  opacity: 1;
-}
-
-.scrolly-step .step-kicker {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--teal);
-}
-
-.scrolly-step h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--fs-act);
-  font-weight: 500;
-  line-height: 1.26;
-  letter-spacing: -0.015em;
-  text-wrap: balance;
-  color: var(--navy);
-}
-
-.scrolly-step p {
-  margin: 0;
-  font-family: var(--font-prose);
-  font-size: var(--fs-prose);
-  font-weight: 400;
-  line-height: 1.74;
-  letter-spacing: 0.004em;
-  text-wrap: pretty;
-  color: var(--ink);
-}
-
-.scrolly-viewport {
-  position: sticky;
-  top: 0;
-  height: 100dvh;
-  min-width: 0;
-  overflow: hidden;
-  z-index: 2;
-}
-
-.scrolly-viewport > .stage-fullbleed,
-.scrolly-viewport > .stage-pane {
-  position: absolute;
-  inset: 0;
-}
-
-/* ==========================================================================
-   6. Layout Mode 6: Zen / Immersion Deck (`data-zen="true"` on ANY shell)
+   Zen / Immersion Deck (`data-zen="true"` on ANY shell)
    ========================================================================== */
 .artboard-shell[data-zen="true"] {
   display: block !important;
@@ -721,8 +487,7 @@ button {
 }
 
 .artboard-shell[data-zen="true"] > .stage-fullbleed,
-.artboard-shell[data-zen="true"] > .stage-pane,
-.artboard-shell[data-zen="true"] > .scrolly-viewport {
+.artboard-shell[data-zen="true"] > .stage-pane {
   position: absolute !important;
   inset: 0 !important;
   height: 100% !important;
@@ -733,9 +498,7 @@ button {
 .artboard-shell[data-zen="true"] .right-dock,
 .artboard-shell[data-zen="true"] .split-aside,
 .artboard-shell[data-zen="true"] .hud-bottom-left,
-.artboard-shell[data-zen="true"] .bottom-left-dock,
-.artboard-shell[data-zen="true"] .multiview-strip,
-.artboard-shell[data-zen="true"] .scrolly-prose {
+.artboard-shell[data-zen="true"] .bottom-left-dock {
   display: none !important;
 }
 
@@ -1043,7 +806,6 @@ button {
 
 .stage-pane .view-cube-dock,
 .ab-viewport .view-cube-dock,
-.scrolly-stage .view-cube-dock,
 .mv-primary .view-cube-dock {
   top: 12px;
   right: 14px;
@@ -1310,6 +1072,126 @@ button {
 .callout-tag[data-style="editorial"][data-tone="danger"] {
   border-bottom-color: var(--danger);
   background: transparent;
+}
+
+/* Narrow-screen single-row callout chip bar (CalloutLayer compactMode: "bar") */
+.callout-compact-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-solid);
+  box-shadow: var(--shadow-sm);
+  pointer-events: auto;
+}
+
+.callout-compact-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 1px;
+}
+
+.callout-compact-chip {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--navy);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.callout-compact-chip[aria-pressed="true"] {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--accent-contrast);
+}
+
+.callout-compact-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.callout-compact-detail > strong {
+  font-weight: 700;
+  font-size: 11.5px;
+  flex: 0 0 auto;
+}
+
+.callout-compact-detail > span {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Graceful WebGL / WebGPU unavailable stage fallback overlay */
+.stage-fallback-card {
+  position: absolute;
+  inset: 16px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 24px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  background: var(--card-solid);
+  color: var(--navy);
+  box-shadow: var(--shadow-sm);
+}
+
+.stage-fallback-card > strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.stage-fallback-card > p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.stage-fallback-reason {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Floating 3D-to-2D WAAPI Popups */
@@ -2174,86 +2056,6 @@ input[type="range"] {
   color: var(--muted);
 }
 
-/* Track B 2D SVG Stage (Theme-aware) */
-.stage-2d-wrap {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-}
-
-.stage-2d-svg {
-  width: min(94%, 880px);
-  height: auto;
-}
-
-.stage-2d-packets {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.s2d-edge {
-  fill: none;
-  stroke: var(--line);
-  stroke-width: 2.2;
-}
-
-.s2d-edge[data-active="true"] {
-  stroke: var(--teal);
-  stroke-width: 2.8;
-}
-
-.s2d-node-rect {
-  fill: var(--card);
-  stroke: var(--navy);
-  stroke-width: 1.8;
-}
-
-.s2d-node[data-active="true"] .s2d-node-rect {
-  stroke: var(--teal);
-  fill: var(--teal-soft);
-}
-
-.s2d-node-title {
-  fill: var(--navy);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.s2d-node-sub {
-  fill: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-
-.s2d-packet-pill {
-  fill: var(--navy);
-  stroke: var(--accent-contrast);
-  stroke-width: 1.2;
-}
-
-.s2d-packet-pill[data-tone="teal"] {
-  fill: var(--teal);
-}
-
-.s2d-packet-pill[data-tone="amber"] {
-  fill: var(--amber);
-}
-
-.s2d-packet-pill[data-tone="danger"] {
-  fill: var(--danger);
-}
-
-.s2d-packet-text {
-  fill: var(--accent-contrast);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 700;
-}
-
 /* Motion opt-in */
 @media (prefers-reduced-motion: no-preference) {
   .lesson-pill,
@@ -2269,17 +2071,6 @@ input[type="range"] {
 
   .meter-fill {
     transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-}
-
-/* Mandatory reduced-motion safety for scroll-driven storytelling */
-@media (prefers-reduced-motion: reduce) {
-  .scrolly-progress-fill {
-    animation: none !important;
-  }
-  .scrolly-step {
-    opacity: 1 !important;
-    transition: none !important;
   }
 }
 
@@ -2302,10 +2093,7 @@ input[type="range"] {
 @media (max-width: 900px) {
   .artboard-shell,
   .artboard-shell[data-layout="split-bench"],
-  .artboard-shell[data-layout="ab-compare"],
-  .artboard-shell[data-layout="multi-view"],
-  .artboard-shell[data-layout="scrolly-stage"],
-  .scrolly-shell {
+  .artboard-shell[data-layout="ab-compare"] {
     block-size: auto;
     min-block-size: 100dvh;
     overflow-x: clip;
@@ -2351,37 +2139,6 @@ input[type="range"] {
 
   .stage-fullbleed,
   .stage-pane,
-  .scrolly-viewport {
-    position: relative;
-    inset: auto;
-    order: 2;
-    height: min(46dvh, 360px);
-    min-height: 280px;
-    width: 100%;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    background: rgba(255, 253, 248, 0.35);
-  }
-
-  .scrolly-viewport {
-    position: sticky;
-    top: 8px;
-    z-index: 10;
-  }
-
-  .scrolly-prose {
-    order: 3;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    padding: 16px;
-  }
-
-  .scrolly-step {
-    min-block-size: auto;
-    opacity: 1;
-  }
-
   .ab-stage-grid {
     grid-template-columns: 1fr;
     grid-template-rows: 260px 260px;
@@ -2394,14 +2151,6 @@ input[type="range"] {
     order: 2;
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
-  }
-
-  .multiview-strip {
-    order: 4;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-auto-rows: 100px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
   }
 
   .thumb-dock {
@@ -2541,8 +2290,7 @@ input[type="range"] {
   overflow-y: auto;
 }
 
-.artboard-shell[data-layout="split-bench"] .live-maths-body,
-.artboard-shell[data-layout="scrolly-stage"] .live-maths-body {
+.artboard-shell[data-layout="split-bench"] .live-maths-body {
   max-height: none;
   overflow-y: visible;
 }
@@ -3394,8 +3142,6 @@ html[data-thumb="1"] .bottom-left-dock,
 html[data-thumb="1"] .bottom-transport,
 html[data-thumb="1"] .view-cube-dock,
 html[data-thumb="1"] .scale-bar,
-html[data-thumb="1"] .scrolly-prose,
-html[data-thumb="1"] .scrolly-progress-rail,
 html[data-thumb="1"] .thumb-dock,
 html[data-thumb="1"] .tags-layer,
 html[data-thumb="1"] .leader-svg,

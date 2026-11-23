@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="paper-ink">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开放式差速器 · Simulify</title>
+  <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../kit/primer-tokens.css">
+  <link rel="stylesheet" href="../../kit/theme-studio.css">
+  <link rel="stylesheet" href="../../kit/katex/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">{
+  "imports": {
+    "simulify/": "../../kit/",
+    "three": "../shared/vendor/three/three.webgpu.js",
+    "three/webgpu": "../shared/vendor/three/three.webgpu.js",
+    "three/tsl": "../shared/vendor/three/three.tsl.js",
+    "three/addons/": "../shared/vendor/three/addons/"
+  }
+}</script>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <main class="artboard-shell" data-layout="split-bench">
+    <header class="top-ribbon">
+      <a class="gallery-link" href="../../index.html">← 实验台画廊</a>
+      <h1>开放式差速器</h1>
+      <p>为什么一侧车轮打滑，另一侧也推不动车？</p>
+    </header>
+    <section class="stage-pane" aria-label="差速器剖切演示">
+      <div class="stage-viewport">
+        <canvas id="stage-canvas" class="stage-canvas" aria-label="差速器总成。可拖动视角，剖开后可拖动绿色手柄。"></canvas>
+        <div id="views"></div>
+        <div class="stage-key" data-export-role="chrome"><span class="left">左轮</span><span class="right">右轮</span><span class="force">传动输入</span></div>
+      </div>
+      <div class="stage-notes">
+        <div class="act-copy"><h2 id="act-title">传动路径</h2><p id="act-cue">传动轴带动差速器，两根半轴把动力送到车轮。</p></div>
+        <div id="transport" class="bench-transport"></div>
+      </div>
+    </section>
+    <aside class="split-aside" aria-label="试验参数和测量">
+      <section aria-labelledby="conditions">
+        <div class="section-head"><h2 id="conditions">试验条件</h2><button type="button" id="story">回到演示</button></div>
+        <div class="presets" aria-label="预设路况">
+          <button type="button" data-preset="straight">直线干地</button>
+          <button type="button" data-preset="corner">弯道差速</button>
+          <button type="button" data-preset="ice">右轮上冰</button>
+        </div>
+        <div class="controls">
+          <label for="muLeft"><span class="left">左轮摩擦</span><output for="muLeft">0.85</output></label>
+          <input id="muLeft" type="range" min="0.05" max="0.95" step="0.01" value="0.85">
+          <label for="muRight"><span class="right">右轮摩擦</span><output for="muRight">0.85</output></label>
+          <input id="muRight" type="range" min="0.05" max="0.95" step="0.01" value="0.85">
+          <label for="steeringBias"><span>过弯偏置</span><output for="steeringBias">0.00</output></label>
+          <input id="steeringBias" type="range" min="-0.8" max="0.8" step="0.01" value="0">
+          <label for="cutaway"><span>剖切深度</span><output for="cutaway">0%</output></label>
+          <input id="cutaway" type="range" min="0" max="1" step="0.01" value="0">
+        </div>
+      </section>
+      <dl class="readings">
+        <div class="left"><dt>左轮 <small>rad/s</small></dt><dd id="left-speed">3.00</dd></div>
+        <div class="right"><dt>右轮 <small>rad/s</small></dt><dd id="right-speed">3.00</dd></div>
+        <div class="force"><dt>推进力 <small>kN</small></dt><dd id="drive-force">3.29</dd></div>
+      </dl>
+      <section id="maths" aria-label="差速器公式"></section>
+      <section class="chart-section" aria-label="摩擦系数扫描">
+        <div id="chart" class="chart-card"></div>
+        <div class="chart-actions"><button type="button" id="ghost">保存基准对照</button><output id="ghost-result" aria-live="polite"></output></div>
+        <p class="scale-note">转速以 6 rad/s 为 100%，推进力以干地值为 100%。虚线表示保存的基准对照。</p>
+      </section>
+    </aside>
+  </main>
+</body>
+</html>

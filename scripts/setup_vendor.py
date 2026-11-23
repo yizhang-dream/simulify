@@ -12,6 +12,7 @@ from urllib.parse import quote
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_FONTS_SRC = REPO_ROOT / "kit" / "fonts"
 KATEX_SRC = REPO_ROOT / "kit" / "katex"
+THREE_SRC = REPO_ROOT / "examples" / "shared" / "vendor" / "three"
 
 BASE_FILES = {
     "package/build/three.core.js": "three.core.js",
@@ -47,19 +48,33 @@ def vendor_three(
     *,
     include_legacy: bool = True,
     include_fx: bool = True,
+    from_npm: bool = False,
 ) -> Path:
-    """Pack official three@<version> from npm and extract offline WebGPU + TSL + addons ESM runtime."""
+    """Copy bundled Three.js, or extract the requested npm version if needed."""
     target_dir = target_dir.resolve()
     out_dir = target_dir / "vendor" / "three"
-    npm_exe = shutil.which("npm.cmd") or shutil.which("npm")
-    if not npm_exe:
-        raise RuntimeError("npm executable not found on PATH")
 
     files_to_extract = dict(BASE_FILES)
     if include_legacy:
         files_to_extract.update(LEGACY_FILES)
     if include_fx:
         files_to_extract.update(FX_FILES)
+
+    if THREE_SRC.is_dir() and not from_npm:
+        sources = [THREE_SRC / rel_dest for rel_dest in files_to_extract.values()]
+        for source in sources:
+            if not source.is_file():
+                raise RuntimeError(f"Bundled Three.js file missing: {source}; use --from-npm to rebuild")
+        if out_dir.resolve() != THREE_SRC.resolve():
+            for source in sources:
+                dest = out_dir / source.relative_to(THREE_SRC)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, dest)
+        return out_dir
+
+    npm_exe = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm_exe:
+        raise RuntimeError("npm executable not found on PATH")
 
     with tempfile.TemporaryDirectory(prefix="three-vendor-") as tmp:
         tmp_path = Path(tmp)
@@ -78,15 +93,14 @@ def vendor_three(
             raise RuntimeError("npm pack produced no tarball")
         tgz = tarballs[0]
 
-        if out_dir.exists():
-            shutil.rmtree(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(tgz, "r:gz") as tf:
             members = {m.name: m for m in tf.getmembers()}
-            for src_member, rel_dest in files_to_extract.items():
+            for src_member in files_to_extract:
                 if src_member not in members:
                     raise RuntimeError(f"Expected file missing from three@{version}: {src_member}")
+            for src_member, rel_dest in files_to_extract.items():
                 dest_path = out_dir / rel_dest
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 extracted = tf.extractfile(members[src_member])
@@ -184,18 +198,23 @@ def _find_system_font(candidates: list[str]) -> Path | None:
 
 def collect_project_cjk_chars(project_dir: Path) -> set[str]:
     """Scan a Simulify project directory for all CJK, punctuation, and math-arrow glyphs."""
+    root = Path(project_dir).resolve()
+    if not root.is_dir():
+        raise ValueError(f"CJK project directory does not exist or is not a directory: {root}")
     chars = set(CJK_BASE_PUNCT)
+    scanned = 0
     skip_dirs = {"vendor", "node_modules", ".git", "__pycache__", "dist", "build"}
     exts = {".html", ".js", ".mjs", ".css", ".json", ".md"}
-    for path in Path(project_dir).resolve().rglob("*"):
+    for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in exts:
             continue
-        if any(part in skip_dirs for part in path.parts):
+        if any(part in skip_dirs for part in path.relative_to(root).parts[:-1]):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
+        scanned += 1
         for ch in text:
             cp = ord(ch)
             if (
@@ -206,12 +225,14 @@ def collect_project_cjk_chars(project_dir: Path) -> set[str]:
                 or ch in "—…·“”‘’℃°±×÷≠≤≥≈→←↑↓↔⇒⇔⌘"
             ):
                 chars.add(ch)
+    if not scanned:
+        raise ValueError(f"No readable project text files found under {root}")
     chars.discard("\u3000")
     return chars
 
 
 def subset_cjk_for_project(
-    project_dir: Path,
+    chars: set[str],
     fonts_out_dir: Path,
     *,
     sans_src: Path | None = None,
@@ -228,9 +249,6 @@ def subset_cjk_for_project(
             "  uv run --with fonttools --with brotli python scripts/setup_vendor.py <target> --subset-cjk <project_dir>"
         ) from exc
 
-    chars = collect_project_cjk_chars(project_dir)
-    if not chars:
-        raise RuntimeError(f"No CJK characters discovered under {project_dir}")
     payload = "".join(sorted(chars))
 
     resolved_sans = sans_src or _find_system_font(["NotoSansSC-VF.ttf", "NotoSansCJKsc-Regular.otf"])
@@ -298,7 +316,8 @@ def main() -> None:
         ),
     )
     parser.add_argument("target", type=Path, help="Destination project directory (receives vendor/three/, kit/fonts/, and kit/katex/)")
-    parser.add_argument("--version", default="0.187.0", help="Official three npm version (default: 0.187.0)")
+    parser.add_argument("--version", default="0.187.0", help="Version to use when fetching from npm (default: 0.187.0)")
+    parser.add_argument("--from-npm", action="store_true", help="Fetch Three.js from npm instead of using the bundled copy")
     parser.add_argument("--no-legacy", action="store_true", help="Omit legacy three.module.js WebGL-only bundle")
     parser.add_argument("--no-fx", action="store_true", help="Omit TSL post-processing display nodes (Bloom/DoF)")
     parser.add_argument("--no-fonts", action="store_true", help="Skip syncing offline kit/fonts/ WOFF2 assets")
@@ -324,20 +343,30 @@ def main() -> None:
     parser.add_argument("--cjk-serif-src", type=Path, default=None, help="Explicit NotoSerifSC-VF.ttf path for --subset-cjk")
     args = parser.parse_args()
 
+    if args.subset_cjk is not None:
+        if args.no_fonts:
+            parser.error("--subset-cjk requires fonts to be enabled")
+        try:
+            cjk_chars = collect_project_cjk_chars(args.subset_cjk)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     if not args.fonts_only:
         out_dir = vendor_three(
             args.target,
             args.version,
             include_legacy=not args.no_legacy,
             include_fx=not args.no_fx,
+            from_npm=args.from_npm,
         )
-        _report_dir(f"three@{args.version}", out_dir)
+        label = "bundled Three.js" if THREE_SRC.is_dir() and not args.from_npm else f"three@{args.version}"
+        _report_dir(label, out_dir)
 
     if not args.no_fonts:
         fonts_dest = sync_fonts(args.target, fonts_subdir=args.fonts_dir)
         if args.subset_cjk is not None:
             rebuilt = subset_cjk_for_project(
-                args.subset_cjk,
+                cjk_chars,
                 fonts_dest,
                 sans_src=args.cjk_sans_src,
                 serif_src=args.cjk_serif_src,

@@ -1,0 +1,151 @@
+:root {
+  --split-stage: 66%;
+  --left-ink: #0072b2;
+  --right-ink: #ad4200;
+  --torque-ink: #007759;
+}
+
+html[data-theme="dark-studio"],
+html[data-theme="obsidian-gallery"],
+html[data-theme="blueprint"] {
+  --left-ink: #62c5ff;
+  --right-ink: #ff9a5c;
+  --torque-ink: #3ad1a3;
+}
+
+body { margin: 0; }
+
+.artboard-shell > .top-ribbon {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.4rem;
+  justify-content: flex-start;
+  padding: 1.02rem 1.65rem 0.95rem;
+  background: var(--card-solid);
+}
+
+h1, h2, p, dl, dd { margin: 0; }
+h1 {
+  font: 600 clamp(1.65rem, 3vw, 2.45rem)/1.2 var(--font-serif);
+  letter-spacing: 0.025em;
+}
+.top-ribbon p { color: var(--muted); font-size: 0.92rem; }
+.gallery-link { color: var(--muted); font-size: 0.8rem; text-underline-offset: 3px; white-space: nowrap; }
+.gallery-link:hover { color: var(--navy); }
+
+.artboard-shell > .stage-pane {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.stage-viewport { position: relative; min-width: 0; min-height: 0; }
+.stage-canvas { position: absolute; inset: 0; }
+.stage-key {
+  position: absolute;
+  inset: 1.1rem auto auto 1.3rem;
+  display: flex;
+  gap: 1rem;
+  pointer-events: none;
+  font-size: 0.79rem;
+}
+.stage-key span::before {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-inline-end: 0.35em;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 0.1em;
+}
+.left { color: var(--left-ink); }
+.right { color: var(--right-ink); }
+.force { color: var(--torque-ink); }
+.stage-pane .view-cube-dock {
+  inset: 0.9rem 1rem auto auto;
+  width: auto;
+}
+.stage-notes {
+  z-index: 1;
+  border-top: 1px solid var(--line);
+  background: var(--card-solid);
+  padding: 0.8rem 1.25rem 0.7rem;
+}
+.act-copy { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0.7rem; }
+.act-copy h2 { font: 600 1.07rem/1.3 var(--font-serif); }
+.act-copy p { color: var(--muted); font-size: 0.87rem; min-height: 1.5em; }
+.bench-transport { padding: 0.5rem 0 0; }
+.bench-transport .timeline-dock { width: 100%; }
+
+.artboard-shell[data-layout="split-bench"] > .split-aside { gap: 0.75rem; padding: 0.9rem 1.1rem; }
+.split-aside > * { flex: none; min-width: 0; }
+.section-head, .chart-actions { display: flex; align-items: baseline; justify-content: space-between; gap: 0.4rem; }
+.section-head h2 { font: 600 1.13rem/1.3 var(--font-serif); }
+.split-aside button:not(.chart-fold) {
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.38rem;
+  padding: 0.35rem 0.52rem;
+  cursor: pointer;
+}
+.split-aside button:hover { background: var(--bg); }
+.split-aside button:focus-visible, input:focus-visible { outline: 2px solid var(--left-ink); outline-offset: 2px; }
+.presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.38rem; margin-block: 0.55rem 0.65rem; }
+.controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.28rem 0.85rem;
+  font-size: 0.82rem;
+}
+.controls label { display: flex; justify-content: space-between; gap: 0.35rem; }
+.controls output { font: 500 0.77rem/1.4 var(--font-mono); }
+.controls input {
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--torque-ink);
+}
+#muLeft { accent-color: var(--left-ink); }
+#muRight { accent-color: var(--right-ink); }
+
+.readings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--line);
+  padding-block: 0.56rem;
+  gap: 0.4rem;
+}
+.readings dt { font-size: 0.83rem; color: var(--ink); }
+.readings small { font: 400 0.84rem/1 var(--font-mono); color: var(--muted); }
+.readings dd { font: 500 1.43rem/1.22 var(--font-mono); }
+
+#maths .live-maths-summary { padding: 0.48rem 0.65rem; }
+#maths .live-maths-body { padding: 0.15rem 0.65rem 0.5rem; }
+#maths .eq-list { gap: 0.35rem; }
+#maths .eq-block { padding: 0.24rem 0.42rem; }
+#maths .eq-line { min-height: 0; font-size: 15.5px; }
+#maths .katex-display { margin: 0.15rem 0; }
+/* The zero-width KaTeX table strut reserves space and carries no visible glyph. */
+#maths .katex .vlist-s { visibility: hidden; }
+.chart-section .chart-card { margin: 0; }
+.chart-section svg { display: block; max-height: 10.25rem; }
+.chart-actions { margin-block: 0.35rem 0.26rem; }
+.chart-actions output, .scale-note { color: var(--muted); font-size: 0.75rem; line-height: 1.45; }
+
+@media (max-width: 900px) {
+  .artboard-shell > .top-ribbon { padding: 0.55rem 0.45rem 0.7rem; }
+  .artboard-shell > .stage-pane {
+    grid-template-rows: clamp(255px, 40vw, 450px) auto;
+    border: 1px solid var(--line);
+    border-radius: 0.65rem;
+  }
+  .stage-key { inset: auto auto 0.65rem 0.65rem; gap: 0.8rem; }
+  .stage-pane .view-cube-dock { position: absolute; inset: 0.6rem 0.6rem auto auto; }
+  .stage-notes { padding: 0.65rem; }
+  .act-copy { grid-template-columns: auto; gap: 0.2rem; }
+  .timeline-dock { flex-wrap: wrap; min-width: 0; }
+}

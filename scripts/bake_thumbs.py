@@ -17,7 +17,7 @@ import json
 import pathlib
 import sys
 import threading
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -43,6 +43,13 @@ def start_server(root_dir: pathlib.Path):
 def build_browser_args(backend: str = 'auto'):
     common = ['--enable-blink-features=CanvasDrawElement']
     if backend == 'webgpu':
+        if sys.platform in ('win32', 'darwin'):
+            # Windows (D3D12 ANGLE) and macOS (Metal) expose hardware WebGPU natively;
+            # forcing Linux Vulkan flags on Windows breaks hardware WebGPU and falls back to WebGL2.
+            return common + [
+                '--enable-unsafe-webgpu',
+                '--ignore-gpu-blocklist',
+            ]
         return common + [
             '--use-gl=angle',
             '--use-angle=vulkan',
@@ -97,11 +104,13 @@ def main():
     parser.add_argument('--manifest', required=True, help='JSON list of { id, url, out, width?, height?, waitMs?, t?, exportMode? }')
     parser.add_argument('--channel', choices=['auto', 'chrome', 'chromium'], default='auto')
     parser.add_argument('--backend', choices=['auto', 'webgl2', 'webgpu'], default='auto')
+    parser.add_argument('--dpr', type=float, default=2.0, help='Device scale factor for baked thumbnails (default: 2.0)')
     args = parser.parse_args()
+    dpr = max(1.0, min(3.0, float(args.dpr)))
 
     root_dir = pathlib.Path(args.root).resolve()
     manifest_path = pathlib.Path(args.manifest).resolve()
-    items = json.loads(manifest_path.read_text(encoding='utf-8'))
+    items = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
 
     try:
         from playwright.sync_api import sync_playwright
@@ -119,41 +128,59 @@ def main():
                 w = int(item.get('width', 640))
                 h = int(item.get('height', 400))
                 wait_ms = int(item.get('waitMs', 300))
-                rel_url = item['url']
-                sep = '&' if '?' in rel_url else '?'
+                entry = urlsplit(item['url'])
+                query = parse_qsl(entry.query, keep_blank_values=True)
+                keys = {key for key, _ in query}
                 export_mode = item.get('exportMode')
                 if export_mode:
-                    if 'export=' not in rel_url:
-                        rel_url = f'{rel_url}{sep}export={export_mode}'
-                elif 'thumb=' not in rel_url and 'export=' not in rel_url:
-                    rel_url = f'{rel_url}{sep}thumb=1'
+                    if 'export' not in keys:
+                        query.append(('export', export_mode))
+                elif not {'thumb', 'export'} & keys:
+                    query.append(('thumb', '1'))
+                if args.backend != 'auto':
+                    query = [(key, value) for key, value in query if key != 'backend']
+                    query.append(('backend', args.backend))
+                rel_url = entry._replace(query=urlencode(query)).geturl()
 
                 out_file = (root_dir / item['out']).resolve()
                 out_file.parent.mkdir(parents=True, exist_ok=True)
 
-                ctx = browser.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2)
+                ctx = browser.new_context(viewport={'width': w, 'height': h}, device_scale_factor=dpr)
                 page = ctx.new_page()
-                page.goto(urljoin(base_url, rel_url.lstrip('/')), wait_until='domcontentloaded', timeout=25000)
-                try:
-                    page.wait_for_function('window.__ready === true', timeout=12000)
-                except Exception:
-                    page.wait_for_timeout(1200)
+                response = page.goto(urljoin(base_url, rel_url.lstrip('/')), wait_until='domcontentloaded', timeout=25000)
+                if response is None or not response.ok:
+                    raise RuntimeError(f'Unable to open thumbnail entry: {rel_url}')
+                page.wait_for_function('window.__ready === true', timeout=15000)
 
-                if item.get('t') is not None:
+                # Apply the mode through the shared hook for entries that do not parse export URLs.
+                if export_mode:
                     page.evaluate(
-                        """async (t) => {
-                          if (typeof window.__simulify?.seek === 'function') {
-                            await window.__simulify.seek(t);
-                            await new Promise((r) => requestAnimationFrame(() => r()));
-                          }
-                        }""",
-                        float(item['t']),
+                        "(mode) => window.__simulify?.enterExportMode?.({ hud: mode, muteAudio: true })",
+                        export_mode,
                     )
 
+                if item.get('t') is not None:
+                    page.evaluate('async (t) => { await window.__simulify?.seek?.(t); }', float(item['t']))
+                page.evaluate('() => document.fonts ? document.fonts.ready : null')
                 page.wait_for_timeout(wait_ms)
-                page.screenshot(path=str(out_file))
+                rendered = page.evaluate(
+                    """async () => {
+                      const wb = window.__simulify || {};
+                      const stage = wb.stage?.stage || wb.stage || wb.scene?.stage;
+                      const ok = stage?.renderNowAsync ? await stage.renderNowAsync() : stage?.renderNow?.();
+                      return {
+                        ok: ok === true && stage?.backendKind !== 'fallback'
+                          && !document.querySelector('[data-stage-fallback="true"]'),
+                        backend: stage?.backendKind ?? 'unknown',
+                      };
+                    }"""
+                )
+                if not rendered['ok'] or (args.backend != 'auto' and rendered['backend'] != args.backend):
+                    raise RuntimeError(f'Thumbnail render failed for {item["id"]}: active backend {rendered["backend"]}, requested {args.backend}')
+                target = page.locator(item['selector']) if item.get('selector') else page
+                target.screenshot(path=str(out_file), animations='disabled')
                 ctx.close()
-                print(f'[OK] Baked {item["id"]} -> {out_file} ({w}x{h} @2x)')
+                print(f'[OK] Baked {item["id"]} -> {out_file} (viewport {w}x{h} @{dpr:g}x)')
             browser.close()
     finally:
         httpd.shutdown()

@@ -121,8 +121,7 @@
   accent-color: var(--teal);
 }
 
-:root[data-theme="blueprint"] .artboard-shell,
-:root[data-theme="blueprint"] .scrolly-shell {
+:root[data-theme="blueprint"] .artboard-shell {
   background-size: 28px 28px, 28px 28px, 100% 100%;
   background-image:
     linear-gradient(to right, rgba(147, 213, 255, 0.08) 1px, transparent 1px),
@@ -163,8 +162,7 @@
   --scrollbar-thumb: rgba(17, 19, 23, 0.3);
 }
 
-:root[data-theme="monochrome-print"] .artboard-shell,
-:root[data-theme="monochrome-print"] .scrolly-shell {
+:root[data-theme="monochrome-print"] .artboard-shell {
   background-image: var(--stage-backdrop-grad);
   background-size: 100% 100%;
 }
@@ -208,8 +206,7 @@
   accent-color: var(--teal);
 }
 
-:root[data-theme="obsidian-gallery"] .artboard-shell,
-:root[data-theme="obsidian-gallery"] .scrolly-shell {
+:root[data-theme="obsidian-gallery"] .artboard-shell {
   background-image: var(--stage-backdrop-grad);
   background-size: 100% 100%;
 }

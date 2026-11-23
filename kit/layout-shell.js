@@ -2,8 +2,6 @@
  * Simulify v2.2 Multi-Archetype Layout & Viewport Chrome Controllers (`kit/layout-shell.js`).
  *
  * Zero-dependency helpers powering:
- * - `ScrollyBridge`: connects editorial `.scrolly-step` sections to a deterministic
- *   `SpacetimeClock` (bidirectional scroll scrubbing, active step tracking, reduced-motion safe)
  * - `WipeCompareController`: draggable + keyboard-accessible A/B wipe curtain (`ab-compare`)
  * - `mountViewCube`: compact 3D orientation / Front-Side-Top-Iso switcher & camera-lock badge
  * - `mountScaleBar`: live world-unit physical scale bar synced to orthographic/perspective zoom
@@ -17,8 +15,6 @@ export const LAYOUT_ARCHETYPES = Object.freeze([
   'fullbleed-hud',
   'split-bench',
   'ab-compare',
-  'multi-view',
-  'scrolly-stage',
 ]);
 
 export const THEME_PRESETS = Object.freeze([
@@ -78,171 +74,6 @@ export function setShellPresentation(shellEl, { layout, theme, split, stage } = 
     stage?.setTheme?.(theme);
   }
   stage?.resize?.(true);
-}
-
-/**
- * Bidirectional scroll-to-4D-clock controller for `data-layout="scrolly-stage"`.
- * Maps scrollable `.scrolly-step` sections (`data-t-start`, `data-t-end` or `data-t`)
- * deterministically to `SpacetimeClock.seek(t)` and highlights the active narrative step.
- */
-export class ScrollyBridge {
-  /**
-   * @param {{
-   *   clock: import('./spacetime.js').SpacetimeClock,
-   *   steps: ArrayLike<HTMLElement>,
-   *   scrollTarget?: Window | HTMLElement,
-   *   progressEl?: HTMLElement | null,
-   *   anchorRatio?: number,
-   *   onStepChange?: ((index: number, el: HTMLElement, t: number) => void) | null,
-   * }} opts
-   */
-  constructor({
-    clock,
-    steps,
-    scrollTarget = typeof window !== 'undefined' ? window : null,
-    progressEl = null,
-    anchorRatio = 0.42,
-    onStepChange = null,
-  } = {}) {
-    if (!clock) throw new Error('ScrollyBridge requires a SpacetimeClock instance.');
-    this.clock = clock;
-    this.steps = Array.from(steps || []);
-    this.scrollTarget = scrollTarget;
-    this.progressEl = progressEl;
-    this.anchorRatio = clamp01(anchorRatio);
-    this.onStepChange = typeof onStepChange === 'function' ? onStepChange : null;
-    this.activeIndex = -1;
-    this._raf = 0;
-    this._disposed = false;
-    this._stepRanges = this.#resolveRanges();
-    this._onScroll = () => this.#scheduleSync();
-
-    if (this.scrollTarget && typeof this.scrollTarget.addEventListener === 'function') {
-      this.scrollTarget.addEventListener('scroll', this._onScroll, { passive: true });
-      if (typeof window !== 'undefined' && this.scrollTarget === window) {
-        window.addEventListener('resize', this._onScroll, { passive: true });
-      }
-    }
-    this.syncFromGeometry();
-  }
-
-  #resolveRanges() {
-    const dur = Math.max(0.001, Number(this.clock.duration) || 1);
-    const n = Math.max(1, this.steps.length);
-    return this.steps.map((el, idx) => {
-      const ds = el?.dataset || {};
-      const explicitStart = ds.tStart !== undefined ? Number(ds.tStart) : (ds.t !== undefined ? Number(ds.t) : null);
-      const explicitEnd = ds.tEnd !== undefined ? Number(ds.tEnd) : null;
-      const start = Number.isFinite(explicitStart) ? explicitStart : (idx / n) * dur;
-      const end = Number.isFinite(explicitEnd) ? explicitEnd : ((idx + 1) / n) * dur;
-      return {
-        start: Math.max(0, Math.min(dur, start)),
-        end: Math.max(0, Math.min(dur, Math.max(start, end))),
-      };
-    });
-  }
-
-  #scheduleSync() {
-    if (this._disposed || this._raf) return;
-    if (typeof requestAnimationFrame === 'function') {
-      this._raf = requestAnimationFrame(() => {
-        this._raf = 0;
-        this.syncFromGeometry();
-      });
-    } else {
-      this.syncFromGeometry();
-    }
-  }
-
-  /**
-   * Pure computation mapping step rectangles + viewport height to `(t, activeIndex, progress)`.
-   * Exported as an instance method for deterministic unit verification without browser scroll.
-   */
-  computeTimeFromRects(rects, viewportHeight) {
-    const dur = Math.max(0, Number(this.clock.duration) || 0);
-    if (!rects || rects.length === 0) {
-      return { t: 0, activeIndex: 0, progress: 0 };
-    }
-    const anchorY = Math.max(1, Number(viewportHeight) || 800) * this.anchorRatio;
-    let chosenIdx = 0;
-    let localFrac = 0;
-
-    for (let i = 0; i < rects.length; i += 1) {
-      const r = rects[i];
-      const top = Number(r.top) || 0;
-      const height = Math.max(1, Number(r.height) || 1);
-      const bottom = r.bottom !== undefined ? Number(r.bottom) : top + height;
-      if (anchorY >= top && anchorY <= bottom) {
-        chosenIdx = i;
-        localFrac = clamp01((anchorY - top) / height);
-        break;
-      }
-      if (anchorY > bottom) {
-        chosenIdx = i;
-        localFrac = 1;
-      }
-    }
-
-    const range = this._stepRanges[chosenIdx] || { start: 0, end: dur };
-    const t = range.start + (range.end - range.start) * localFrac;
-    const progress = dur > 0 ? clamp01(t / dur) : 0;
-    return { t, activeIndex: chosenIdx, progress };
-  }
-
-  syncFromGeometry() {
-    if (this._disposed || this.steps.length === 0) return null;
-    const vh =
-      this.scrollTarget && this.scrollTarget !== globalThis.window && 'clientHeight' in this.scrollTarget
-        ? this.scrollTarget.clientHeight
-        : (typeof window !== 'undefined' ? window.innerHeight : 800);
-    const rects = this.steps.map((el) =>
-      typeof el.getBoundingClientRect === 'function'
-        ? el.getBoundingClientRect()
-        : { top: 0, bottom: 100, height: 100 }
-    );
-    return this.applyComputed(this.computeTimeFromRects(rects, vh));
-  }
-
-  applyComputed({ t, activeIndex, progress }) {
-    this.clock.pause?.();
-    this.clock.seek(t);
-
-    if (this.progressEl?.style) {
-      this.progressEl.style.setProperty('--scroll-progress', progress.toFixed(4));
-    }
-
-    if (activeIndex !== this.activeIndex) {
-      this.activeIndex = activeIndex;
-      this.steps.forEach((el, idx) => {
-        if (!el?.classList) return;
-        if (idx === activeIndex) {
-          el.classList.add('is-active');
-          el.setAttribute?.('aria-current', 'step');
-        } else {
-          el.classList.remove('is-active');
-          el.removeAttribute?.('aria-current');
-        }
-      });
-      if (this.onStepChange && this.steps[activeIndex]) {
-        this.onStepChange(activeIndex, this.steps[activeIndex], t);
-      }
-    }
-    return { t, activeIndex, progress };
-  }
-
-  dispose() {
-    this._disposed = true;
-    if (this._raf && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this._raf);
-      this._raf = 0;
-    }
-    if (this.scrollTarget && typeof this.scrollTarget.removeEventListener === 'function') {
-      this.scrollTarget.removeEventListener('scroll', this._onScroll);
-      if (typeof window !== 'undefined' && this.scrollTarget === window) {
-        window.removeEventListener('resize', this._onScroll);
-      }
-    }
-  }
 }
 
 /**
@@ -478,12 +309,13 @@ export function mountViewCube(containerEl, stage, { lang = 'zh', showAngles = tr
  * Mount a live physical scale bar synced to the 3D stage's zoom and world unit scale.
  * @param {HTMLElement} containerEl
  * @param {import('./stage-3d.js').IsometricStage} stage
- * @param {{ worldUnitsPerMeter?: number, unitLabel?: string, niceSteps?: number[] }} [opts]
+ * @param {{ worldUnitsPerMeter?: number, unitScale?: number, unitLabel?: string, niceSteps?: number[] }} [opts]
  */
 export function mountScaleBar(
   containerEl,
   stage,
-  { unitScale = 1, unitLabel = 'm', niceSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50] } = {}
+  { worldUnitsPerMeter = 1, unitScale = 1 / worldUnitsPerMeter, unitLabel = 'm',
+    niceSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50] } = {}
 ) {
   if (!containerEl || !stage) {
     throw new Error('mountScaleBar requires containerEl and stage.');
@@ -504,10 +336,11 @@ export function mountScaleBar(
   const sync = () => {
     const h = Math.max(160, stage.size?.height || 600);
     const zoom = Math.max(0.2, stage.view?.zoom || 1);
+    const camera = stage.camera;
     const spanWorld =
       stage.cameraType === 'perspective'
-        ? 2 * ((stage.view?.distance || stage.distance || 16) / zoom) * Math.tan(((stage.fov || 36) * Math.PI) / 360)
-        : (stage.baseSpan || 11.5) / zoom;
+        ? 2 * ((stage.view?.distance || stage.distance || 16) / zoom) * Math.tan(((camera?.fov ?? stage.fov ?? 36) * Math.PI) / 360)
+        : camera?.isOrthographicCamera ? camera.top - camera.bottom : (stage.baseSpan || 11.5) / zoom;
     const pxPerWorldUnit = h / Math.max(1e-4, spanWorld);
     const targetPx = 84;
     const rawWorld = targetPx / Math.max(1, pxPerWorldUnit);
@@ -522,7 +355,7 @@ export function mountScaleBar(
         best = s;
       }
     }
-    const barPx = Math.max(36, Math.min(180, Math.round((best / Math.max(1e-6, unitScale)) * pxPerWorldUnit)));
+    const barPx = Math.round((best / unitScale) * pxPerWorldUnit);
     rule.style.width = `${barPx}px`;
     label.textContent = `${best} ${unitLabel}`;
     return { barPx, value: best, unitLabel };

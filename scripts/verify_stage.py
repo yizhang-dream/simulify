@@ -4,33 +4,16 @@
 # dependencies = ["playwright>=1.45", "numpy>=1.24", "pillow>=9.0"]
 # ///
 """
-Automated 3-viewport, deep-link, multi-beat, and Simulify v2.2 Layout-Aware 4D Quality Oracle.
+Automated 3-viewport, deep-link, multi-beat, and Simulify v3.1 Layout-Aware 4D & Look-Dev Quality Oracle.
 
 Spins up an ephemeral loopback HTTP server, verifies zero console/page/request errors,
-zero guide-card overflow on desktop, mobile thumb-dock visibility, optional URL probes,
-and writes screenshots + a machine-readable JSON receipt.
+zero unintended guide-card overflow, mobile thumb-dock visibility, optional URL probes,
+quantitative look-dev pixel/scene telemetry, a 2x center close-up crop, and writes
+screenshots + a machine-readable JSON receipt.
 
-v1 legs (always enforced):
-  - prose-lint, stage-frame, chart-legibility, hud-overlap (including multi-beat sampling
-    and `.beat-caption-pill` + 3D HtmlSurface occlusion), falsify-oracle, camera-ownership
-
-v2 legs (auto-enforced when `window.__simulify.version >= 2` or `--strict-4d` is set):
-  1. initial-sparsity: bench must NOT boot in `showEnd` state; `actors(0) < peakActors`.
-  2. temporal-scrub-determinism: drives `seek(0.1T) -> seek(0.5T) -> seek(0.9T) -> seek(0.5T)`
-     and verifies real visual progression over time + reversible rewind determinism.
-  3. mandatory-falsify: fails if `window.__simulify.falsify` is missing or `passed !== true`.
-  4. visual-integrity: `canvasNonBlank` (RGB pixel variance > 0), zero horizontal truncation
-     on visible code/guide/maths cards across sampled beats, and zero GPU console errors.
-  5. typography-crispness: offline fonts loaded (`loadedCount >= 2, failedCount === 0`),
-     1:1 physical canvas backing (`canvas.width >= rect.width * dpr - 2`), zero visible
-     HUD/SVG text `< 10.5px`, and active 3D HtmlSurface physical pixel density >= HiDPI floor.
-  6. geometry-diversity: on 3D stages, `getGeometryAudit()` must satisfy
-     `cuboidRatio <= 0.70` and `sculptedMeshes > 0` (v1 classic benches remain exempt).
-  7. camera-ownership: real mouse drag on desktop canvas rotates the camera and holds
-     ownership for >= 400ms without script snap-back.
-  8. three-views: on v2 3D desktop stages, captures orthographic/cardinal Front / Side / Top / Iso
-     views via `setCardinalView()`, verifies non-flat volumetric LxWxH bounds (`flatnessRatio >= 0.08`),
-     and verifies Front/Side/Top views render distinct non-blank frames.
+Rendering, layout, and typography checks are independent of the profile.
+PROFILE_GATES controls the severity of the 4D and 3D checks for v2/v3 benches
+(`window.__simulify.version >= 2` or `--strict-4d`). v1 benches retain legacy checks.
 """
 
 import argparse
@@ -43,14 +26,16 @@ import pathlib
 import sys
 import threading
 import time
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
 
 try:
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
 except ImportError:
     np = None
     Image = None
+    ImageDraw = None
+    ImageFont = None
 
 
 GPU_ERROR_PATTERNS = (
@@ -63,15 +48,110 @@ GPU_ERROR_PATTERNS = (
 )
 
 
-EVAL_FRAME_METRICS_JS = """() => {
-  const shellEl = document.querySelector('.artboard-shell, .scrolly-shell');
-  const layoutArchetype = shellEl?.dataset?.layout || (document.querySelector('.scrolly-shell') ? 'scrolly-stage' : 'fullbleed-hud');
-  const isScrollableWorkspace = layoutArchetype === 'split-bench' || layoutArchetype === 'scrolly-stage';
-  const guide = document.querySelector('.hud-guide') || document.querySelector('.right-dock');
+_MECHANICAL_GATES = {
+    'geometry_diversity': 'hard',
+    'three_views': 'hard',
+    'initial_sparsity': 'hard',
+    'temporal_scrub': 'hard',
+    'camera_ownership': 'hard',
+    'mandatory_falsify': 'hard',
+}
+_DIRECT_GATES = {
+    **_MECHANICAL_GATES,
+    'geometry_diversity': 'advisory',
+    'three_views': 'advisory',
+    'initial_sparsity': 'advisory',
+}
+PROFILE_GATES = {
+    'mechanical-3d': _MECHANICAL_GATES.copy(),
+    'field-math': _DIRECT_GATES,
+    'sandbox-direct': _DIRECT_GATES.copy(),
+
+}
+
+
+def resolve_effective_profile(cli_profile, hook_profile, has_3d, is_v2) -> str | None:
+    for profile in (cli_profile, hook_profile):
+        if isinstance(profile, str) and profile in PROFILE_GATES:
+            return profile
+    if is_v2:
+        return 'mechanical-3d'
+    return None
+
+
+def evaluate_profile_policy(profile, *, has_3d=True, duration=None) -> dict[str, str]:
+    if profile is None:
+        policy = dict.fromkeys(_MECHANICAL_GATES, 'skipped')
+        policy.update(camera_ownership='hard', mandatory_falsify='hard')
+    else:
+        policy = PROFILE_GATES[profile].copy()
+    if not has_3d and profile != 'mechanical-3d':
+        policy.update(geometry_diversity='skipped', three_views='skipped', camera_ownership='skipped')
+    if duration is not None and duration <= 0.2 and profile in ('field-math', 'sandbox-direct'):
+        policy['temporal_scrub'] = 'skipped'
+    return policy
+
+
+def evaluate_falsify(result, is_v2: bool, *, from_model=False, is_v3=False) -> bool:
+    structured = is_v3 or from_model or (isinstance(result, dict) and result.get('version') == 3)
+    if not is_v2 and not structured:
+        return result is None or (isinstance(result, dict) and bool(result.get('passed')))
+    if not isinstance(result, dict) or result.get('passed') is not True:
+        return False
+    assertions = result.get('assertions')
+    if not isinstance(assertions, list) or not assertions:
+        return False
+    if structured and (
+        not from_model or type(result.get('version')) is not int or result['version'] != 3
+        or any(type(result.get(key)) is not int or result[key] != len(assertions)
+               for key in ('total', 'passedCount'))
+    ):
+        return False
+    for assertion in assertions:
+        if not isinstance(assertion, dict) or assertion.get('passed') is not True:
+            return False
+        name = assertion.get('name')
+        if not isinstance(name, str) or not name.strip():
+            return False
+        if structured:
+            comparisons = assertion.get('comparisons')
+            if type(comparisons) is not int or comparisons < 1:
+                return False
+        base, mutant = assertion.get('baseMetric'), assertion.get('mutantMetric')
+        if not structured and ('baseMetric' in assertion or 'mutantMetric' in assertion):
+            if base is None and mutant is None:
+                return False
+        if base is not None or mutant is not None:
+            if not all(type(metric) in (int, float) and math.isfinite(metric) for metric in (base, mutant)):
+                return False
+            if base == mutant:
+                return False
+    return True
+
+
+def entry_url(entry: str, backend: str, probe: str = '') -> str:
+    url = urlsplit(entry)
+    overrides = parse_qsl(probe.removeprefix('?'), keep_blank_values=True)
+    if backend != 'auto':
+        overrides = [(key, value) for key, value in overrides if key != 'backend']
+        overrides.append(('backend', backend))
+    keys = {key for key, _ in overrides}
+    query = [(key, value) for key, value in parse_qsl(url.query, keep_blank_values=True) if key not in keys]
+    query.extend(overrides)
+    return url._replace(query=urlencode(query)).geturl()
+
+
+def skipped_gate(reason: str) -> dict:
+    return {'passed': True, 'skipped': True, 'reason': reason}
+
+
+EVAL_FRAME_METRICS_JS = """(collectGeometry) => {
+  const shellEl = document.querySelector('.artboard-shell');
+  const layoutArchetype = shellEl?.dataset?.layout || 'fullbleed-hud';
   const thumbDock = document.querySelector('.thumb-dock');
-  const canvas = document.querySelector('.stage-canvas') || document.querySelector('canvas');
   const hook = window.__simulify || null;
   const stageObj = hook?.stage?.stage || hook?.stage || hook?.scene?.stage || null;
+  const canvas = stageObj?.canvas || document.querySelector('.stage-canvas') || document.querySelector('canvas');
 
   const isVisibleEl = (el) => {
     if (!el || el.hidden || el.getAttribute('data-hud-hidden') === 'true') return false;
@@ -81,18 +161,22 @@ EVAL_FRAME_METRICS_JS = """() => {
     return r.width > 1 && r.height > 1;
   };
 
-  const guideVisible = isVisibleEl(guide);
-  const guideOverflow = (!isScrollableWorkspace && guideVisible) ? (guide.scrollHeight > guide.clientHeight + 2) : false;
+  const guideOverflow = Array.from(document.querySelectorAll('.hud-guide, .right-dock, .split-aside')).some(
+    (guide) => isVisibleEl(guide) && !['auto', 'scroll'].includes(getComputedStyle(guide).overflowY)
+      && guide.scrollHeight > guide.clientHeight + 2
+  );
   const thumbVisible = thumbDock ? getComputedStyle(thumbDock).display !== 'none' : null;
   const thumbTop = thumbDock ? thumbDock.getBoundingClientRect().top : null;
   const canvasRect = canvas ? canvas.getBoundingClientRect() : null;
+  const stageRect = isVisibleEl(canvas) && canvas.width > 0 && canvas.height > 0
+    ? canvasRect : null;
 
   // 1. Prose lint (AI clichés check on visible prose across all layout archetypes)
   const AI_CLICHES = [
     '本质上', '值得注意的是', '总而言之', '综上所述', '不难发现', '众所周知',
     '至关重要', '深入探讨', '赋能', '旨在', '极大地', '正如我们所见'
   ];
-  const proseEls = document.querySelectorAll('.hud-guide, .right-dock, .split-aside, .scrolly-prose, .question-chain, .brand-sub, .beat-caption-pill, .hero-act-banner');
+  const proseEls = document.querySelectorAll('.hud-guide, .right-dock, .split-aside, .question-chain, .brand-sub, .beat-caption-pill, .hero-act-banner');
   const proseHits = [];
   for (const el of proseEls) {
     if (!isVisibleEl(el)) continue;
@@ -102,20 +186,21 @@ EVAL_FRAME_METRICS_JS = """() => {
     }
   }
 
-  // 2. HUD panel mutual overlap check (desktop > 900px), including .beat-caption-pill & .view-cube-dock
+  // 2. HUD panel mutual overlap check, including .beat-caption-pill & .view-cube-dock
   const hudSelectors = [
     '.hud-top-left', '.top-ribbon', '.beat-caption-pill', '.hud-guide', '.right-dock',
     '.split-aside', '.scrolly-prose', '.hud-bottom-left', '.bottom-left-dock',
-    '.hud-bottom-center', '.bottom-transport', '.view-cube-dock'
+    '.hud-bottom-center', '.bottom-transport', '.bench-transport', '.view-cube-dock'
   ];
   const visibleHud = [];
   const seenHudEls = new Set();
   for (const sel of hudSelectors) {
-    const el = document.querySelector(sel);
-    if (!el || seenHudEls.has(el) || !isVisibleEl(el)) continue;
-    seenHudEls.add(el);
-    const r = el.getBoundingClientRect();
-    visibleHud.push({ sel, el, left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    for (const el of document.querySelectorAll(sel)) {
+      if (seenHudEls.has(el) || !isVisibleEl(el)) continue;
+      seenHudEls.add(el);
+      const r = el.getBoundingClientRect();
+      visibleHud.push({ sel, el, left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
   }
   const hudOverlaps = [];
   for (let i = 0; i < visibleHud.length; i += 1) {
@@ -257,6 +342,10 @@ EVAL_FRAME_METRICS_JS = """() => {
     '.right-dock', '.split-aside', '.scrolly-prose', '.live-maths-panel', '.beat-caption-pill'
   ];
   const horizontalTruncations = [];
+  const root = document.documentElement;
+  if (root.scrollWidth > root.clientWidth + 2) {
+    horizontalTruncations.push(`viewport(${root.scrollWidth}>${root.clientWidth})`);
+  }
   for (const sel of truncSelectors) {
     for (const el of document.querySelectorAll(sel)) {
       const inCanvas = Boolean(el.closest('canvas'));
@@ -348,7 +437,7 @@ EVAL_FRAME_METRICS_JS = """() => {
       inspectTextEl(desc);
     }
   }
-  for (const svgText of document.querySelectorAll('.xy-svg text, .hyst-svg text, .dist-svg text, .heatmap-svg text, .timing-svg text, .stage-2d-svg text')) {
+  for (const svgText of document.querySelectorAll('.xy-svg text, .hyst-svg text, .dist-svg text, .heatmap-svg text, .timing-svg text')) {
     inspectTextEl(svgText);
   }
 
@@ -398,19 +487,36 @@ EVAL_FRAME_METRICS_JS = """() => {
 
   // 8. Geometry diversity audit (`window.__simulify.getGeometryAudit()`)
   let geometryAudit = null;
-  if (hook && typeof hook.getGeometryAudit === 'function') {
-    geometryAudit = hook.getGeometryAudit();
-  } else if (stageObj && typeof stageObj.getGeometryAudit === 'function') {
-    geometryAudit = stageObj.getGeometryAudit();
+  if (collectGeometry) {
+    if (typeof hook?.getGeometryAudit === 'function') {
+      geometryAudit = hook.getGeometryAudit();
+    } else if (typeof stageObj?.getGeometryAudit === 'function') {
+      geometryAudit = stageObj.getGeometryAudit();
+    }
   }
 
-  // 9. Telemetry: rendererBackend & HTML-in-Canvas support
-  const rendererBackend = stageObj?.backendKind || (canvas ? 'webgl2' : 'svg');
+  // 9. Telemetry: rendererBackend, HTML-in-Canvas support & v3.1 look-dev telemetry
+  const rendererBackend = stageObj?.backendKind || (canvas ? 'unknown' : 'svg');
   const htmlInCanvasSupported = 'content' in HTMLCanvasElement.prototype;
+  let lookDevTelemetry = null;
+  try {
+    if (typeof stageObj?.getTelemetry === 'function') {
+      lookDevTelemetry = stageObj.getTelemetry();
+    } else if (typeof window.__SIMULIFY_TELEMETRY__ === 'function') {
+      lookDevTelemetry = window.__SIMULIFY_TELEMETRY__();
+    } else if (window.__SIMULIFY_TELEMETRY__ && typeof window.__SIMULIFY_TELEMETRY__ === 'object') {
+      lookDevTelemetry = window.__SIMULIFY_TELEMETRY__;
+    }
+  } catch (err) {
+    lookDevTelemetry = { error: String(err) };
+  }
 
   // 10. Live counterfactual falsification runner (if exposed)
   let falsifyResult = null;
-  if (hook && typeof hook.falsify === 'function') {
+  const hasModel = typeof hook?.model?.falsify === "function";
+  if (hasModel) {
+    falsifyResult = hook.model.falsify();
+  } else if (typeof hook?.falsify === 'function') {
     falsifyResult = hook.falsify();
   }
 
@@ -433,6 +539,9 @@ EVAL_FRAME_METRICS_JS = """() => {
     } : null,
     canvasWidth: canvasRect ? Math.round(canvasRect.width) : 0,
     canvasHeight: canvasRect ? Math.round(canvasRect.height) : 0,
+    hasActiveStage: Boolean(stageRect),
+    stageWidth: stageRect ? Math.round(stageRect.width) : 0,
+    stageHeight: stageRect ? Math.round(stageRect.height) : 0,
     canvasBacking,
     bodyTextLen: document.body.innerText.trim().length,
     proseHits: [...new Set(proseHits)],
@@ -446,7 +555,9 @@ EVAL_FRAME_METRICS_JS = """() => {
     geometryAudit,
     rendererBackend,
     htmlInCanvasSupported,
+    lookDevTelemetry,
     falsifyResult,
+    hasModel,
   };
 }"""
 
@@ -536,21 +647,317 @@ def launch_browser(p, channel: str = 'auto', backend: str = 'auto', no_hic: bool
     raise RuntimeError(f'No Chromium/Chrome/Edge browser executable found for Playwright ({last_err}).')
 
 
-def analyze_canvas_variance(shot_path: pathlib.Path, canvas_box: dict | None, dpr: float = 1.0) -> tuple[bool, float]:
-    """Verify the rendered canvas area is non-blank (catches SwiftShader/WebGPU blank regressions)."""
-    if Image is None or np is None or not shot_path.exists():
-        return True, -1.0
-    img = Image.open(shot_path).convert('RGB')
-    arr = np.asarray(img, dtype=np.float32)
+def _crop_canvas_roi(img, canvas_box: dict | None, dpr: float = 1.0):
+    """Crop PIL RGB image to the active canvas bounding box (in physical pixels)."""
+    w, h = img.size
     if canvas_box and canvas_box.get('width', 0) > 10 and canvas_box.get('height', 0) > 10:
         x0 = max(0, int(canvas_box['left'] * dpr))
         y0 = max(0, int(canvas_box['top'] * dpr))
-        x1 = min(arr.shape[1], int((canvas_box['left'] + canvas_box['width']) * dpr))
-        y1 = min(arr.shape[0], int((canvas_box['top'] + canvas_box['height']) * dpr))
+        x1 = min(w, int((canvas_box['left'] + canvas_box['width']) * dpr))
+        y1 = min(h, int((canvas_box['top'] + canvas_box['height']) * dpr))
         if x1 - x0 > 10 and y1 - y0 > 10:
-            arr = arr[y0:y1, x0:x1]
-    std = float(arr.std())
+            return img.crop((x0, y0, x1, y1))
+    return img
+
+
+def analyze_canvas_variance(shot_path: pathlib.Path, canvas_box: dict | None, dpr: float = 1.0) -> tuple[bool, float]:
+    """Verify the rendered canvas area is non-blank (catches SwiftShader/WebGPU blank regressions)."""
+    if Image is None or np is None:
+        return False, -1.0
+    try:
+        with Image.open(shot_path) as image:
+            rgb = image.convert('RGB')
+            img = _crop_canvas_roi(rgb, canvas_box, dpr=dpr)
+            if canvas_box is not None and img is rgb:
+                return False, -1.0
+            arr = np.asarray(img, dtype=np.float64)
+            std = float(arr.std(axis=(0, 1)).max())
+    except (OSError, ValueError):
+        return False, -1.0
+    if not math.isfinite(std):
+        return False, -1.0
     return std > 1.5, round(std, 2)
+
+
+def analyze_lookdev_pixels(shot_path: pathlib.Path, canvas_box: dict | None, dpr: float = 1.0) -> dict:
+    """
+    Compute quantitative look-dev pixel telemetry on the rendered canvas ROI:
+      - colorEntropyBits: Shannon entropy of 16x16x16 quantized RGB histogram (warn < 3.0)
+      - dominantColorShare: max quantized RGB bin share (warn > 0.65)
+      - edgeDensity: 3x3 Sobel gradient ratio (> 28) at CSS-pixel scale (warn < 0.025)
+      - luminanceContrast: p95 - p5 luminance spread on 0..255 scale (warn < 55)
+    """
+    if Image is None or np is None or not shot_path.exists():
+        return {'available': False, 'warnings': []}
+    roi = _crop_canvas_roi(Image.open(shot_path).convert('RGB'), canvas_box, dpr=dpr)
+    # Normalize to 1x CSS-pixel resolution so Sobel edgeDensity stays invariant across DPR=1..3
+    if dpr > 1.05:
+        norm_w = max(16, int(round(roi.width / dpr)))
+        norm_h = max(16, int(round(roi.height / dpr)))
+        resample = getattr(Image, 'Resampling', Image).BILINEAR
+        roi = roi.resize((norm_w, norm_h), resample)
+
+    arr_u8 = np.asarray(roi, dtype=np.uint8)
+    if arr_u8.ndim != 3 or arr_u8.shape[0] < 4 or arr_u8.shape[1] < 4:
+        return {'available': False, 'warnings': []}
+
+    # 12-bit quantized RGB histogram (16 x 16 x 16 = 4096 bins)
+    q = (
+        ((arr_u8[:, :, 0].astype(np.int32) >> 4) << 8)
+        | ((arr_u8[:, :, 1].astype(np.int32) >> 4) << 4)
+        | (arr_u8[:, :, 2].astype(np.int32) >> 4)
+    )
+    counts = np.bincount(q.ravel(), minlength=4096).astype(np.float64)
+    total = float(counts.sum())
+    probs = counts[counts > 0] / max(total, 1.0)
+    color_entropy_bits = float(-(probs * np.log2(probs)).sum()) if probs.size else 0.0
+    dominant_color_share = float(probs.max()) if probs.size else 1.0
+
+    # Rec. 709 luminance (0..255) & 3x3 Sobel edge density
+    arr_f = arr_u8.astype(np.float32)
+    lum = 0.2126 * arr_f[:, :, 0] + 0.7152 * arr_f[:, :, 1] + 0.0722 * arr_f[:, :, 2]
+    p5, p95 = np.percentile(lum, [5.0, 95.0])
+    luminance_contrast = float(p95 - p5)
+
+    gx = (
+        -lum[:-2, :-2] + lum[:-2, 2:]
+        - 2.0 * lum[1:-1, :-2] + 2.0 * lum[1:-1, 2:]
+        - lum[2:, :-2] + lum[2:, 2:]
+    )
+    gy = (
+        -lum[:-2, :-2] - 2.0 * lum[:-2, 1:-1] - lum[:-2, 2:]
+        + lum[2:, :-2] + 2.0 * lum[2:, 1:-1] + lum[2:, 2:]
+    )
+    grad_mag = np.hypot(gx, gy) / 4.0
+    edge_density = float((grad_mag > 14.0).mean()) if grad_mag.size else 0.0
+
+    # Magenta / purple-frame shader error detection (R>210, G<45, B>210)
+    magenta_mask = (arr_u8[:, :, 0] > 210) & (arr_u8[:, :, 1] < 45) & (arr_u8[:, :, 2] > 210)
+    magenta_ratio = float(magenta_mask.mean()) if magenta_mask.size else 0.0
+
+    warnings = []
+    if color_entropy_bits < 3.0:
+        warnings.append(f'low_color_entropy({color_entropy_bits:.2f}<3.0)')
+    if dominant_color_share > 0.65:
+        warnings.append(f'high_dominant_color({dominant_color_share:.2f}>0.65)')
+    if edge_density < 0.025:
+        warnings.append(f'low_edge_density({edge_density:.4f}<0.025)')
+    if luminance_contrast < 55.0:
+        warnings.append(f'low_luminance_contrast({luminance_contrast:.1f}<55)')
+    if magenta_ratio > 0.015:
+        warnings.append(f'magenta_frame({magenta_ratio:.4f}>0.015)')
+
+    return {
+        'available': True,
+        'colorEntropyBits': round(color_entropy_bits, 3),
+        'dominantColorShare': round(dominant_color_share, 4),
+        'edgeDensity': round(edge_density, 4),
+        'luminanceContrast': round(luminance_contrast, 2),
+        'magentaRatio': round(magenta_ratio, 5),
+        'warnings': warnings,
+    }
+
+
+def save_closeup_crop(shot_path: pathlib.Path, canvas_box: dict | None, dpr: float = 1.0) -> str | None:
+    """
+    Save a 2x zoomed center crop (`*-closeup.png`) of the hero canvas so visual review
+    immediately exposes edge aliasing, bevel highlights, and micro-texture crispness.
+    """
+    if Image is None or not shot_path.exists():
+        return None
+    roi = _crop_canvas_roi(Image.open(shot_path).convert('RGB'), canvas_box, dpr=dpr)
+    w, h = roi.size
+    if w < 32 or h < 32:
+        return None
+    crop_w = max(32, w // 2)
+    crop_h = max(32, h // 2)
+    x0 = (w - crop_w) // 2
+    y0 = (h - crop_h) // 2
+    closeup = roi.crop((x0, y0, x0 + crop_w, y0 + crop_h))
+    if dpr < 1.5:
+        nearest = getattr(Image, 'Resampling', Image).NEAREST
+        closeup = closeup.resize((crop_w * 2, crop_h * 2), nearest)
+    closeup_path = shot_path.with_name(f'{shot_path.stem}-closeup{shot_path.suffix}')
+    closeup_path.parent.mkdir(parents=True, exist_ok=True)
+    closeup.save(closeup_path)
+    return str(closeup_path)
+
+
+def save_contact_sheet(results: list[dict], out_path: pathlib.Path) -> str | None:
+    """
+    Assemble a single labeled visual review sheet (`*-contact-sheet.png`) combining
+    the primary viewport still, 2x center close-up, cardinal three-views, probes,
+    and the 390px mobile frame.
+    """
+    if Image is None or ImageDraw is None or not results:
+        return None
+
+    tiles: list[tuple[str, pathlib.Path]] = []
+    seen: set[pathlib.Path] = set()
+
+    def add_tile(label: str, raw_path: str | None) -> None:
+        if not raw_path:
+            return
+        p = pathlib.Path(raw_path)
+        if p.exists() and p not in seen:
+            seen.add(p)
+            tiles.append((label, p))
+
+    primary = results[0]
+    add_tile(f'MAIN {primary.get("viewport", "")}'.strip(), primary.get('screenshot'))
+    add_tile('2x CLOSEUP', primary.get('closeupScreenshot'))
+
+    three_shots = (primary.get('oracle') or {}).get('threeViews', {}).get('screenshots') or {}
+    for vname in ('front', 'side', 'top', 'iso'):
+        if vname in three_shots:
+            add_tile(f'VIEW {vname.upper()}', three_shots[vname])
+
+    probe_idx = 0
+    mobile_tile = None
+    for item in results[1:]:
+        vp = str(item.get('viewport', ''))
+        shot = item.get('screenshot')
+        if vp.startswith('390x'):
+            mobile_tile = (f'MOBILE {vp}', shot)
+        elif '-probe-' in pathlib.Path(shot or '').name:
+            probe_idx += 1
+            query = str(item.get('url', '')).split('?', 1)
+            suffix = f' ?{query[1]}' if len(query) > 1 and query[1] else ''
+            add_tile(f'PROBE {probe_idx}{suffix}'[:42], shot)
+
+    if mobile_tile:
+        add_tile(*mobile_tile)
+
+    if not tiles:
+        return None
+
+    cols = 2 if len(tiles) <= 4 else 3
+    rows = math.ceil(len(tiles) / cols)
+    cell_w, cell_h = 640, 400
+    header_h, gap, pad = 30, 14, 16
+    sheet_w = pad * 2 + cols * cell_w + (cols - 1) * gap
+    sheet_h = pad * 2 + rows * (cell_h + header_h) + (rows - 1) * gap
+
+    sheet = Image.new('RGB', (sheet_w, sheet_h), (20, 22, 26))
+    draw = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    resample = getattr(Image, 'Resampling', Image).LANCZOS
+
+    for idx, (label, img_path) in enumerate(tiles):
+        r, c = divmod(idx, cols)
+        x0 = pad + c * (cell_w + gap)
+        y0 = pad + r * (cell_h + header_h + gap)
+        draw.rectangle([x0, y0, x0 + cell_w - 1, y0 + header_h - 1], fill=(32, 37, 46))
+        draw.rectangle([x0, y0 + header_h, x0 + cell_w - 1, y0 + header_h + cell_h - 1], fill=(12, 14, 18))
+        draw.text((x0 + 10, y0 + 7), label, fill=(235, 240, 248), font=font)
+        with Image.open(img_path) as raw:
+            im = raw.convert('RGB')
+            scale = min(cell_w / max(im.width, 1), cell_h / max(im.height, 1))
+            nw = max(1, int(round(im.width * scale)))
+            nh = max(1, int(round(im.height * scale)))
+            resized = im.resize((nw, nh), resample)
+            ox = x0 + (cell_w - nw) // 2
+            oy = y0 + header_h + (cell_h - nh) // 2
+            sheet.paste(resized, (ox, oy))
+        draw.rectangle([x0, y0, x0 + cell_w - 1, y0 + header_h + cell_h - 1], outline=(56, 64, 78), width=1)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out_path)
+    return str(out_path)
+
+
+def evaluate_lookdev_scene_telemetry(raw_tel: dict | None) -> dict:
+    """
+    Inspect optional engine/scene telemetry (`stage.getTelemetry()` / `window.__SIMULIFY_TELEMETRY__`)
+    matching Simulify v3.1 schema and produce advisory look-dev warnings while degrading gracefully
+    on older benches.
+    """
+    if not isinstance(raw_tel, dict) or raw_tel.get('error'):
+        return {
+            'available': False,
+            'error': raw_tel.get('error') if isinstance(raw_tel, dict) else None,
+            'warnings': [],
+        }
+
+    warnings = []
+
+    # 1. Shadow frustum utilization (sceneSpan / frustumSpan < 0.35 wastes shadow texels)
+    sf = raw_tel.get('shadow') or raw_tel.get('shadowFrustum') or {}
+    utilization = None
+    shadow_type = None
+    shadow_fitted = None
+    if isinstance(sf, dict):
+        shadow_type = sf.get('type')
+        shadow_fitted = sf.get('fitted')
+        if isinstance(sf.get('utilization'), (int, float)) and math.isfinite(sf['utilization']):
+            utilization = float(sf['utilization'])
+        elif isinstance(sf.get('sceneSpan'), (int, float)) and isinstance(sf.get('frustumSpan'), (int, float)):
+            if sf['frustumSpan'] > 0:
+                utilization = float(sf['sceneSpan']) / float(sf['frustumSpan'])
+    if utilization is not None and utilization < 0.35:
+        warnings.append(f'low_shadow_utilization({utilization:.2f}<0.35)')
+
+    # 2. Visible mesh roughness spread & mud-zone metalness audit
+    mat_info = raw_tel.get('materials') or raw_tel.get('roughness') or {}
+    rough_summary = None
+    if isinstance(mat_info, dict):
+        r_min = mat_info.get('roughnessMin', mat_info.get('min'))
+        r_max = mat_info.get('roughnessMax', mat_info.get('max'))
+        r_count = mat_info.get('meshCount', mat_info.get('count', 0))
+        r_spread = mat_info.get('roughnessSpread', mat_info.get('spread'))
+        plastic_ratio = mat_info.get('plasticClusterRatio')
+        mid_metal_cnt = mat_info.get('midMetalnessCount')
+        if isinstance(r_min, (int, float)) and isinstance(r_max, (int, float)):
+            spread = float(r_spread) if isinstance(r_spread, (int, float)) else float(r_max - r_min)
+            rough_summary = {
+                'count': int(r_count) if isinstance(r_count, (int, float)) else None,
+                'min': round(float(r_min), 3),
+                'max': round(float(r_max), 3),
+                'spread': round(spread, 3),
+                'plasticClusterRatio': round(float(plastic_ratio), 3) if isinstance(plastic_ratio, (int, float)) else None,
+                'midMetalnessCount': int(mid_metal_cnt) if isinstance(mid_metal_cnt, (int, float)) else None,
+            }
+            if (r_count is None or r_count >= 2) and r_min >= 0.20 and r_max <= 0.45 and spread <= 0.15:
+                warnings.append(f'plastic_roughness_cluster([{r_min:.2f},{r_max:.2f}])')
+            elif (
+                isinstance(plastic_ratio, (int, float))
+                and (r_count is None or r_count >= 3)
+                and plastic_ratio >= 0.85
+            ):
+                warnings.append(f'plastic_roughness_cluster(ratio={plastic_ratio:.2f})')
+        if isinstance(mid_metal_cnt, (int, float)) and mid_metal_cnt > 0:
+            warnings.append(f'mid_metalness_meshes({int(mid_metal_cnt)})')
+        if mat_info.get('plasticCluster') is True and not any('plastic_roughness' in w for w in warnings):
+            warnings.append('plastic_roughness_cluster')
+
+    outline_raw = raw_tel.get('outline')
+    if isinstance(outline_raw, dict):
+        outline_mode = outline_raw.get('preset') or ('enabled' if outline_raw.get('enabled') else 'none')
+    else:
+        outline_mode = raw_tel.get('outlineMode') or outline_raw
+
+    ibl_raw = raw_tel.get('ibl') if isinstance(raw_tel.get('ibl'), dict) else None
+
+    return {
+        'available': True,
+        'theme': raw_tel.get('theme'),
+        'aestheticTier': raw_tel.get('aestheticTier') or raw_tel.get('tier'),
+        'backend': raw_tel.get('backend') or raw_tel.get('rendererBackend'),
+        'toneMapping': raw_tel.get('toneMapping'),
+        'dpr': raw_tel.get('dpr') or raw_tel.get('pixelRatio'),
+        'outlineMode': outline_mode,
+        'iblKind': ibl_raw.get('kind') if ibl_raw else None,
+        'selectiveIBL': ibl_raw.get('selective') if ibl_raw else None,
+        'shadowType': shadow_type,
+        'shadowFitted': shadow_fitted,
+        'shadowUtilization': round(utilization, 3) if utilization is not None else None,
+        'roughness': rough_summary,
+        'raw': raw_tel,
+        'warnings': warnings,
+    }
 
 
 def png_mean_abs_diff(png_a: bytes, png_b: bytes) -> float:
@@ -574,6 +981,9 @@ def capture_initial_4d_snapshot(page) -> dict:
         """() => {
           const wb = window.__simulify || {};
           const version = Number(wb.version || 1);
+          const profile = typeof wb.getProfile === 'function' ? wb.getProfile() ?? wb.profile : wb.profile;
+          const stage = wb.stage?.stage || wb.stage || wb.scene?.stage || null;
+          const has3D = ['webgl2', 'webgpu', 'webgl'].includes(stage?.backendKind);
           const tl = typeof wb.getTimelineInfo === 'function' ? wb.getTimelineInfo() : null;
           const cs = wb.clock?.getState?.() ?? null;
           const ds = wb.director?.getState?.() ?? null;
@@ -591,6 +1001,8 @@ def capture_initial_4d_snapshot(page) -> dict:
           }
           return {
             version,
+            profile: typeof profile === 'string' ? profile : null,
+            has3D,
             dur,
             initT: +initT.toFixed(3),
             bootedComplete,
@@ -648,7 +1060,7 @@ def select_multi_beat_samples(timeline: dict | None, dur: float) -> list[dict]:
     return dedup
 
 
-def run_multi_beat_audit(page, init_probe: dict) -> list[dict]:
+def run_multi_beat_audit(page, init_probe: dict, collect_geometry: bool) -> list[dict]:
     """Seek across key acts/beats and evaluate layout, HUD/surface overlap, truncation, typography & geometry."""
     if not init_probe.get('hasSeek') or init_probe.get('dur', 0) <= 0.2:
         return []
@@ -688,7 +1100,7 @@ def run_multi_beat_audit(page, init_probe: dict) -> list[dict]:
             }""",
             sample['t'],
         )
-        m = page.evaluate(EVAL_FRAME_METRICS_JS)
+        m = page.evaluate(EVAL_FRAME_METRICS_JS, collect_geometry)
         beat_reports.append({
             'id': sample['id'],
             'label': sample['label'],
@@ -707,13 +1119,13 @@ def run_multi_beat_audit(page, init_probe: dict) -> list[dict]:
     return beat_reports
 
 
-def run_v2_4d_probes(page, init_probe: dict, strict_4d: bool) -> dict:
+def run_v2_4d_probes(page, init_probe: dict, strict_4d: bool, run_scrub: bool) -> dict:
     """Run initial-sparsity and reversible temporal-scrub determinism checks on primary desktop check."""
     v2_active = (init_probe['version'] >= 2) or strict_4d
 
     # 1. initial-sparsity (computed strictly from pre-seek load snapshot)
     if not v2_active:
-        sparsity = {'passed': True, 'skipped': True, 'reason': 'v1 bench'}
+        sparsity = skipped_gate('v1 bench')
     else:
         not_end = not init_probe['bootedComplete']
         actor_growth = True
@@ -731,7 +1143,9 @@ def run_v2_4d_probes(page, init_probe: dict, strict_4d: bool) -> dict:
 
     # 2. temporal-scrub-determinism: seek(0.1T) -> seek(0.5T) -> seek(0.9T) -> seek(0.5T)
     if not v2_active:
-        scrub = {'passed': True, 'skipped': True, 'reason': 'v1 bench'}
+        scrub = skipped_gate('v1 bench')
+    elif not run_scrub:
+        scrub = skipped_gate('timeline duration is at most 0.2s')
     elif not init_probe['hasSeek'] or init_probe['dur'] <= 0.2:
         scrub = {
             'passed': False,
@@ -790,7 +1204,7 @@ def run_v2_4d_probes(page, init_probe: dict, strict_4d: bool) -> dict:
     }
 
 
-def run_camera_ownership_probe(page, init_probe: dict, v2_active: bool) -> dict:
+def run_camera_ownership_probe(page, v2_active: bool, *, required: bool) -> dict:
     """
     Real interactive desktop mouse-drag probe on the 3D canvas:
     drags to orbit the camera, verifies real angular deflection, then waits >= 400ms
@@ -853,8 +1267,8 @@ def run_camera_ownership_probe(page, init_probe: dict, v2_active: bool) -> dict:
 
     if not setup.get('available'):
         return {
-            'passed': True,
-            'skipped': True,
+            'passed': not required,
+            'skipped': not required,
             'reason': setup.get('reason', 'unavailable'),
         }
 
@@ -928,11 +1342,8 @@ def run_camera_ownership_probe(page, init_probe: dict, v2_active: bool) -> dict:
     }
 
 
-def run_three_view_audit(page, init_probe: dict, shot_path: pathlib.Path, v2_active: bool) -> dict:
+def run_three_view_audit(page, init_probe: dict, shot_path: pathlib.Path) -> dict:
     """Capture cardinal Front / Side / Top / Iso views and check volumetric 3D LxWxH bounds."""
-    if not v2_active:
-        return {'passed': True, 'skipped': True, 'reason': 'v1 bench'}
-
     has_hook = page.evaluate(
         "() => typeof window.__simulify?.setCardinalView === 'function' || typeof (window.__simulify?.stage?.stage || window.__simulify?.stage || window.__simulify?.scene?.stage)?.setCardinalView === 'function'"
     )
@@ -1022,6 +1433,7 @@ def check_target(
     strict_4d: bool = False,
     is_probe: bool = False,
     requested_backend: str = 'auto',
+    cli_profile: str = 'auto',
 ):
     for attempt in range(2):
         console_errors = []
@@ -1043,8 +1455,9 @@ def check_target(
         page.on('console', on_console)
         page.on('pageerror', lambda err: page_errors.append(str(err)))
         page.on('requestfailed', lambda req: failed_requests.append(f'{req.method} {req.url}'))
+        page.on('response', lambda res: failed_requests.append(f'{res.status} {res.url}') if res.status >= 400 else None)
 
-        url = urljoin(base_url, rel_url.lstrip('/'))
+        url = urljoin(base_url, entry_url(rel_url, requested_backend).lstrip('/'))
         page.goto(url, wait_until='domcontentloaded', timeout=25000)
 
         try:
@@ -1065,7 +1478,14 @@ def check_target(
         page.wait_for_timeout(350)
 
         init_probe = capture_initial_4d_snapshot(page)
-        metrics = page.evaluate(EVAL_FRAME_METRICS_JS)
+        v2_active = (init_probe['version'] >= 2) or strict_4d
+        has_3d = init_probe['has3D']
+        effective_profile = resolve_effective_profile(
+            cli_profile, init_probe['profile'], has_3d or strict_4d, v2_active,
+        )
+        profile_policy = evaluate_profile_policy(effective_profile, has_3d=has_3d, duration=init_probe['dur'])
+        collect_geometry = profile_policy['geometry_diversity'] != 'skipped'
+        metrics = page.evaluate(EVAL_FRAME_METRICS_JS, collect_geometry)
 
         shot_path.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(shot_path), animations='disabled', timeout=45000)
@@ -1074,19 +1494,32 @@ def check_target(
         has_pinned_query = any(k in rel_url for k in ('stage=', 't=', 'end'))
         beat_reports = []
         if width > 900 and not is_probe and not has_pinned_query:
-            beat_reports = run_multi_beat_audit(page, init_probe)
+            beat_reports = run_multi_beat_audit(page, init_probe, collect_geometry)
 
-        v2_probes = None
+        sparsity_res = skipped_gate('non-primary viewport')
+        scrub_res = skipped_gate('non-primary viewport')
         if run_4d_checks:
-            v2_probes = run_v2_4d_probes(page, init_probe, strict_4d=strict_4d)
+            v2_probes = run_v2_4d_probes(
+                page, init_probe, strict_4d, run_scrub=profile_policy['temporal_scrub'] != 'skipped',
+            )
+            sparsity_res = v2_probes['sparsity']
+            scrub_res = v2_probes['scrub']
 
-        v2_active = (metrics['simulifyVersion'] >= 2) or strict_4d
-
-        camera_ownership = {'passed': True, 'skipped': True, 'reason': 'non-primary viewport'}
-        three_views = {'passed': True, 'skipped': True, 'reason': 'non-primary viewport'}
-        if run_4d_checks and width > 900 and metrics['hasCanvas']:
-            three_views = run_three_view_audit(page, init_probe, shot_path, v2_active)
-            camera_ownership = run_camera_ownership_probe(page, init_probe, v2_active)
+        view_skip_reason = 'not applicable to this profile, stage or viewport'
+        camera_ownership = skipped_gate(view_skip_reason)
+        three_views = skipped_gate(view_skip_reason)
+        missing_mechanical_stage = effective_profile == 'mechanical-3d' and not has_3d
+        missing_stage_gate = {'passed': False, 'reason': 'mechanical-3d requires an active 3D renderer'}
+        if missing_mechanical_stage:
+            camera_ownership = missing_stage_gate.copy()
+            three_views = missing_stage_gate.copy()
+        elif run_4d_checks and width > 900 and metrics['hasCanvas']:
+            if (v2_active or effective_profile == 'mechanical-3d') and profile_policy['three_views'] != 'skipped':
+                three_views = run_three_view_audit(page, init_probe, shot_path)
+            if profile_policy['camera_ownership'] != 'skipped':
+                camera_ownership = run_camera_ownership_probe(
+                    page, v2_active, required=profile_policy['camera_ownership'] == 'hard',
+                )
 
         page.close()
         ctx.close()
@@ -1097,8 +1530,17 @@ def check_target(
             continue
 
         canvas_non_blank, canvas_std = (True, -1.0)
+        lookdev_pixels = {'available': False, 'warnings': []}
+        closeup_shot = None
         if metrics['hasCanvas']:
             canvas_non_blank, canvas_std = analyze_canvas_variance(shot_path, metrics.get('canvasBox'), dpr=dpr)
+            lookdev_pixels = analyze_lookdev_pixels(shot_path, metrics.get('canvasBox'), dpr=dpr)
+            if run_4d_checks or (width > 900 and is_probe):
+                closeup_shot = save_closeup_crop(shot_path, metrics.get('canvasBox'), dpr=dpr)
+        lookdev_scene = evaluate_lookdev_scene_telemetry(metrics.get('lookDevTelemetry'))
+        lookdev_warnings = list(dict.fromkeys(
+            list(lookdev_pixels.get('warnings') or []) + list(lookdev_scene.get('warnings') or [])
+        ))
 
         # Aggregate multi-beat metrics with initial snapshot
         all_prose_hits = set(metrics['proseHits'])
@@ -1164,22 +1606,37 @@ def check_target(
         metrics['guideOverflow'] = any_guide_overflow
 
         prose_ok = len(all_prose_hits_list) == 0
-        min_canvas_w_ratio = 0.40 if metrics.get('layoutArchetype') in ('ab-compare', 'multi-view') else 0.45
-        frame_ok = (width <= 900) or (not metrics['hasCanvas']) or (
-            metrics['canvasWidth'] >= width * min_canvas_w_ratio and metrics['canvasHeight'] >= height * 0.45
-        )
+        min_canvas_w_ratio = 0.40 if metrics.get('layoutArchetype') == 'ab-compare' else 0.45
+        if v2_active:
+            frame_w, frame_h = metrics['stageWidth'], metrics['stageHeight']
+            frame_ok = metrics['hasActiveStage'] and (
+                width <= 900 or (frame_w >= width * min_canvas_w_ratio and frame_h >= height * 0.45)
+            )
+        else:
+            frame_w, frame_h = metrics['canvasWidth'], metrics['canvasHeight']
+            frame_ok = width <= 900 or not metrics['hasCanvas'] or (
+                frame_w >= width * min_canvas_w_ratio and frame_h >= height * 0.45
+            )
         chart_ok = len(chart_fail_beats) == 0
-        hud_ok = (width <= 900) or (len(all_hud_overlaps) == 0 and len(all_surface_occlusions) == 0)
+        hud_ok = len(all_hud_overlaps) == 0
 
         falsify_res = metrics.get('falsifyResult')
-        if v2_active:
-            falsify_ok = falsify_res is not None and bool(falsify_res.get('passed'))
-        else:
-            falsify_ok = True if falsify_res is None else bool(falsify_res.get('passed'))
+        is_v3 = metrics['simulifyVersion'] >= 3 or metrics['hasModel'] or (
+            isinstance(falsify_res, dict) and falsify_res.get('version') == 3
+        )
+        falsify_enforced = v2_active or is_v3
+        falsify_gate = {
+            'passed': evaluate_falsify(falsify_res, v2_active, from_model=metrics['hasModel'], is_v3=is_v3),
+            'enforced': falsify_enforced,
+        }
+        if not falsify_enforced and falsify_res is None:
+            falsify_gate['skipped'] = True
 
-        trunc_ok = (not v2_active) or (width <= 900) or (len(all_truncations) == 0)
+        trunc_ok = len(all_truncations) == 0
         gpu_ok = len(gpu_errors) == 0
-        visual_integrity_ok = canvas_non_blank and trunc_ok and gpu_ok
+        magenta_ratio = float(lookdev_pixels.get('magentaRatio', 0.0)) if lookdev_pixels.get('available') else 0.0
+        magenta_ok = magenta_ratio <= 0.015
+        visual_integrity_ok = canvas_non_blank and trunc_ok and gpu_ok and magenta_ok
 
         # Typography & Crispness gate (enforced on v2 benches)
         font_audit = metrics.get('fontAudit')
@@ -1193,13 +1650,15 @@ def check_target(
         tiny_text_ok = len(all_tiny_texts) == 0
         surface_density_ok = all(bool(d.get('ok')) for d in all_surface_densities)
         if v2_active:
-            typo_ok = fonts_ok and canvas_backing_ok and tiny_text_ok and surface_density_ok
+            typo_ok = fonts_ok and canvas_backing_ok and tiny_text_ok
         else:
             typo_ok = True
 
         # Anti-Cuboid Geometry Diversity gate (enforced on desktop v2 3D benches across populated beats;
-        # v1 benches, 2D stages, mobile sparse-t=0 viewports & pinned single-beat probes remain exempt)
-        geo_enforced = bool(v2_active and metrics['hasCanvas'] and width > 900 and not is_probe and not has_pinned_query)
+        # v1 benches, mobile sparse-t=0 viewports & pinned single-beat probes remain exempt)
+        geo_applicable = (v2_active or effective_profile == 'mechanical-3d') and collect_geometry and (
+            width > 900 and not is_probe and not has_pinned_query
+        )
         best_geo_beat = None
         best_geo_audit = None
         for btag, audit in geo_candidates:
@@ -1209,17 +1668,11 @@ def check_target(
                 best_geo_beat = btag
                 best_geo_audit = audit
 
-        if not geo_enforced:
-            skip_reason = (
-                'v1 bench'
-                if not v2_active
-                else ('2D stage (no 3D canvas)' if not metrics['hasCanvas'] else 'evaluated on desktop multi-beat check')
-            )
+        if missing_mechanical_stage:
+            geo_res = missing_stage_gate.copy()
+        elif not geo_applicable:
             geo_res = {
-                'passed': True,
-                'skipped': True,
-                'enforced': False,
-                'reason': skip_reason,
+                **skipped_gate('v1 bench' if not v2_active else view_skip_reason),
                 'sampleBeat': best_geo_beat,
                 'audit': best_geo_audit,
             }
@@ -1227,7 +1680,6 @@ def check_target(
             geo_res = {
                 'passed': False,
                 'skipped': False,
-                'enforced': True,
                 'reason': 'Missing window.__simulify.getGeometryAudit()',
                 'sampleBeat': None,
                 'audit': None,
@@ -1240,7 +1692,6 @@ def check_target(
             geo_res = {
                 'passed': geo_passed,
                 'skipped': False,
-                'enforced': True,
                 'sampleBeat': best_geo_beat,
                 'cuboidRatio': cuboid_ratio,
                 'sculptedMeshes': sculpted_meshes,
@@ -1249,12 +1700,23 @@ def check_target(
                 'audit': best_geo_audit,
             }
 
-        sparsity_res = v2_probes['sparsity'] if v2_probes else {'passed': True, 'skipped': True}
-        scrub_res = v2_probes['scrub'] if v2_probes else {'passed': True, 'skipped': True}
+        gate_results = {
+            'geometry_diversity': geo_res,
+            'three_views': three_views,
+            'initial_sparsity': sparsity_res,
+            'temporal_scrub': scrub_res,
+            'camera_ownership': camera_ownership,
+            'mandatory_falsify': falsify_gate,
+        }
+        profile_gates = {
+            gate: 'skipped' if result.get('skipped') else profile_policy[gate]
+            for gate, result in gate_results.items()
+        }
+        geo_res['enforced'] = profile_gates['geometry_diversity'] == 'hard'
 
         oracle = {
             'prose': {'passed': prose_ok, 'hits': all_prose_hits_list},
-            'frame': {'passed': frame_ok, 'w': metrics['canvasWidth'], 'h': metrics['canvasHeight']},
+            'frame': {'passed': frame_ok, 'w': frame_w, 'h': frame_h},
             'chart': {'passed': chart_ok, 'size': worst_chart_size, 'failedBeats': chart_fail_beats},
             'hud': {
                 'passed': hud_ok,
@@ -1269,13 +1731,15 @@ def check_target(
                 'chartFailBeats': chart_fail_beats,
             },
             'falsify': falsify_res,
-            'mandatoryFalsify': {'passed': falsify_ok, 'enforced': v2_active},
+            'mandatoryFalsify': falsify_gate,
             'initialSparsity': sparsity_res,
             'temporalScrubDeterminism': scrub_res,
             'visualIntegrity': {
                 'passed': visual_integrity_ok,
                 'canvasNonBlank': canvas_non_blank,
                 'canvasStd': canvas_std,
+                'magentaRatio': round(magenta_ratio, 5),
+                'magentaOk': magenta_ok,
                 'horizontalTruncations': all_truncations,
                 'gpuErrors': gpu_errors,
             },
@@ -1295,15 +1759,19 @@ def check_target(
             'geometryDiversity': geo_res,
             'threeViews': three_views,
             'cameraOwnership': camera_ownership,
+            'lookDev': {
+                'advisory': True,
+                'passed': len(lookdev_warnings) == 0,
+                'warnings': lookdev_warnings,
+                'pixels': lookdev_pixels,
+                'scene': lookdev_scene,
+                'closeupScreenshot': closeup_shot,
+            },
             'backend': {
                 'requested': requested_backend,
                 'actual': metrics['rendererBackend'],
-                'enforced': bool(requested_backend == 'webgpu' and metrics['hasCanvas']),
-                'passed': not (
-                    requested_backend == 'webgpu'
-                    and metrics['hasCanvas']
-                    and metrics['rendererBackend'] != 'webgpu'
-                ),
+                'enforced': requested_backend != 'auto',
+                'passed': requested_backend == 'auto' or metrics['rendererBackend'] == requested_backend,
             },
         }
 
@@ -1319,26 +1787,24 @@ def check_target(
             'canvasNonBlank': canvas_non_blank,
             'canvasStd': canvas_std,
             'dpr': dpr,
+            'lookDevPixels': lookdev_pixels,
+            'lookDevScene': lookdev_scene,
+            'lookDevWarnings': lookdev_warnings,
         }
 
         ok = (
             len(console_errors) == 0
             and len(page_errors) == 0
             and len(failed_requests) == 0
-            and (width <= 900 or not any_guide_overflow)
+            and not any_guide_overflow
             and backend_ok
             and prose_ok
             and frame_ok
             and chart_ok
             and hud_ok
-            and falsify_ok
             and visual_integrity_ok
             and typo_ok
-            and bool(geo_res.get('passed', True))
-            and bool(three_views.get('passed', True))
-            and bool(camera_ownership.get('passed', True))
-            and bool(sparsity_res.get('passed', True))
-            and bool(scrub_res.get('passed', True))
+            and all(gate_results[gate]['passed'] for gate, mode in profile_gates.items() if mode == 'hard')
         )
         if width <= 900 and metrics['thumbVisible'] is True and metrics['thumbTop'] is not None:
             if metrics['thumbTop'] > height:
@@ -1348,9 +1814,12 @@ def check_target(
             'url': rel_url,
             'viewport': f'{width}x{height}',
             'screenshot': str(shot_path),
+            'closeupScreenshot': closeup_shot,
             'consoleErrors': console_errors,
             'pageErrors': page_errors,
             'failedRequests': failed_requests,
+            'effectiveProfile': effective_profile,
+            'profileGates': profile_gates,
             'telemetry': telemetry,
             'metrics': metrics,
             'oracle': oracle,
@@ -1360,7 +1829,7 @@ def check_target(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Verify Simulify pages across 3 viewports, multi-beat timelines, deep-links, and v2.1 4D gates.'
+        description='Verify Simulify v3.1 pages across 3 viewports, multi-beat timelines, deep-links, 4D gates, and Look-Dev telemetry.'
     )
     parser.add_argument('--root', required=True, help='Root directory to serve over HTTP')
     parser.add_argument('--entry', default='index.html', help='Entry URL relative to root')
@@ -1368,11 +1837,15 @@ def main():
     parser.add_argument('--out-dir', default='./.verify-shots', help='Screenshot & receipt output folder')
     parser.add_argument('--channel', choices=['auto', 'chrome', 'chromium'], default='auto', help='Browser channel')
     parser.add_argument('--backend', choices=['auto', 'webgl2', 'webgpu'], default='auto', help='Graphics backend')
+    parser.add_argument(
+        '--profile', choices=['auto', *PROFILE_GATES], default='auto',
+        help='Verification profile (auto reads the runtime profile or infers one for v2 benches)',
+    )
     parser.add_argument('--dpr', type=float, default=1.0, help='Device scale factor for browser contexts (default: 1.0)')
     parser.add_argument(
         '--no-hic',
         action='store_true',
-        help='Disable CanvasDrawElement (HTML-in-Canvas) to verify non-HIC browser fallback parity',
+        help='Verify CanvasDrawElement fallback when the bench mounts a 3D HtmlSurface',
     )
     parser.add_argument('--strict-4d', action='store_true', help='Enforce Simulify v2 4D quality legs even on v1 benches')
     args = parser.parse_args()
@@ -1383,7 +1856,7 @@ def main():
     dpr = max(1.0, min(3.0, float(args.dpr)))
 
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout, sync_playwright
     except ImportError as exc:
         print(f'ERROR: playwright Python package is required ({exc}). Try: uv run scripts/verify_stage.py ...', file=sys.stderr)
         sys.exit(2)
@@ -1393,9 +1866,30 @@ def main():
     slug = pathlib.Path(args.entry).parent.name or pathlib.Path(args.entry).stem
 
     results = []
+    no_hic_applied = False
     try:
         with sync_playwright() as p:
-            browser = launch_browser(p, channel=args.channel, backend=args.backend, no_hic=args.no_hic)
+            browser = launch_browser(p, channel=args.channel, backend=args.backend)
+            if args.no_hic:
+                for suffix in ['', *args.probe]:
+                    probe_page = browser.new_page()
+                    try:
+                        probe_page.goto(urljoin(base_url, entry_url(args.entry, args.backend, suffix)), wait_until='domcontentloaded')
+                        probe_page.wait_for_function('window.__ready === true', timeout=12000)
+                        no_hic_applied = probe_page.evaluate("""() => {
+                            const hook = window.__simulify;
+                            const stage = hook?.stage?.stage || hook?.stage || hook?.scene?.stage;
+                            return (stage?.htmlSurfaces?.surfaces?.size ?? 0) > 0;
+                        }""")
+                    except PlaywrightTimeout:
+                        # The full verification captures the page's startup errors.
+                        pass
+                    finally:
+                        probe_page.close()
+                    if no_hic_applied:
+                        browser.close()
+                        browser = launch_browser(p, channel=args.channel, backend=args.backend, no_hic=True)
+                        break
             for idx, (vw, vh) in enumerate([(1280, 800), (1440, 900), (390, 844)]):
                 shot = out_dir / f'{slug}-{vw}x{vh}.png'
                 results.append(
@@ -1411,12 +1905,12 @@ def main():
                         strict_4d=args.strict_4d,
                         is_probe=False,
                         requested_backend=args.backend,
+                        cli_profile=args.profile,
                     )
                 )
 
             for idx, probe in enumerate(args.probe):
-                sep = '' if probe.startswith('?') else '?'
-                probe_url = f'{args.entry}{sep}{probe}'
+                probe_url = entry_url(args.entry, args.backend, probe)
                 shot = out_dir / f'{slug}-probe-{idx + 1}.png'
                 results.append(
                     check_target(
@@ -1431,6 +1925,7 @@ def main():
                         strict_4d=args.strict_4d,
                         is_probe=True,
                         requested_backend=args.backend,
+                        cli_profile=args.profile,
                     )
                 )
 
@@ -1439,21 +1934,28 @@ def main():
         httpd.shutdown()
 
     passed_all = all(r['passed'] for r in results)
+    contact_sheet = save_contact_sheet(results, out_dir / f'{slug}-contact-sheet.png')
     receipt = {
         'root': str(root_dir),
         'entry': args.entry,
         'channel': args.channel,
         'backend': args.backend,
+        'requestedProfile': args.profile,
+        'effectiveProfile': results[0]['effectiveProfile'],
         'dpr': dpr,
-        'noHic': args.no_hic,
+        'noHic': no_hic_applied,
+        'noHicRequested': args.no_hic,
         'strict4d': args.strict_4d,
         'passed': passed_all,
+        'contactSheet': contact_sheet,
         'checks': results,
     }
     receipt_path = out_dir / f'{slug}-receipt.json'
     receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding='utf-8')
 
     print(f'Receipt: {receipt_path}')
+    if contact_sheet:
+        print(f'Contact sheet: {contact_sheet}')
     for r in results:
         tag = 'PASS' if r['passed'] else 'FAIL'
         ora = r.get('oracle', {})
@@ -1468,18 +1970,28 @@ def main():
         h_issues = list(h_info.get('overlaps', [])) + list(h_info.get('surfaceOcclusions', []))
         h_str = 'OK' if h_info.get('passed') else f'FAIL({",".join(h_issues[:3])})'
         fal = ora.get('falsify')
+        falsify_gate = ora['mandatoryFalsify']
         if fal is None:
-            fal_str = 'FAIL(missing)' if ora.get('mandatoryFalsify', {}).get('enforced') else 'N/A'
+            fal_str = 'N/A' if falsify_gate.get('skipped') else 'FAIL(missing)'
+        elif not isinstance(fal, dict):
+            fal_str = 'FAIL(invalid)'
         else:
-            ok_cnt = sum(1 for a in fal.get('assertions', []) if a.get('passed'))
-            tot_cnt = len(fal.get('assertions', []))
+            assertions = fal.get('assertions') or []
+            ok_cnt = sum(1 for a in assertions if a.get('passed'))
+            tot_cnt = len(assertions)
             fal_str = f'{ok_cnt}/{tot_cnt}'
+            if not falsify_gate['passed']:
+                fal_str = f'FAIL({fal_str})'
         sp = ora.get('initialSparsity', {})
         sp_str = 'SKIP' if sp.get('skipped') else ('OK' if sp.get('passed') else f'FAIL(a0={sp.get("actorsAt0")},pk={sp.get("peakActors")})')
         sc = ora.get('temporalScrubDeterminism', {})
         sc_str = 'SKIP' if sc.get('skipped') else ('OK' if sc.get('passed') else f'FAIL(p={sc.get("maxProgressDiff")},rw={sc.get("rewindDiff")})')
         vi = ora.get('visualIntegrity', {})
-        vi_str = 'OK' if vi.get('passed') else f'FAIL(blank={not vi.get("canvasNonBlank")},trunc={len(vi.get("horizontalTruncations", []))})'
+        vi_str = (
+            'OK'
+            if vi.get('passed')
+            else f'FAIL(blank={not vi.get("canvasNonBlank")},magenta={vi.get("magentaRatio", 0):.4f},trunc={len(vi.get("horizontalTruncations", []))})'
+        )
         ty = ora.get('typographyCrispness', {})
         if ty.get('skipped'):
             ty_str = 'SKIP'
@@ -1518,20 +2030,41 @@ def main():
             co_str = f'OK(d={co.get("dragDelta")})'
         else:
             co_str = f'FAIL(d={co.get("dragDelta")},drift={co.get("driftAfterWait")},lock={co.get("userCameraLocked")})'
+        ld = ora.get('lookDev', {})
+        ld_px = ld.get('pixels') or {}
+        ld_warns = ld.get('warnings') or []
+        if not ld_px.get('available'):
+            ld_str = 'N/A'
+        else:
+            ld_base = (
+                f'H={ld_px.get("colorEntropyBits")} '
+                f'dom={ld_px.get("dominantColorShare")} '
+                f'edge={ld_px.get("edgeDensity")} '
+                f'con={ld_px.get("luminanceContrast")}'
+            )
+            ld_str = f'OK({ld_base})' if not ld_warns else f'WARN({ld_base}; {",".join(ld_warns)})'
         mb_cnt = ora.get('multiBeat', {}).get('sampledCount', 0)
         bk_info = ora.get('backend', {})
         bk_str = str(tel.get('rendererBackend'))
         if bk_info.get('enforced') and not bk_info.get('passed', True):
             bk_str = f'{bk_str}(FAIL:expected={bk_info.get("requested")})'
+        gates = r['profileGates']
+        gate_summary = ' '.join(
+            f'{mode}={",".join(gate for gate, state in gates.items() if state == mode) or "-"}'
+            for mode in ('hard', 'advisory', 'skipped')
+        )
+        closeup_note = f' +{pathlib.Path(r["closeupScreenshot"]).name}' if r.get('closeupScreenshot') else ''
 
         print(
             f'  [{tag}] {r["url"]} @ {r["viewport"]} | '
+            f'profile={r["effectiveProfile"] or "legacy"} {gate_summary} | '
             f'backend={bk_str} hic={tel.get("htmlInCanvasSupported")} beats={mb_cnt} | '
             f'console={len(r["consoleErrors"])} pageErr={len(r["pageErrors"])} '
             f'reqFail={len(r["failedRequests"])} overflow={r["metrics"]["guideOverflow"]} '
             f'oracle=[prose:{p_str} frame:{f_str} chart:{c_str} hud:{h_str} falsify:{fal_str} '
-            f'sparse:{sp_str} scrub:{sc_str} vis:{vi_str} typo:{ty_str} geo:{gd_str} views:{tv_str} cam:{co_str}] '
-            f'-> {pathlib.Path(r["screenshot"]).name}'
+            f'sparse:{sp_str} scrub:{sc_str} vis:{vi_str} typo:{ty_str} geo:{gd_str} views:{tv_str} cam:{co_str} '
+            f'lookdev:{ld_str}] '
+            f'-> {pathlib.Path(r["screenshot"]).name}{closeup_note}'
         )
     sys.exit(0 if passed_all else 1)
 

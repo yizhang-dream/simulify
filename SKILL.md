@@ -1,137 +1,164 @@
 ---
 name: simulify
 description: >-
-  Turn a mechanism, physical structure, hardware/protocol flow, mathematical law, or algorithm into a
-  standalone offline interactive 3D/4D HTML explainer: structured concept drafts + mandatory
-  orthographic three-view blueprints (Front/Side/Top LxWxH proportion lock), true volumetric 3D
-  sculpting & cutaways, progressive temporal revelation over continuous reversible 4D timelines,
-  1:1 HiDPI WebGPU + HTML-in-Canvas progressive enhancement, offline four-tier typography & KaTeX
-  live equation substitution, counterfactual ghosts, and offline MP4/WebM/GIF export.
-  Use whenever a flat page (answer-me-with-html), 2D diagram (archify), or static textbook
-  (atlas-textbook) cannot show 3D spatial occlusion, progressive causal time evolution, or hands-on
+  Turn a mechanism, physical structure, mathematical law, or dynamical system into an offline
+  interactive 3D/4D workbench (self-contained static bundle) — even from a short 5–20 word prompt
+  or raw paper/notes/code/screenshot. Performs silent grounding discovery & misconception mining,
+  scaffolds cleanly via `scripts/new_bench.py`, drives every view from one `createSimModel()`
+  `solve()` truth with structured counterfactual falsification, and renders sculpted 3D/cutaways,
+  fields, direct manipulation, offline four-tier typography & KaTeX across 3 profiles
+  (`mechanical-3d`, `field-math`, `sandbox-direct`), 3 layouts, and 6 CSS skins.
+  Primer skins use rounded tactile geometry and satin lighting.
+  Use whenever 2D prose (answer-me-with-html), 2D diagrams (archify), or interactive books
+  (atlas-textbook) cannot expose 3D spatial occlusion, continuous causal evolution, or hands-on
   "what-if" dynamics — or when the user asks for 用 3D 讲 / 做个 3D 或 4D 交互演示 / 拆解内部结构 /
   做成可调参实验台 / 拖时间轴看过程 / 动起来看原理 / 仿真拆解 / interactive 3D explainer /
-  explorable simulation / cutaway view. Do not use for pure mini-games or decorative 3D backgrounds
-  without explanatory rules.
+  explorable simulation / cutaway view. Do not use for pure 2D flowcharts (use archify), motion
+  video production (use onetake), mini-games, or decorative 3D backgrounds.
 ---
 
-# Simulify v2.2 — True 4D Mechanism, Multi-Layout Studio & Scientific Field Explainer
+# Simulify v3.1 — Grounded 3D/4D Mechanism & Scientific Workbench
 
-> **Suite Role**: **`answer-me-with-html`** explains via 2D prose/tables; **`archify`** draws structural/sequence diagrams; **`atlas-textbook`** weaves connected readable books; **`simulify`** builds **true 4D progressive-reveal 3D/2.5D simulation workbenches & editorial scrollytelling stages** across **6 layout archetypes and 6 visual skins**, where sculpted actors, solid stencil cutaways, scientific fields, KaTeX equations, and plots enter *only when causal friction demands them*, learners scrub time or scroll continuously forward/backward, manipulate the stage directly, compare counterfactual ghosts, and export crisp MP4/WebM/GIF clips.
-
-Simulify v2.2 enforces quality through **1 human visual decision + Four Plugin-Level Iron Laws + code-enforced multi-beat, layout-aware engineering & interactive oracles**:
-
----
-
-## The Four Plugin-Level Iron Laws (Mandatory Across All Disciplines)
-
-Every Simulify workbench — whether physics, mechanics, electronics, optics, biology, protocols, or mathematics — MUST obey all four laws:
-
-### Iron Law 1 · 1:1 Physical Sharpness, Studio Lighting Depth & Camera Ownership
-- **Exact physical backing**: [`IsometricStage`](kit/stage-3d.js) binds `ResizeObserver({ box: 'device-pixel-content-box' })` and renders at exact physical pixels (`setPixelRatio(1) + setSize(physicalWidth, physicalHeight, false)`, DPR up to 3×), eliminating fractional-DPI bilinear blur.
-- **Aligned lighting, depth cues & four-layer isolation**: Main key light casts aligned shadows directly (no floating directional mismatch) paired with a crisp silhouette `_rimLight`, zero-extra-pass Screen-Space Crease Ambient Occlusion (`stage.setAOStrength()`), radial-fade procedural ground grids (`stage.setGridStyle('cartesian' | 'polar' | 'plinth' | 'none')`), soft contact shadows (`stage.addContactShadow()`), local accent lights (`stage.createAccentLight()`), and optional Depth-of-Field (`stage.enableDepthOfField()`). Transparent glass & Fresnel X-Ray shells live on **`GLASS_LAYER = 3`** (lit & refracted in `colorPass`, excluded from `solidPass` so interior ink silhouettes remain unbroken).
-- **Crisp textures & outlines**: Run `stage.configureSharpTexture(tex)` on every custom `CanvasTexture` / texture (auto max anisotropy up to 16×, `SRGBColorSpace`, trilinear mipmaps). Select `stage.setOutlinePreset('crisp' | 'subtle' | 'none')` (1-ring physical-pixel engineering ink line, `NeutralToneMapping`, zero wide grey fog halo).
-- **Isolated 2× HiDPI 3D HTML surfaces**: Mount diegetic 3D HTML panels via [`kit/html-surface.js`](kit/html-surface.js) onto un-tone-mapped `SURFACE_LAYER` (Layer 2) — automatically allocated at `>= 2×` CSS border-box / projected screen scale with premultiplied-linear mipmaps, 16× anisotropy, and an untainted pure-Canvas2D 3D `CanvasTexture` fallback for Firefox/Safari.
-- **Respect user camera ownership & idle GPU**: Choreography beats MUST call `stage.setCameraFromScript(pose)` so user orbit/zoom/`flyTo` locks (`stage.isUserCameraLocked()`) are NEVER snapped back by script (`resetView()` or `stage.unlockUserCamera()` releases lock). Drive updates via on-demand `stage.requestRender()` so paused scenes burn 0fps GPU.
-- **ClearType DOM discipline**: **BAN `backdrop-filter`** on content/HUD cards and **BAN steady-state `translate3d(...)` / static `will-change: transform`** (use integer `left`/`top` or `transform: none` at rest; [`CalloutLayer`](kit/callout-layer.js) enforces integer `left`/`top` + `style: 'editorial'`).
-
-### Iron Law 2 · Multi-Layout Presentation, Offline Four-Tier Typography & True Math Typesetting
-- **Choose layout by explanation shape ([`kit/layout-shell.js`](kit/layout-shell.js)) — NEVER force every topic into floating corner HUD cards**:
-  - `fullbleed-hud`: 3D hero full-bleed canvas with minimal translucent-free corner docks (boxed chrome `<= 25%`).
-  - `split-bench`: CSS Grid two-column workbench (`stage-pane` + scrollable `split-aside` for math, plots, code & controls with `@container` responsive cards and zero canvas occlusion).
-  - `ab-compare`: Synced dual-stage comparison (`mode: 'side'` or drag-handle `WipeCompareController` curtain via `stageA.syncCameraWith(stageB)`).
-  - `multi-view`: Primary isometric stage + live synchronized Front / Side / Top orthographic strip (`stage.updateMultiViewStrip()`).
-  - `scrolly-stage`: Editorial magazine scrollytelling — comfortable reading column (`15.5px / 58ch`) alongside a sticky 3D stage driven continuously & reversibly by `ScrollyBridge` + CSS Scroll-Driven progress rail.
-  - `zen`: Toggleable (`toggleZenMode()`) chrome-free cinema/presentation view (`data-zen="true"`).
-- **Six curated skins & colorblind-safe Okabe-Ito tokens**: Pick `paper-ink`, `dark-studio`, `bio-cutaway`, `blueprint`, `monochrome-print`, or `obsidian-gallery` (`data-theme="..."`), using `--cat-1..8` for multi-series categorical encodings and editorial hierarchy (`--fs-hero`, `--fs-kpi`, `.kpi-readout`, `.editorial-block`, `mountViewCube`, `mountScaleBar`).
-- **Zero-CDN Claude-style editorial serif & four-tier WOFF2 system**: Import [`kit/primer-tokens.css`](kit/primer-tokens.css) + [`kit/theme-studio.css`](kit/theme-studio.css) (pulling [`kit/fonts/fonts.css`](kit/fonts/fonts.css) + [`kit/katex/katex.min.css`](kit/katex/katex.min.css) offline). Headings & narrative/scrollytelling prose use `--font-display` / `--font-prose` (`Newsreader` + `Simulify Serif SC` 400 Regular / 650 Display, `16px / 1.74` Claude editorial cadence), UI controls stay crisp in `--font-sans` (`Inter` + `Simulify Sans SC`), formulas use all 20 offline KaTeX WOFF2 fonts, and telemetry/code use `--font-mono`.
-- **Unified Canvas/DOM font bridge**: Use [`kit/fonts.js`](kit/fonts.js) (`waitForFonts()`, `canvasFont(role, px, weight, style)` incl. `'prose'`/`'serif'`, and `createCrispCanvasTexture(THREE, { width: 512, height: 512, draw, ... })` with `>= 512px` textures that auto-redraw once fonts settle).
-- **Full offline KaTeX formula rendering & live substitution**: [`kit/live-maths.js`](kit/live-maths.js) bundles full offline KaTeX ([`kit/katex/katex.mjs`](kit/katex/katex.mjs)) with `renderTex(tex, el?, opts)`, `substituteTexVars(tex, vars, opts)`, and `renderMathInElement(root, opts)` (auto-rendering `$...$`, `$$...$$`, `\(...\)`, `\[...\]` with escaped `\$` & currency `$100` guards across prose, cards, and [`CalloutLayer`](kit/callout-layer.js)). `LiveMathsPanel` accepts native `{ label, tex, displayMode, vars, linkMap }` equations (with `LinkBus` interactive tokens) alongside 100% backward-compatible AST helpers (`mathVar`, `mathFrac`, `mathSqrt`, `mathMatrix`, `mathCases`, `mathAccent`, `mathFence`, `mathAlign`).
-- **Hard typography bans**: **NEVER** render Chinese text with Latin-only monospace fonts; **NEVER** hand-type broken Unicode micro-subscripts/superscripts (`ₜ`, `ₙ`, `ᵏ`, `⁴`) in formulas; **NEVER** ship unreadable `< 11.5px` micro-text (HUD/SVG floor `>= 11.5px`, prose `>= 13.5px`, scrolly editorial serif prose `16px`, equations `14.5px`).
-- **Offline project font shrinking**: Use `scripts/setup_vendor.py` to bundle `vendor/three/` + `kit/fonts/`, and shrink standalone deliverables to exact used glyphs via:
-  ```bash
-  uv run --with fonttools --with brotli python scripts/setup_vendor.py <target_dir> --fonts-only --subset-cjk <project_dir>
-  ```
-
-### Iron Law 3 · Anti-Cuboid Volumetric Sculpting, Solid Cutaways & Dynamic Scientific Fields
-- **BAN single-view 2D guesswork & flat extruded posters**: **NEVER** model 3D scenes by eyeballing a single perspective/isometric 2D illustration. Every 3D bench MUST derive its geometry from a locked **Orthographic Three-View Blueprint (Front / Side / Top)** and a single shared `DIMENSIONS` constant table (`L`, `W`, `H`, thicknesses, clearances, motion envelopes in world units), holding true volumetric depth across all angles (`bounds.flatnessRatio >= 0.08` on `stage.getGeometryAudit()`).
-- **BAN Lego-box scenes & hollow paper-shell slices**: **Explicitly FORBIDDEN** to build whole 3D workbenches out of stacked cuboids + unlit `MeshBasicMaterial`, or leave cutaway solids looking like hollow paper shells! Every v2 3D bench is audited via `stage.getGeometryAudit()` (`cuboidRatio <= 0.70`, `sculptedMeshes > 0`, and non-flat volumetric `bounds`), and cutaway assemblies use **`stage.createCutawayCap(target, plane)`** (WebGPURenderer `THREE.ClippingGroup` + `stencilBuffer: true` solid 45° cross-hatched cap, also compatible with WebGLRenderer).
-- **Compose from [`kit/geo-sculpt.js`](kit/geo-sculpt.js) (5 sculpting families + cached procedural micro-PBR & Fresnel X-Ray) + [`kit/field-viz.js`](kit/field-viz.js) (scientific field & engineering annotation primitives)**:
-  1. **Turned / Lathed Solids (`'lathe'`)**: `createLathedSolid`, `createGlassVessel` (`ampoule`/`flask`/`dome`/`lens`, glass auto-routed to `GLASS_LAYER`), `createSculptedProbe`, `createBeaconLighthouse`.
-  2. **Bevelled Extruded Profiles (`'extrude'`)**: `createBevelledProfile`, `createGearWheel`, `createHorseshoeYoke`, `createArchSpan`, `createAirfoilVane`.
-  3. **Zero-GC Deformable Terrains, Fractures, Parametric Surfaces & Elastic Strips (`'heightfield' | 'chasm' | 'parametric' | 'strip'`)**: `createHeightfieldSurface` (supports separate `skirtMaterial`), `createFracturedChasm`, `createParametricSurface`, `createDeformableStrip`.
-  4. **True 3D Helices, Conduits & Bellows (`'helix' | 'conduit' | 'bellows'`)**: `createHelicalCoil`, `createTaperedConduit`, `createPleatedBellows`.
-  5. **Theme-Aware Micro-PBR & X-Ray Materials**: `createSculptMaterial(preset, overrides)` (10 presets with cached deterministic `createProceduralSurfaceMaps()` brushed/grain/anodized micro-bump & roughness maps across all 6 skins) + `createXRayMaterial()` (Fresnel translucent rim shell on `GLASS_LAYER`).
-  6. **Dynamic Fields & Engineering Annotations ([`kit/field-viz.js`](kit/field-viz.js))**: `COLORMAPS` (`viridis`/`plasma`/`magma`/`coolwarm`/`thermal`/`cividis`) + `renderColorbar()`, `createFlowConduit()` (directional chevron pulses + draw-on), `createVectorField()` (zero-GC 3D arrows), `createDeterministicSwarm()` (reversible 4D instanced particles), `createMotionTrail()` (ribbon + stroboscopic ghosts), `createDimensionMeasure()` / `createForceArrow()` / `createAngleArc()` (auto-contrast camera-facing 3D sprite plaques), and `createContourField()` (iso-contour scalar heightfield with clean matte skirt).
-- **Cross-disciplinary sculpting map** (full guide in [fidelity-isomorphism.md](references/fidelity-isomorphism.md)):
-
-| Discipline | Replace Crude Boxes With (`kit/geo-sculpt.js`) |
-| :--- | :--- |
-| **Mechanics / Thermo** | `createGearWheel`, `createHelicalCoil` (spring/filament), `createDeformableStrip` (`bimetallic` / cantilever), `createPleatedBellows`, `createArchSpan` |
-| **Optics / Thermal / Chem** | `createGlassVessel` (`ampoule`/`flask`/`dome`/`lens`), `createBeaconLighthouse` (Fresnel rings), `createHelicalCoil` (emitter), `createTaperedConduit` (light/fluid beam) |
-| **EM / Math / Opt / RL** | `createHorseshoeYoke` (magnet), `createHeightfieldSurface` (potential/value/loss landscape), `createFracturedChasm` (discontinuity/cliff), `createSculptedProbe` (agent/field probe), `createTaperedConduit` (flux/policy ribbon) |
-| **Biology / Anatomy / Fluid** | `createParametricSurface` (membrane/tissue), `createLathedSolid` + cutaway planes (vessel/chamber), `createTaperedConduit` (vascular duct), `createPleatedBellows` (diaphragm/pump) |
-| **Hardware / Aero / Protocols** | `createAirfoilVane` (fin/wing), `createBevelledProfile` (chassis/PCB/bracket), `createTaperedConduit` (signal/bus stream), `createSculptedProbe` (logic probe) |
-
-### Iron Law 4 · Multi-Beat Real Interaction Oracle & Truth Integrity
-- **Single `solve()` truth — zero fakes**: Every 3D displacement, trajectory ribbon, chart coordinate, code highlight, and live equation number MUST come from one deterministic `solve()` engine. **BAN** hardcoded fake trajectories, fake progress bars, or fake highlights.
-- **Pass EVERY leg of [`scripts/verify_stage.py`](scripts/verify_stage.py)** across all sampled acts (never rely on a `t = 0.35s` opening screenshot alone): multi-beat HUD & 3D `HtmlSurface` occlusion (`<= 15%`), `typography-crispness`, `geometry-diversity`, `camera-ownership` real drag + 400ms hold, and `--no-hic` non-`CanvasDrawElement` fallback parity.
+> **Suite Role**: **`answer-me-with-html`** explains via 2D prose/tables; **`archify`** draws 2D architecture/protocol/flow diagrams; **`atlas-textbook`** builds readable interactive books; **`onetake`** produces motion videos; **`simulify`** focuses strictly on **offline, single-truth 3D/4D simulation workbenches** across **3 focused profiles, 3 layouts, and 6 unified CSS skins (2 aesthetic rendering tiers)** — turning short prompts or raw study materials into crisp, directly manipulable models that expose *why* a mechanism works and *how* it breaks.
 
 ---
 
-## Step 1 · Concept Draft, Cast & Reveal Ledger & Mandatory Orthographic Three-View Blueprint (Human Lock)
+## Core Craft Laws
 
-Before writing HTML or scene code:
-1. **Present structured Concept Drafts (概念稿) — NOT single-view 2D perspective art**:
-   - Lock the orthogonal coordinate choices:
-     - **Native Truth Axis (`①–④`)** in [fidelity-isomorphism.md](references/fidelity-isomorphism.md):
-       **① Physical/Spatial** (3D cutaway/X-Ray, clipping planes) · **② Logic/Code/Protocol** (2D/2.5D spacetime ladder or hardware ↔ synchronized code/dissector) · **③ Math/Optimization/RL** (formal workspace + `LiveMathsPanel` with bidirectional `LinkBus` tokens) · **④ Physical × Math Dual** (3D bench coupled live to phase-time helix/plot + collapsible formulas from one `solve()`).
-     - **Time Regime (`T1–T4`) & Progressive-Reveal Law** in [time-dimension.md](references/time-dimension.md):
-       - **BAN `t = 0` spatial dumping & `showEnd()` on load.** Never drop the whole chapter's objects, comparison tracks, and 4-corner HUD panels onto frame 0.
-       - **Draft a Beat-by-Beat Cast & Reveal Ledger**: open sparse at `t = 0` (`<= 2` active actors on stage, minimal chrome), unfold over an unhurried **25–60 s continuous global timeline**, and state the exact **causal trigger** for every subsequent actor, subsystem, chart, formula, and HUD reveal (`enter`, `focus`, `cameraBeat`, `hudReveal`).
-     - **Topic Track & Agency** in [topic-fit.md](references/topic-fit.md): design direct on-stage manipulation (`kit/manipulator.js` — drag handles, paintable tiles, clickable in-flight packets, clock-bound auto-exit on act switch) instead of slider-only sidebars.
-   - Propose **2–3 distinct architectural & explanatory Concept Drafts** in crisp structured prose/tables (truth axis, **layout archetype** `fullbleed-hud | split-bench | ab-compare | multi-view | scrolly-stage`, **visual skin** `paper-ink | dark-studio | bio-cutaway | blueprint | monochrome-print | obsidian-gallery`, volumetric 3D structure & cutaway hierarchy, `T1–T4` beat progression, direct manipulation, and falsification assertions). Do **NOT** generate misleading single-view 2D concept renders that encourage flat-poster extrusion.
-2. **Generate the Mandatory Orthographic Three-View Blueprint (工程三视图: 正视 Front / 侧视 Side / 俯视 Top) + `DIMENSIONS` Table**:
-   - Once the concept draft direction is chosen (or directly when the user's architecture is already specific), generate an **aligned orthographic Three-View Blueprint image** showing **Front (正视图) + Side (侧视图) + Top (俯视图)** projections (optionally with a small 3/4 assembly inset) drawn to true uniform scale, accompanied by an explicit **`DIMENSIONS` table (`L × W × H` in world units, elevation datums, part thicknesses, clearances, and 4D motion envelopes)**.
-   - Verify in Front and Side elevations that the mechanism has genuine 3D volumetric layering/cutaway depth and zero distorted/squashed proportions before touching Three.js.
-3. **Stop for user lock on the Concept Draft & Three-View Blueprint.** Do NOT skip directly to scene code unless the user explicitly opted out for the current turn.
+1. **Single-Truth `createSimModel()` & Failure-Mode Verification (No Fake Animations)**
+   - Drive every 3D transform, field contour, chart curve, and live equation number from ONE deterministic `solve(params, t)` inside [`kit/model-core.js`](kit/model-core.js) (`createSimModel`, plus `rk4Step` / `integrateRK4` / `bisectRoot` when dynamics need numerical integration).
+   - Every bench ships with **structured failure modes / stress tests (`falsifyCases`)** executed by `model.falsify()`: the runtime re-runs `solve()` on baseline vs. mutated parameters and checks **independent physical/mathematical invariants** (conservation laws, monotonicity, critical thresholds, zero-input rest — never copy `solve()` formulas to self-validate, and never ship hardcoded `{ passed: true }` stubs).
 
----
+2. **Focused 3D/4D Form & Two Aesthetic Rendering Tiers (Zero Feature Bloat)**
+   - Pick **1 of 3 Profiles** so the oracle enforces what actually matters:
+     - `mechanical-3d` — precision assemblies, linkages, cutaways, anatomy (locks `DIMENSIONS` + orthographic three-view blueprint + anti-cuboid gate).
+     - `field-math` — scalar/vector fields, loss/phase surfaces, optimization, RL, PDE/wave phenomena.
+     - `sandbox-direct` — hands-on instruments and coordinate spaces that open immediately manipulable.
+   - Pick **1 of 3 Layouts** (`fullbleed-hud` | `split-bench` | `ab-compare`; `zen` is a universal HUD-hide toggle via `toggleZenMode`) and **1 of 6 CSS Skins** split cleanly across **2 Aesthetic Tiers** ([references/design-system.md](references/design-system.md)):
+     - **Primer Tactile Illustration** (`paper-ink`, `monochrome-print`): `NoToneMapping`, Selective IBL (matte dielectrics keep `envMap = null`), Next-Gen Object-ID + 8-direction circular-AA + `userData.ink` / `inkThin` outline pass, warm sepia ink `#1f160f`, analytical `fwidth()` ground grid, soft PCF (radius 4.2) + Gaussian contact shadow.
+     - **Studio Precision PBR** (`dark-studio`, `obsidian-gallery`, `bio-cutaway`, `blueprint`, or `mechanical-3d` realistic mode): procedural `StudioLightformerEnvironment` (`sigma <= 0.01`), `NeutralToneMapping`, native 4× MSAA with `outline: 'none'` (relying on crisp chamfers/bevels + tight `Box3` shadows).
+   - **Anti-Kitchen-Sink discipline**: consult [`kit/index.d.ts`](kit/index.d.ts) first and import only the 2–4 modules the core insight genuinely needs.
 
-## Step 2 · Assemble from `kit/` & Domain `primitives/` (Zero-CDN Offline ESM)
+3. **Intentional Time & Direct Agency**
+   - Drive all continuous evolution from one `SpacetimeClock` + `SimulationTape` (`captureGhost()` for baseline ghost overlays) and `ActorChoreographer` (pure functions of `t`, calling `stage.setCameraFromScript(pose)` so user drag never loses camera ownership).
+   - Progressive reveal is a storytelling tool for multi-beat mechanisms, not a forced 4-act tax: `sandbox-direct` and `field-math` may open straight onto the live, directly draggable workspace (`kit/manipulator.js`).
 
-Once the user selects a concept:
-1. **Extract offline vendor runtime + four-tier fonts**: run `python scripts/setup_vendor.py <target_dir>` (zero CDN imports; extracts `three.core.js`, `three.webgpu.js`, `three.tsl.js`, `RoomEnvironment.js`, `RoundedBoxGeometry.js`, `BufferGeometryUtils.js`, legacy `three.module.js`, plus `kit/fonts/`). For compact standalone bundles, append `--subset-cjk <project_dir>`.
-2. **Drive everything from ONE deterministic 4D clock + pure-function choreography**:
-   - Use [`kit/spacetime.js`](kit/spacetime.js): `SpacetimeClock` (single master global clock `0 → T`, single-channel `seek()` dispatch, speed dilation `0.1×–2×`, beat/act bookmarks, `setManualMode(bool)`) and `SimulationTape` (O(1) continuous forward/backward `sampleAt(t)` + `captureGhost()` / `getGhost()` for translucent counterfactual overlays). **Never** drive scene animations off raw `performance.now()` or spawn competing `rAF` loops.
-   - Use [`kit/choreography.js`](kit/choreography.js): `ActorChoreographer` (`register`, `enter` [incl. `'explode' | 'draw' | 'blueprint'`], `exit`, `explodeGroup`, `clipSweep`, `focus` [prefer `'matte'` or `'wireframe'` over alpha-sorting opacity], `cameraBeat` respecting `stage.setCameraFromScript`, `hudReveal`, `evaluate(t)`, `getActiveActorCount(t)`) so every 3D actor, cutaway cap, 3D HTML surface, camera move, and contextual HUD panel is a pure, reversible function of `t`.
-   - Use [`kit/layout-shell.js`](kit/layout-shell.js) for layout controllers (`ScrollyBridge`, `WipeCompareController`, `mountViewCube`, `mountScaleBar`, `toggleZenMode`, `setShellPresentation`), and [`kit/timeline-director.js`](kit/timeline-director.js) for `mountTimelineBar`, `applyUrlState`, and `exposeTestHooks` (synthesizing `window.__simulify` v2).
-3. **Crisp 1:1 WebGPU + Sculpted 3D + Dynamic Fields + HTML-in-Canvas + Direct Manipulation**:
-   - Initialize [`kit/stage-3d.js`](kit/stage-3d.js) via `await IsometricStage.create(canvas, opts)` (1:1 physical pixels, aligned key/shadow + `_rimLight`, SS-Crease AO, `setGridStyle`, `addContactShadow`, `createAccentLight`, `createCutawayCap`, `syncCameraWith`, `updateMultiViewStrip`, `GLASS_LAYER` & `SURFACE_LAYER`, hardware WebGPU → WebGL2 → fallback).
-   - Build 3D mechanisms using [`kit/geo-sculpt.js`](kit/geo-sculpt.js), dynamic scientific fields/annotations via [`kit/field-viz.js`](kit/field-viz.js), and reusable domain [`primitives/`](primitives/) instead of stacked cuboids; draw 3D plaques/gauges with [`kit/fonts.js`](kit/fonts.js) `createCrispCanvasTexture` (`>= 512px`).
-   - Mount live diegetic HTML (KaTeX equations from [`kit/live-maths.js`](kit/live-maths.js) with `surfaceMode: true` & `LinkBus` `linkId` tokens, code traces, telemetry) via [`kit/html-surface.js`](kit/html-surface.js) (`SURFACE_LAYER`, `>= 2×` HiDPI + mipmaps + untainted non-HIC 3D fallback).
-   - Wire direct stage interactions via [`kit/manipulator.js`](kit/manipulator.js) (`bindClock`), multi-mode persistent charts via [`kit/chart-card.js`](kit/chart-card.js) (`xy`, `hysteresis`, `distribution`, `heatmap`, `timing`, `spark-kpi`), editorial/interactive callouts via [`kit/callout-layer.js`](kit/callout-layer.js) (`style: 'editorial'`, `linkBus`, `quietMode`), theme-aware 4D Track B topology via [`kit/stage-2d.js`](kit/stage-2d.js) (`setPacketSchedule`), and offline export via [`kit/stage-exporter.js`](kit/stage-exporter.js).
-   - On `fullbleed-hud`, keep boxed HUD chrome `<= 25%` of viewport (on `split-bench` / `scrolly-stage`, prose & panels live in their own structured column outside the canvas); tag HUD containers with `data-export-role="chrome|caption|callout|panel|stage"`, and follow [`design-system.md`](references/design-system.md) & [`stage-architecture.md`](references/stage-architecture.md).
+4. **Sculpted Craft, Hard Anti-Slop & Three.js r187 Guardrails**
+   - Compose physical mechanisms from [`kit/geo-sculpt.js`](kit/geo-sculpt.js) (lathed solids, gears, coils, conduits, bevelled profiles, deformable strips, heightfields, 45° stencil cutaways), [`kit/field-viz.js`](kit/field-viz.js), and reusable [`primitives/`](primitives/) — never stacked `BoxGeometry` Lego blocks. Glow never makes primitives look crafted: build authored forms first, then materials, then lighting, then motion.
+   - **Hard Anti-Slop & r187 Rules**:
+     - **Never wash matte dielectrics with global `RoomEnvironment`**: in Three.js r187, `scene.environment` silently ignores `material.envMapIntensity`! Use Selective IBL (`material.envMap = null` on matte clay/ceramic/travertine/rubber; studio softbox `envMap` ONLY on metals, enamel clearcoat, and glass).
+     - **Never use mud-zone intermediate metalness (`0.2–0.7`)** or blurry `128²` `DataTexture` roughness/bump maps that slash matte roughness into shiny plastic. Separate material roles by **roughness/metalness contrast**, not hue alone.
+     - **Never wash out mathematical heightfields/fields with `emissive > 0` albedo lift**: render shaded `MeshPhysicalMaterial` (`roughness ~0.44`, subtle `clearcoat ~0.24`, `emissiveIntensity: 0`) plus crisp analytical `fwidth()` iso-contours.
+     - **Never call `bumpMap(proceduralPositionLocalNode)` in r187 TSL** (evaluates to zero because `bumpMap()` only perturbs `uv()`); use direct surface-gradient derivatives or TSL `roughnessNode`/`colorNode` micro-variation instead.
+     - **Always call `stage.fitShadowFrustum(...)`** after mounting initial geometry so >50% of shadow map texels cover real meshes, and frame subjects tightly enough that bevels/chamfers span **≥ 2 px** on screen.
+   - Keep typography razor-sharp and zero-CDN via `kit/fonts/` (`Newsreader` + `Noto Serif SC` / `Inter` + `Noto Sans SC` / `JetBrains Mono`) and offline KaTeX (`kit/katex/`). Never hand-type broken Unicode micro-subscripts (`ₜ`, `ₙ`, `ᵏ`) or `< 11.5px` micro-labels.
+   - Default to the stable WebGL2/WebGPU + DOM/CSS HUD & Callout pipeline. Experimental 3D HTML-in-Canvas ([`kit/html-surface.js`](kit/html-surface.js)) is **strictly opt-in** when diegetic 3D panels are truly needed.
 
 ---
 
-## Step 3 · Pass the v2.2 Layout-Aware Multi-Beat 4D Quality Oracle, Visual Check & Export
+## Primer Tactile Roundness Craft (圆润手办造型规范)
 
-1. Run `node tests/run-tests.mjs` for ESM syntax, v2.2 core kit unit invariants (layouts, 6 skins, lighting/cutaway-cap, geo-sculpt micro-PBR/X-Ray, field-viz, fonts, extended live-maths, 6-mode chart-card, spacetime, choreography, 4D stage-2d, muxers), manifest sync, and zero broken markdown links.
-2. Run the upgraded **v2.2 Layout-Aware Multi-Beat 4D Quality Oracle** ([`scripts/verify_stage.py`](scripts/verify_stage.py)):
+- **Generous Bevel Law (10%–18%)**. In Primer mode, bevel solid blocks, bases, housings and cutaway caps by 10–18% of local thickness. Use `bevelSegments: 3–4` and `curveSegments: 24–32`. Use spline-smoothed or filleted lathe profiles on bell housings and tire shoulders. Finish shafts with domed ends (`CapsuleGeometry` or a rounded lathe profile). Every visible cutaway rim needs a readable rounded bevel.
+- **Satin vs Chrome Separation**. For `paper-ink` and `monochrome-print`, use PMREM `sigma: 0.030`, satin metal `roughness: 0.30–0.36` and `metalness: 0.78–0.85`, and warm soft PCF shadows (`radius: 4.2`, receiver opacity `0.25`). The default `primer` outline uses a rounded nib (`thickness: 1.3`, `normalThreshold: 0.42`). Use `inkNormals: 'none'` on curved or multi-tooth parts when internal creases get noisy. Reserve sharp highlights (PMREM `sigma: 0.008`, polished metal `roughness: 0.18–0.24`, PCF `radius: 1.65`) for Studio Precision PBR skins.
+
+---
+
+## Step 0 · Discover & Ground (Assume Short Prompts by Default)
+
+Follow [references/grounding-discovery.md](references/grounding-discovery.md) before designing:
+
+1. **Short prompt (5–25 words, no files)**:
+   - Silently assemble a compact **Grounding Brief**: (a) governing equations & realistic parameter ranges, (b) canonical learner misconceptions (fuel for Ghosts & `falsifyCases`), (c) component BOM & degrees of freedom / occluded internals, and (d) the single strongest visual "Aha" hook.
+   - Ask **at most 1 high-information-gain question** targeting *which cognitive bottleneck to crack* (2–3 concrete angles, recommended default first) — never interrogate the user about skins or layouts. If the user says "just build it", skip the question and state a 3-line assumption card.
+2. **Raw material (paper, notes, code, screenshot)**:
+   - Extract the 4-piece skeleton: Baseline failure → 3D spatial/causal topology → 1–2 governing equations & parameters → Failure/ablation mode.
+3. **Source transparency**: Tag key proportions/parameters as `[Verbatim / Measured]`, `[Canonical]`, or `[Pedagogical Scale]` (disclose visual exaggeration honestly on the scale bar or caption).
+
+---
+
+## Step 1 · Lock Direction & Blueprint
+
+1. **Propose 1–3 clear explanatory directions** (concise prose or compact table):
+   - **Core cognitive hook & `solve(params, t)` model**
+   - **Profile** (`mechanical-3d` | `field-math` | `sandbox-direct`) + **Layout** (`fullbleed-hud` | `split-bench` | `ab-compare`) + **Skin** (one of the 6 CSS skins)
+   - **Direct manipulation** (`kit/manipulator.js`) & **2–3 numerical `falsifyCases`**
+   - For multi-beat narrative builds, include a compact **Beat & Reveal Ledger** ([references/time-dimension.md](references/time-dimension.md)).
+2. **Orthographic Blueprint & `DIMENSIONS` table — `mechanical-3d` ONLY**:
+   - **`mechanical-3d`**: Lock a shared `DIMENSIONS` constant table (`L × W × H`, elevation datums, clearances, motion envelopes) and an orthographic Front / Side / Top blueprint (parametric/SVG preferred over hallucination-prone raster generation) before writing Three.js geometry.
+   - **`field-math` & `sandbox-direct`**: Exempt from three-view blueprints; lock coordinate ranges, axis units, and spatial bounds directly in `model.js` constants.
+3. **Pause for user lock** on open-ended or high-effort builds unless the user explicitly asked to proceed immediately.
+
+---
+
+## Step 2 · Scaffold & Assemble Offline
+
+> **Delivery Reality**: A Simulify deliverable is a **zero-CDN offline static directory** (ESM + local Three.js/fonts/KaTeX). Serve it over any local HTTP server (e.g. `python -m http.server`); ESM modules cannot run over `file://`.
+
+1. **Check exact API signatures once** in [`kit/index.d.ts`](kit/index.d.ts) instead of guessing across 20 files.
+2. **Generate a runnable starter bench via `<PLUGIN_ROOT>/scripts/new_bench.py`** (where `<PLUGIN_ROOT>` is the directory containing this `SKILL.md`; always write `<target_dir>` in the user's workspace, never inside an installed plugin directory, and always pass `--with-vendor` when `<target_dir>` is outside `<PLUGIN_ROOT>`):
    ```bash
-   uv run scripts/verify_stage.py --root <dir> --entry <index.html> --probe "?stage=..."
-   # Also verify Firefox/Safari non-HTML-in-Canvas fallback parity:
-   uv run scripts/verify_stage.py --root <dir> --entry <index.html> --no-hic
+   # Standalone static bundle (reuses bundled offline Three.js/fonts/KaTeX/primitives with zero network; omits legacy three.module.js; add --no-katex if equation-free — also omits katex.min.css; add --serve to preview):
+   python "<PLUGIN_ROOT>/scripts/new_bench.py" <target_dir> --title "My Mechanism" \
+     --profile mechanical-3d --layout split-bench --skin paper-ink --with-vendor --serve
+   # Or inside the simulify repo itself sharing examples/shared/vendor:
+   python "<PLUGIN_ROOT>/scripts/new_bench.py" "<PLUGIN_ROOT>/examples/<slug>" --title "My Mechanism" \
+     --profile field-math --layout fullbleed-hud --skin dark-studio
    ```
-   A v2 bench (`window.__simulify.version >= 2`) passes ONLY when ALL oracle legs report `OK` across `1280×800`, `1440×900`, `390×844`, multi-beat timeline samples (first + middle + final acts), and deep-link probes:
-   - **`prose-lint` & `multi-beat` layout**: Zero AI clichés and zero desktop `guideOverflow` across EVERY sampled act (not just `t ≈ 0.35s`).
-   - **`stage-frame` & `visual-integrity`**: Active non-blank canvas (`>= 45%` desktop area), zero horizontal code/guide/maths/caption truncation (`scrollWidth <= clientWidth + 2`) at every sampled act, zero GPU/console errors.
-   - **`chart-legibility` & `hud-overlap`**: Readable visible plots (`>= 200 × 85` px) across all acts, zero HUD dock collisions (`<= 6px`, including `.beat-caption-pill`), and zero 3D `HtmlSurface` vs HUD dock occlusion `> 15%`.
-   - **`typography-crispness`** *(v2)*: Offline fonts loaded (`getFontAudit().loadedCount >= 2, failedCount === 0`), 1:1 physical canvas backing (`canvas.width >= rect.width * dpr - 2`), zero visible HUD/SVG text `< 10.5px`, and active 3D `HtmlSurface` texture pixel density `>= HiDPI floor` (blocks 0.5× blur regressions).
-   - **`geometry-diversity` & `three-views`** *(v2 3D)*: `getGeometryAudit()` on populated acts satisfies `cuboidRatio <= 0.70`, `sculptedMeshes > 0`, and volumetric non-flat bounds (`flatnessRatio >= 0.08`); `verify_stage.py` automatically drives `setCardinalView()` to capture **Front / Side / Top / Iso** screenshots and verifies distinct multi-angle 3D structure.
-   - **`camera-ownership`** *(desktop 3D)*: Real Playwright mouse drag across canvas rotates the camera AND holds ownership for `>= 400ms` without script snap-back.
-   - **`initial-sparsity`**: Bench boots near `t = 0` (NOT `showEnd()`) and strictly grows over time (`getActiveActorCount(0) < getActiveActorCount(T)`).
-   - **`temporal-scrub-determinism`**: Driving `seek(0.1T) → seek(0.5T) → seek(0.9T) → seek(0.5T)` yields real visual evolution across timepoints AND repeatable state/pixels on rewind.
-   - **`mandatory-falsify`**: `window.__simulify.falsify()` MUST exist and return `{ passed: true }` across `>= 2` counterfactual assertions.
-3. Visually inspect the rendered **Front / Side / Top / Iso** four-view screenshots directly against the **Step 1 Orthographic Three-View Blueprint** and `DIMENSIONS` table to confirm zero `L × W × H` distortion across every axis. For galleries, bake crisp 2× thumbnails with [`scripts/bake_thumbs.py`](scripts/bake_thumbs.py); for studio MP4/WebM/GIF reels, run [`scripts/export_video.py`](scripts/export_video.py) (Tier 2 Playwright CLI) or the in-browser [`kit/stage-exporter.js`](kit/stage-exporter.js) popover (Tier 1).
+   Optional CJK font subsetting for compact standalone bundles:
+   ```bash
+   uv run --with fonttools --with brotli python "<PLUGIN_ROOT>/scripts/setup_vendor.py" <target_dir> --fonts-only --subset-cjk <target_dir>
+   ```
+3. **Implement the single-truth model & scene**:
+   - Write `model.js` with `createSimModel({ params, solve, falsifyCases })` from [`kit/model-core.js`](kit/model-core.js).
+   - Wire `main.js` using [`kit/stage-3d.js`](kit/stage-3d.js), [`kit/spacetime.js`](kit/spacetime.js), [`kit/choreography.js`](kit/choreography.js), [`kit/layout-shell.js`](kit/layout-shell.js), and [`kit/timeline-director.js`](kit/timeline-director.js).
+   - Add only what the topic requires: [`kit/geo-sculpt.js`](kit/geo-sculpt.js) + [`primitives/`](primitives/), [`kit/field-viz.js`](kit/field-viz.js), [`kit/live-maths.js`](kit/live-maths.js) + [`kit/link-bus.js`](kit/link-bus.js), [`kit/manipulator.js`](kit/manipulator.js), [`kit/chart-card.js`](kit/chart-card.js), [`kit/callout-layer.js`](kit/callout-layer.js).
+   - Expose hooks using the unified single-object signature:
+     ```js
+     exposeTestHooks({ version: 3, profile, clock, director, stage, choreographer, model });
+     ```
+4. **Static Look-Dev Gate (BEFORE Wiring Animation & Interactivity)**:
+   - Freeze at a representative resting pose, call `stage.fitShadowFrustum(...)`, and capture BOTH a full-frame still AND a 2× center close-up crop (`*-closeup.png`, automatically emitted by `verify_stage.py`).
+   - Inspect **form, material separation, shadows, and edge crispness independently of solver math**:
+     - Do silhouettes, negative space, joins, and ≥2px bevels read cleanly without leaning on glow/fog?
+     - Are matte dielectrics genuinely matte (zero grey IBL wash) and distinct in roughness/metalness from bare metals and clearcoat enamel?
+     - Are outlines (Primer tier) smooth without 1-bit stair-stepping or outward bleed, and do thin rods use `userData.inkThin = true`?
+     - Does the shadow map hug the scene tightly without detached contact shadows or acne?
+   - Fix geometry, material, or lighting defects here **before** adding choreography beats, sliders, and charts — never conflate solver accuracy with visual craft.
+
+---
+
+## Step 3 · Verify (Profile-Aware Oracle + Look-Dev Telemetry + Real Visual Eyes)
+
+```bash
+node "<PLUGIN_ROOT>/tests/run-tests.mjs"
+# For standalone --with-vendor bundles:
+uv run "<PLUGIN_ROOT>/scripts/verify_stage.py" --root <target_dir> --entry index.html --dpr 2 --probe "?stage=..."
+# For in-repo shared examples (root must be <PLUGIN_ROOT> so ../../kit and ../../examples/shared/vendor resolve):
+uv run "<PLUGIN_ROOT>/scripts/verify_stage.py" --root "<PLUGIN_ROOT>" --entry examples/<slug>/index.html --dpr 2 --probe "?stage=..."
+# Optional: 2x crisp thumbnail for gallery/cards
+uv run "<PLUGIN_ROOT>/scripts/bake_thumbs.py" --root <dir> --manifest <thumbs-manifest.json>
+```
+
+- **Universal Hard Gates (`verify_stage.py`)**: zero console/page/request/WebGPU errors; active non-blank stage; zero horizontal or guide overflow; zero HUD collisions; readable visible charts; offline fonts loaded & 1:1 physical backing (`typography-crispness`); zero AI-cliché copy (`prose-lint`); structured `window.__simulify.falsify()` passing with non-empty verified assertions.
+- **Profile-Conditional Hard Gates** (matrix in [references/engine-contract.md](references/engine-contract.md)):
+  - `mechanical-3d`: also enforces `geometry-diversity`, `three-views`, `initial-sparsity`, `camera-ownership`, `temporal-scrub-determinism`.
+  - `field-math` & `sandbox-direct`: enforce `camera-ownership` and `temporal-scrub-determinism` (when `T > 0.2s`); treat `geometry-diversity`, `three-views`, and `initial-sparsity` as advisory telemetry.
+- **Look-Dev Telemetry, Magenta Gate & Contact Sheet (`verify_stage.py`)**:
+  - Measures pixel metrics on the hero canvas (`colorEntropyBits`, `dominantColorShare`, `edgeDensity`, `luminanceContrast`, and hard-gated `magentaRatio <= 0.015` purple-frame detection) and reads scene telemetry (`shadowFrustum` utilization, visible mesh roughness spread, active `toneMapping`, `backend`, `dpr`, `outline` mode), flagging flat-plastic clustering, muddy contrast, or oversized shadow frustums.
+  - Emits a 2× zoomed center crop (`*-closeup.png`) and a labeled multi-view contact sheet (`*-contact-sheet.png`, recorded in `receipt.contactSheet`) so edge aliasing, bevel highlights, three-views, and 390px mobile layout are immediately inspectable.
+- **Mandatory Visual Inspection (never replaced by exit code `0`)**:
+  - Open and inspect `*-contact-sheet.png`, the full stills, `*-closeup.png`, and Front/Side/Top/Iso views with your own eyes to verify depth clarity, material separation, proportion accuracy, and that the failure-mode stress test actually delivers the Step 0 "Aha moment".
+  - For narrated/launch motion videos built from the explainer, hand off to **`onetake`**.
+
+---
+
+## Reference Map (Load On Demand)
+
+- [`kit/index.d.ts`](kit/index.d.ts) — Single-file TypeScript API contract for every public `kit/` export.
+- [references/grounding-discovery.md](references/grounding-discovery.md) — Step 0 short-prompt mining, multi-modal extraction, source transparency tags.
+- [references/fidelity-isomorphism.md](references/fidelity-isomorphism.md) — Native Truth Axes `①–④`, anti-cuboid sculpting map, analogy rules.
+- [references/topic-fit.md](references/topic-fit.md) — Topic archetypes, 3 profiles, 3 layouts & 6 CSS skins selection guide.
+- [references/time-dimension.md](references/time-dimension.md) — `T1–T4` time regimes, progressive reveal vs. direct sandbox, anti-cliché prose rules.
+- [references/design-system.md](references/design-system.md) — 6 CSS skins, Okabe-Ito tokens, offline typography hierarchy, KaTeX & accessibility.
+- [references/engine-contract.md](references/engine-contract.md) — WebGL2/WebGPU layers, ClearType rules, `exposeTestHooks`, `verify_stage.py` profile gate matrix.
+- [references/stage-architecture.md](references/stage-architecture.md) — Repository layout, `kit/` / `primitives/` / `scripts/` architecture & render pipeline.
