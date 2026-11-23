@@ -2594,3 +2594,119 @@ declare module "*/timeline-director.js" {
 declare module "*/toolbar-a11y.js" {
   export function initToolbars(root?: Document): void;
 }
+
+declare module "*/primer-lesson.js" {
+  export interface FocusPinDef {
+    id?: string;
+    label: string;
+    worldPos: [number, number, number] | { x: number; y: number; z: number } | (() => [number, number, number] | { x: number; y: number; z: number } | null);
+    offset?: [number, number];
+    tone?: "default" | "accent";
+  }
+  export interface LessonStepDef {
+    id: string;
+    title: string;
+    icon?: string;
+    iconSvg?: string;
+    cue?: string;
+    cueLabel?: string;
+    durationMs?: number;
+    pins?: FocusPinDef[];
+  }
+  export interface LessonStageDef {
+    id: string;
+    title: string;
+    shortTitle?: string;
+    icon?: string;
+    iconSvg?: string;
+    summary?: string;
+    steps?: LessonStepDef[];
+    explain?: string | string[];
+    think?: { question: string; answer: string };
+    tips?: string[];
+    pins?: FocusPinDef[];
+    exploreItems?: Array<{ id: string; title: string; icon?: string; detail?: string; pins?: FocusPinDef[]; stageIndex?: number }>;
+    mountControls?: (slotEl: HTMLElement, ctx: { shell: PrimerLessonShell; state: any }) => void | (() => void);
+  }
+  export interface LessonDef {
+    id: string;
+    category?: string;
+    title: string;
+    progressTitle?: string;
+    mode?: "steps" | "explore";
+    icon?: string;
+    iconSvg?: string;
+    description?: string;
+    completionToast?: string;
+    stages: LessonStageDef[];
+    exploreItems?: Array<{ id: string; title: string; icon?: string; detail?: string; pins?: FocusPinDef[]; stageIndex?: number }>;
+  }
+  export function buildBackdropSvg(kind?: "topo" | "iso-grid" | "paper"): string;
+  export class FocusPinLayer {
+    constructor(stage: any, containerEl: HTMLElement);
+    setPins(pinDefs?: FocusPinDef[]): void;
+    update(): void;
+  }
+  export function attachExplorePicking(stage: any, getPickables: any, onPick: (id: string, obj: any) => void): () => void;
+  export class PrimerLessonShell {
+    constructor(rootEl: HTMLElement, config: {
+      title?: string;
+      subtitle?: string;
+      palette?: "forest" | "slate" | "terracotta";
+      backdrop?: "topo" | "iso-grid" | "paper";
+      emblemSvg?: string;
+      homeHref?: string;
+      autoPlay?: boolean;
+      stage?: any;
+      lessons: LessonDef[];
+      onStateChange?: (state: any, ctx: any) => void;
+    });
+    canvas: HTMLCanvasElement;
+    attachStage(stage: any): this;
+    setPins(pins?: FocusPinDef[]): void;
+    updatePins(): void;
+    getState(): any;
+    selectLesson(lessonIdOrIndex: string | number): void;
+    setStage(index: number, opts?: { stepIndex?: number; autoMarkPrevious?: boolean }): void;
+    setStep(stepIndex: number): void;
+    selectExploreItem(itemId: string): void;
+    setTab(tab: "steps" | "explain" | "tips"): void;
+    nextStage(): void;
+    prevStage(): void;
+    play(): void;
+    pause(): void;
+    togglePlay(): void;
+    replayStage(): void;
+    cycleSpeed(): void;
+    orbitBy(deltaDeg: number): void;
+    resetCamera(): void;
+    openCatalog(): void;
+    closeCatalog(): void;
+    showToast(message: string, durationMs?: number): void;
+    getTotalDuration(): number;
+    seekGlobal(seconds: number): any;
+    getTimelineInfo(): { duration: number; stages: any[] };
+    dispose(): void;
+  }
+  export class DioramaAnimator {
+    trackPresence(id: string, object: any, opts?: {
+      lift?: number;
+      duration?: number;
+      delay?: number;
+      scaleFrom?: number;
+      overshoot?: number;
+      mode?: "drop" | "grow-x" | "grow-y" | "pop";
+      initial?: boolean;
+    }): this;
+    setPresent(id: string, visible: boolean, opts?: { delay?: number }): void;
+    trackColor(id: string, material: any, opts?: { speed?: number }): this;
+    setColor(id: string, hexOrColor: number | string | any): void;
+    trackScalar(id: string, initial?: number, opts?: { speed?: number }): this;
+    setScalar(id: string, value: number): void;
+    getScalar(id: string): number;
+    getPresence(id: string): number;
+    step(dt: number): boolean;
+    snap(): void;
+  }
+  export function mountPrimerLesson(rootEl: HTMLElement, config: ConstructorParameters<typeof PrimerLessonShell>[1]): PrimerLessonShell;
+}

@@ -12,6 +12,7 @@
 const clamp01 = (u) => Math.max(0, Math.min(1, Number(u) || 0));
 
 export const LAYOUT_ARCHETYPES = Object.freeze([
+  'primer-lesson',
   'fullbleed-hud',
   'split-bench',
   'ab-compare',

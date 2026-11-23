@@ -12,6 +12,7 @@
 export const easeLinear = (u) => u;
 
 export const VALID_PROFILES = Object.freeze([
+  'primer-lesson',
   'mechanical-3d',
   'field-math',
   'sandbox-direct',
@@ -1274,6 +1275,8 @@ export function exposeTestHooks(controller, extra = {}) {
   const isClock = isSpacetimeClock(controller);
   const isDirector = isTimelineDirector(controller);
   const isScrubber = isPhaseScrubber(controller);
+  const lessonShell = extra.lessonShell ?? null;
+  const isLessonShell = Boolean(lessonShell && typeof lessonShell.seekGlobal === 'function' && !isClock && !isDirector && !isScrubber);
 
   const resolveStage = () => extra.stage || extra.scene?.stage || null;
   const resolveCallouts = () => extra.callouts || extra.scene?.callouts || null;
@@ -1298,6 +1301,9 @@ export function exposeTestHooks(controller, extra = {}) {
     }
     if (isClock || isDirector) {
       return controller.getTimelineInfo();
+    }
+    if (isLessonShell) {
+      return lessonShell.getTimelineInfo();
     }
     if (isScrubber) {
       return {
@@ -1345,6 +1351,8 @@ export function exposeTestHooks(controller, extra = {}) {
       snap = controller.seekGlobal(t, { emitCamera: true });
     } else if (isScrubber) {
       snap = controller.scrub(t);
+    } else if (isLessonShell) {
+      snap = lessonShell.seekGlobal(t);
     }
 
     const appliedTime = snap?.t ?? snap?.globalTime ?? t;
@@ -1472,7 +1480,7 @@ export function exposeTestHooks(controller, extra = {}) {
     if (typeof extra.getCaptionState === 'function') {
       return extra.getCaptionState();
     }
-    const st = controller?.getState ? controller.getState() : {};
+    const st = controller?.getState ? controller.getState() : (isLessonShell ? lessonShell.getState() : {});
     const info = getTimelineInfo();
     const t = st.globalTime ?? st.t ?? 0;
     const duration = info.duration || st.globalDuration || st.duration || 0;
@@ -1628,6 +1636,7 @@ export function exposeTestHooks(controller, extra = {}) {
     director: isDirector ? controller : (extra.director ?? null),
     clock: isClock ? controller : (extra.clock ?? null),
     scrubber: isScrubber ? controller : (extra.scrubber ?? null),
+    lessonShell,
     choreographer,
     getTimelineInfo,
     enterExportMode,

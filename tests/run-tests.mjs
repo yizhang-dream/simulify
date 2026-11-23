@@ -73,7 +73,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), '..');
 const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-const expectedProfiles = ['mechanical-3d', 'field-math', 'sandbox-direct'];
+const expectedProfiles = ['primer-lesson', 'mechanical-3d', 'field-math', 'sandbox-direct'];
 
 // Minimal pure-JS DOM harness scoped strictly inside `withMockDocument(fn)` for Node tests
 function createMockElement(tagName, ns = null) {
@@ -1751,7 +1751,7 @@ console.log('[OK] Cross-domain non-cuboid 3D sculpting kit (kit/geo-sculpt.js: a
 // ============================================================================
 
 // 16a. Layout Archetypes, 6 Themes, WipeCompare, ViewCube, ScaleBar
-assert.deepEqual(LAYOUT_ARCHETYPES, ['fullbleed-hud', 'split-bench', 'ab-compare']);
+assert.deepEqual(LAYOUT_ARCHETYPES, ['primer-lesson', 'fullbleed-hud', 'split-bench', 'ab-compare']);
 assert.equal(THEME_PRESETS.length, 6);
 assert.ok(ICONS.cutaway.includes('<svg') && ICONS.explode.includes('<svg'));
 
@@ -2627,6 +2627,7 @@ assert [p.name for p in target.iterdir()] == ['keep.txt']
 `, retryTarget], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
   execFileSync(python, ['-B', 'scripts/new_bench.py', retryTarget, '--with-vendor', '--no-katex'], { cwd: ROOT });
   const targets = [
+    { name: 'primer lesson', layout: 'primer-lesson', profile: 'primer-lesson', skin: 'paper-ink', extra: ['--with-vendor', '--no-katex'] },
     { name: 'vendored bench', layout: 'split-bench', profile: 'field-math', skin: 'blueprint', extra: ['--with-vendor', '--no-katex'] },
     { name: 'shared bench', layout: 'split-bench', profile: 'sandbox-direct', skin: 'bio-cutaway', extra: ['--vendor-base', '../../shared/vendor'] },
     { name: 'default bench', layout: 'fullbleed-hud', profile: 'mechanical-3d', skin: 'paper-ink', extra: [] },
@@ -2643,9 +2644,14 @@ assert [p.name for p in target.iterdir()] == ['keep.txt']
     assert.ok(html.includes('&lt;测试 &amp; bench&gt;'));
     assert.ok(html.includes(`data-layout="${layout}"`) && html.includes(`data-theme="${skin}"`));
     const { imports } = JSON.parse(html.match(/<script type="importmap">([\s\S]+?)<\/script>/)[1]);
-    for (const file of ['main.js', 'model.js']) {
+    const jsFiles = layout === 'primer-lesson' ? ['main.js', 'lesson-data.js'] : ['main.js', 'model.js'];
+    for (const file of jsFiles) {
       const source = fs.readFileSync(path.join(target, file), 'utf8');
       execFileSync(process.execPath, ['--input-type=module', '--check'], { input: source });
+    }
+    if (layout === 'primer-lesson') {
+      assert.ok(fs.existsSync(path.join(target, 'lesson.md')));
+      assert.ok(html.includes('primer-lesson.css'));
     }
     assert.ok(fs.existsSync(path.join(target, 'styles.css')));
     assert.ok(fs.readFileSync(path.join(target, 'main.js'), 'utf8').includes(`profile: "${profile}"`));

@@ -62,11 +62,15 @@ _DIRECT_GATES = {
     'three_views': 'advisory',
     'initial_sparsity': 'advisory',
 }
+_PRIMER_LESSON_GATES = {
+    **_DIRECT_GATES,
+    'mandatory_falsify': 'advisory',
+}
 PROFILE_GATES = {
+    'primer-lesson': _PRIMER_LESSON_GATES.copy(),
     'mechanical-3d': _MECHANICAL_GATES.copy(),
     'field-math': _DIRECT_GATES,
     'sandbox-direct': _DIRECT_GATES.copy(),
-
 }
 
 
@@ -87,7 +91,7 @@ def evaluate_profile_policy(profile, *, has_3d=True, duration=None) -> dict[str,
         policy = PROFILE_GATES[profile].copy()
     if not has_3d and profile != 'mechanical-3d':
         policy.update(geometry_diversity='skipped', three_views='skipped', camera_ownership='skipped')
-    if duration is not None and duration <= 0.2 and profile in ('field-math', 'sandbox-direct'):
+    if duration is not None and duration <= 0.2 and profile in ('primer-lesson', 'field-math', 'sandbox-direct'):
         policy['temporal_scrub'] = 'skipped'
     return policy
 
@@ -188,9 +192,9 @@ EVAL_FRAME_METRICS_JS = """(collectGeometry) => {
 
   // 2. HUD panel mutual overlap check, including .beat-caption-pill & .view-cube-dock
   const hudSelectors = [
-    '.hud-top-left', '.top-ribbon', '.beat-caption-pill', '.hud-guide', '.right-dock',
+    '.hud-top-left', '.top-ribbon', '.pl-topbar', '.beat-caption-pill', '.hud-guide', '.right-dock',
     '.split-aside', '.scrolly-prose', '.hud-bottom-left', '.bottom-left-dock',
-    '.hud-bottom-center', '.bottom-transport', '.bench-transport', '.view-cube-dock'
+    '.hud-bottom-center', '.bottom-transport', '.bench-transport', '.pl-bottom-dock', '.view-cube-dock'
   ];
   const visibleHud = [];
   const seenHudEls = new Set();

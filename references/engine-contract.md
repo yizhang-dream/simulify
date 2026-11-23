@@ -47,6 +47,7 @@ uv run scripts/verify_stage.py --root <dir> --entry index.html --probe "?stage=.
 
 | Profile | `geometry_diversity` | `three_views` | `initial_sparsity` | `temporal_scrub` | `camera_ownership` | `mandatory_falsify` |
 |---|---|---|---|---|---|---|
+| `primer-lesson` | 遥测 | 遥测 | 遥测 | 硬门禁 | 硬门禁 | 遥测 |
 | `mechanical-3d` | 硬门禁 | 硬门禁 | 硬门禁 | 硬门禁 | 硬门禁 | 硬门禁 |
 | `field-math` | 遥测 | 遥测 | 遥测 | 硬门禁 | 硬门禁 | 硬门禁 |
 | `sandbox-direct` | 遥测 | 遥测 | 遥测 | 硬门禁 | 硬门禁 | 硬门禁 |
